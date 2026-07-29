@@ -19,8 +19,27 @@
   --bone:#f6e6c8;
   --dust:#ab8f70;
 
+  /* Windows 95 system palette. The cave stays desert; every panel, button
+     and counter the player reads is the old control panel instead. */
+  --w95:#c0c0c0;      /* button face      */
+  --w95-lt:#dfdfdf;   /* button light     */
+  --w95-hi:#ffffff;   /* button highlight */
+  --w95-sh:#808080;   /* button shadow    */
+  --w95-dk:#000000;   /* button dark      */
+  --w95-nav:#000080;  /* active title bar */
+  --w95-nav2:#1084d0;
+  --w95-desk:#008080; /* the desktop teal */
+  --w95-led:#ff2020;  /* seven-segment counters */
+
+  /* raised / sunken, the two shapes every Win95 control is made of */
+  --out: inset -1px -1px 0 var(--w95-dk), inset 1px 1px 0 var(--w95-hi),
+         inset -2px -2px 0 var(--w95-sh), inset 2px 2px 0 var(--w95-lt);
+  --in:  inset 1px 1px 0 var(--w95-sh), inset -1px -1px 0 var(--w95-hi),
+         inset 2px 2px 0 var(--w95-dk), inset -2px -2px 0 var(--w95-lt);
+
   --display: "Arial Black","Arial Bold",Impact,Haettenschweiler,"Franklin Gothic Heavy","Helvetica Neue",sans-serif;
   --mono: ui-monospace,"Cascadia Mono","Consolas","DejaVu Sans Mono",monospace;
+  --ui: "Segoe UI",Tahoma,"MS Sans Serif",Verdana,sans-serif;
 }
 
 html,body{margin:0;padding:0;height:100%;background:var(--soot);overflow:hidden;}
@@ -54,38 +73,36 @@ canvas#gl{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:
 #hud::before{top:0;background:linear-gradient(180deg,rgba(9,5,4,.78),rgba(9,5,4,0));}
 #hud::after{bottom:0;background:linear-gradient(0deg,rgba(9,5,4,.62),rgba(9,5,4,0));}
 
-.stat{display:flex;flex-direction:column;gap:2px;}
-.stat .k{font-size:clamp(8px,1.05vmin,11px);letter-spacing:.22em;text-transform:uppercase;color:var(--dust);}
-.stat .v{font-family:var(--display);font-size:clamp(20px,3.4vmin,40px);line-height:.95;
-         letter-spacing:-.02em;font-variant-numeric:tabular-nums;}
-.v.mines{color:var(--ember);}
-.v.gold{color:var(--gold);}
-.v.time{color:var(--sand-hi);}
-.v.left{color:var(--bone);}
+/* the counter plates: a raised gray panel holding a sunken black readout,
+   exactly the two shapes that flank the smiley in the original */
+.stat{display:flex;flex-direction:column;gap:3px;background:var(--w95);
+      padding:5px 6px 6px;box-shadow:var(--out);text-shadow:none;}
+.stat .k{font-family:var(--ui);font-size:clamp(8px,1.05vmin,11px);letter-spacing:.08em;
+         text-transform:uppercase;color:#000;}
+.stat .v{font-family:var(--mono);font-weight:700;
+         font-size:clamp(17px,2.7vmin,31px);line-height:1.08;
+         letter-spacing:.02em;font-variant-numeric:tabular-nums;
+         background:#000;padding:1px 7px 2px;min-width:3ch;text-align:right;
+         box-shadow:inset 1px 1px 0 var(--w95-sh), inset -1px -1px 0 var(--w95-hi);}
+.v.mines{color:var(--w95-led);}
+.v.time{color:var(--w95-led);}
+.v.left{color:var(--w95-led);}
+.v.gold{color:var(--gold);}   /* the one readout that is not a mine counter */
+.v.foes{color:#ff8a3a;}
+.v.life{color:#ff3b3b;letter-spacing:.06em;}
+.v.life.low{animation:lifepulse .7s steps(2) infinite;}
+@keyframes lifepulse{0%,100%{color:#ff3b3b}50%{color:#5a1010}}
+@media (prefers-reduced-motion:reduce){.v.life.low{animation:none}}
+/* the two boss-mode readouts only exist when something is hunting you */
+.foe-only{display:none;}
+#hud.boss .foe-only{display:flex;}
+
+/* took a hit: the frame bleeds for a moment */
+#hurt{position:absolute;inset:0;z-index:6;pointer-events:none;opacity:0;
+      background:radial-gradient(115% 115% at 50% 50%, rgba(255,0,0,0) 42%, rgba(180,0,0,.85) 100%);}
 
 #tl{grid-column:1;grid-row:1;display:flex;gap:clamp(16px,3vmin,38px);align-items:flex-start;}
 #tr{grid-column:3;grid-row:1;display:flex;gap:clamp(16px,3vmin,38px);align-items:flex-start;justify-content:flex-end;}
-
-#planes{grid-column:2;grid-row:1;justify-self:center;text-align:center;
-        font-size:clamp(8px,1.05vmin,11px);letter-spacing:.2em;text-transform:uppercase;color:var(--dust);}
-#planes b{color:var(--sand);font-weight:400;}
-#planes.off b{color:#5b4736;text-decoration:line-through;}
-
-/* progress bar — how many safe blocks are left */
-#bar{grid-column:1/-1;grid-row:3;height:3px;background:rgba(255,255,255,.07);position:relative;align-self:end;}
-#bar i{position:absolute;inset:0 auto 0 0;width:0%;background:linear-gradient(90deg,var(--ochre),var(--sand),var(--gold));
-       transition:width .25s ease;}
-
-#charge{grid-column:2;grid-row:3;justify-self:center;align-self:end;margin-bottom:14px;
-        width:clamp(90px,14vmin,160px);height:5px;background:rgba(0,0,0,.5);
-        border:1px solid rgba(255,209,102,.35);opacity:0;transition:opacity .12s;}
-#charge.on{opacity:1;}
-#charge i{display:block;height:100%;width:0%;background:var(--gold);}
-
-#tip{grid-column:1;grid-row:3;align-self:end;margin-bottom:16px;
-     font-size:clamp(9px,1.15vmin,12px);letter-spacing:.09em;color:var(--dust);max-width:46ch;line-height:1.6;
-     transition:opacity .8s ease;}
-#tip.fade{opacity:0;}
 
 /* mira */
 #cross{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:6;pointer-events:none;
@@ -106,88 +123,125 @@ canvas#gl{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:
 #cross.bad .dot{background:#6b5a4a;}
 #cross.mark .a,#cross.mark .b,#cross.mark .dot{background:var(--violet);box-shadow:0 0 8px rgba(168,107,255,.8);}
 #cross.num .a,#cross.num .b,#cross.num .dot{background:#5fe6ff;box-shadow:0 0 9px rgba(95,230,255,.95);}
+#cross.foe .a,#cross.foe .b,#cross.foe .dot{background:#ff3b3b;box-shadow:0 0 10px rgba(255,60,60,.95);}
+#cross.foe{transform:translate(-50%,-50%) rotate(45deg);}
 
 /* ---------- telas ---------- */
 .screen{position:absolute;inset:0;z-index:20;display:none;place-items:center;
-        background:radial-gradient(90% 90% at 50% 45%, rgba(36,24,18,.86), rgba(10,6,5,.97));
-        backdrop-filter:blur(2px);pointer-events:auto;
-        /* on a short window the panel is taller than the viewport, and without
-           this the start button sits below the fold with no way to reach it */
-        overflow:auto;}
+        background:radial-gradient(120% 120% at 50% 45%, rgba(0,128,128,.80), rgba(0,46,46,.95));
+        backdrop-filter:blur(2px);pointer-events:auto;}
 .screen.on{display:grid;}
-.panel{width:min(760px,92vw);padding:clamp(18px,3.4vmin,40px);color:var(--bone);font-family:var(--mono);
-       margin:auto;}
+
+/* every screen is a window: raised frame, navy title bar, gray client area */
+.panel{width:min(760px,92vw);max-height:94vh;overflow:auto;padding:3px;
+       background:var(--w95);color:#000;font-family:var(--ui);
+       box-shadow:var(--out), 6px 6px 0 rgba(0,0,0,.4);}
+.titlebar{display:flex;align-items:center;justify-content:space-between;gap:10px;
+          background:linear-gradient(90deg,var(--w95-nav),var(--w95-nav2));
+          color:#fff;font-family:var(--ui);font-weight:700;font-size:12px;
+          padding:3px 3px 3px 6px;user-select:none;}
+.titlebar .btns{display:flex;gap:2px;}
+.titlebar .btns i{width:17px;height:15px;background:var(--w95);box-shadow:var(--out);
+                  display:grid;place-items:center;font-style:normal;
+                  font-size:9px;color:#000;line-height:1;}
+.body{padding:clamp(14px,2.8vmin,30px);}
 
 h1{font-family:var(--display);margin:0;text-transform:uppercase;
-   font-size:clamp(38px,9.4vmin,104px);line-height:.82;letter-spacing:-.035em;
-   color:var(--sand-hi);text-wrap:balance;
-   text-shadow:4px 5px 0 var(--ochre), 8px 10px 0 rgba(0,0,0,.55);}
-h1 em{display:block;font-style:normal;color:var(--ember);font-size:.44em;letter-spacing:-.02em;}
-.eyebrow{font-size:clamp(9px,1.25vmin,13px);letter-spacing:.4em;text-transform:uppercase;color:var(--violet);margin:0 0 14px;}
-.lede{margin:20px 0 0;max-width:56ch;line-height:1.75;font-size:clamp(12px,1.6vmin,15px);color:#cdb694;}
-.lede b{color:var(--sand-hi);font-weight:400;}
+   font-size:clamp(30px,6.8vmin,74px);line-height:.82;letter-spacing:-.035em;
+   color:var(--w95-nav);text-wrap:balance;
+   text-shadow:3px 3px 0 var(--w95-hi), 6px 6px 0 var(--w95-sh);}
+h1 em{display:block;font-style:normal;color:#c00000;font-size:.44em;letter-spacing:-.02em;}
+.eyebrow{font-size:clamp(9px,1.25vmin,13px);letter-spacing:.32em;text-transform:uppercase;
+         color:var(--w95-desk);font-weight:700;margin:0 0 14px;}
+.lede{margin:14px 0 0;max-width:64ch;line-height:1.55;font-size:clamp(11px,1.45vmin,13px);color:#1a1a1a;}
+.lede b{color:var(--w95-nav);font-weight:700;}
 
-.rule{height:1px;background:linear-gradient(90deg,var(--ochre),rgba(168,95,38,0));margin:24px 0;}
+/* the etched groove that separated every group box in the old shell */
+.rule{height:2px;background:none;border-top:1px solid var(--w95-sh);
+      border-bottom:1px solid var(--w95-hi);margin:14px 0;}
 
-.diffs{display:flex;flex-wrap:wrap;gap:10px;margin-top:6px;}
-button{font-family:var(--display);text-transform:uppercase;letter-spacing:.02em;cursor:pointer;
-       background:transparent;color:var(--sand);border:2px solid var(--ochre);
-       padding:12px 18px;font-size:clamp(13px,1.9vmin,19px);line-height:1;
-       transition:background .14s,color .14s,transform .14s,border-color .14s;}
-button:hover,button:focus-visible{background:var(--ochre);color:#1a0f08;transform:translateY(-2px);outline:none;border-color:var(--sand);}
-button.sel{background:var(--sand);border-color:var(--sand);color:#1a0f08;}
-button.go{border-color:var(--gold);color:var(--gold);padding:15px 30px;font-size:clamp(15px,2.3vmin,24px);}
-button.go:hover,button.go:focus-visible{background:var(--gold);color:#1a0f08;}
-button:focus-visible{box-shadow:0 0 0 3px rgba(255,209,102,.35);}
+/* the old scrollbar, so a long panel does not sprout a modern one */
+.panel::-webkit-scrollbar{width:16px;height:16px;}
+.panel::-webkit-scrollbar-track{background:repeating-conic-gradient(var(--w95) 0 25%, var(--w95-hi) 0 50%) 0 0/2px 2px;}
+.panel::-webkit-scrollbar-thumb{background:var(--w95);box-shadow:var(--out);}
+.panel{scrollbar-color:var(--w95) var(--w95-lt);}
 
-.diffnote{font-size:clamp(10px,1.3vmin,13px);color:var(--dust);margin-top:10px;line-height:1.6;
-          font-variant-numeric:tabular-nums;}
+.diffs{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;}
+button{font-family:var(--ui);font-weight:700;text-transform:none;letter-spacing:0;cursor:pointer;
+       background:var(--w95);color:#000;border:0;box-shadow:var(--out);
+       padding:8px 18px;font-size:clamp(12px,1.6vmin,15px);line-height:1.2;}
+button:active{box-shadow:var(--in);padding:9px 17px 7px 19px;}
+button.sel{box-shadow:var(--in);
+           background:repeating-conic-gradient(var(--w95) 0 25%, var(--w95-hi) 0 50%) 0 0/2px 2px;}
+button.go{padding:10px 28px;font-size:clamp(13px,1.9vmin,18px);
+          box-shadow:var(--out), 0 0 0 1px var(--w95-dk);}   /* the default button */
+button.go:active{box-shadow:var(--in), 0 0 0 1px var(--w95-dk);}
+button:focus-visible{outline:1px dotted #000;outline-offset:-5px;}
 
-.keys{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:6px 26px;margin-top:4px;
-      font-size:clamp(10px,1.35vmin,13px);line-height:1.9;color:#bda488;}
-.keys kbd{font-family:var(--mono);background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);
-          border-bottom-width:2px;padding:1px 6px;color:var(--bone);font-size:.92em;margin-right:6px;}
+.diffnote{font-size:clamp(10px,1.3vmin,12px);color:#333;margin-top:10px;line-height:1.6;
+          font-family:var(--mono);font-variant-numeric:tabular-nums;}
+.diffnote.warn{color:#a00000;}
 
-.opt{display:flex;align-items:center;gap:14px;margin-top:14px;font-size:clamp(10px,1.35vmin,13px);color:#bda488;}
-.opt input[type=range]{accent-color:var(--sand);width:150px;}
+/* the custom-board sliders, sunk into the panel like a group box */
+#customBox{display:none;margin-top:10px;padding:10px 14px 14px;box-shadow:var(--in);}
+#customBox.on{display:block;}
+#customBox .opt{margin-top:8px;}
+#customBox .opt label:first-child{min-width:64px;}
+#customBox span{font-family:var(--mono);font-variant-numeric:tabular-nums;min-width:4ch;}
+
+/* the music switch sits a size up from the controls around it */
+button.big{padding:11px 22px;font-size:clamp(13px,1.8vmin,17px);margin-left:6px;}
+
+.keys{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:3px 26px;margin-top:2px;
+      font-size:clamp(10px,1.25vmin,12px);line-height:1.65;color:#1a1a1a;}
+kbd{font-family:var(--mono);font-size:.92em;background:var(--w95);color:#000;
+    box-shadow:var(--out);padding:1px 6px 2px;margin-right:7px;display:inline-block;}
+
+.opt{display:flex;align-items:center;gap:14px;margin-top:12px;font-size:clamp(10px,1.35vmin,12px);color:#1a1a1a;}
+.opt input[type=range]{accent-color:var(--w95-nav);width:150px;}
+
+/* the clock, as the thing you actually earned */
+#overClock{margin:14px auto 0;display:inline-flex;align-items:baseline;gap:14px;
+           background:#000;padding:8px 18px;box-shadow:inset 1px 1px 0 var(--w95-sh), inset -1px -1px 0 var(--w95-hi);}
+#overTime{font-family:var(--mono);font-weight:700;color:var(--w95-led);
+          font-size:clamp(26px,5vmin,50px);letter-spacing:.04em;font-variant-numeric:tabular-nums;}
+#overBest{font-family:var(--ui);font-size:clamp(10px,1.4vmin,13px);font-weight:700;color:#7a7a7a;}
+#overBest.new{color:#3cff6a;}
 
 /* game over — corny and flashy, on purpose */
-#over .panel{text-align:center;}
-#over h1{animation:jolt .16s steps(2) infinite;}
+#over .body{text-align:center;}
+#over h1{animation:jolt .16s steps(2) infinite;color:#c00000;}
 @keyframes jolt{0%{transform:translate(0,0)}50%{transform:translate(-3px,2px)}100%{transform:translate(2px,-2px)}}
-#over.win h1{animation:none;color:var(--gold);text-shadow:4px 5px 0 var(--ochre),8px 10px 0 rgba(0,0,0,.55),0 0 44px rgba(255,209,102,.55);}
+#over.win h1{animation:none;color:#008000;text-shadow:3px 3px 0 var(--w95-hi),6px 6px 0 var(--w95-sh),0 0 40px rgba(0,160,0,.5);}
+#over .titlebar{background:linear-gradient(90deg,#800000,#c05050);}
+#over.win .titlebar{background:linear-gradient(90deg,var(--w95-nav),var(--w95-nav2));}
 @media (prefers-reduced-motion:reduce){#over h1{animation:none}}
 
 #flash{position:absolute;inset:0;z-index:30;pointer-events:none;background:#fff;opacity:0;}
 
-#toast{position:absolute;left:50%;bottom:7%;transform:translateX(-50%);z-index:8;
-       font-family:var(--mono);font-size:12px;letter-spacing:.06em;color:#1a0f08;background:var(--gold);
-       padding:8px 14px;display:none;max-width:80vw;text-align:center;line-height:1.5;}
+/* toast and the pointer-lock prompt: balloon tips, same gray as everything else */
+#toast{position:absolute;left:50%;bottom:9%;transform:translateX(-50%);z-index:8;
+       font-family:var(--ui);font-size:12px;color:#000;background:#ffffe1;
+       border:1px solid #000;padding:8px 14px;display:none;max-width:80vw;
+       text-align:center;line-height:1.5;box-shadow:3px 3px 0 rgba(0,0,0,.35);}
 #toast.on{display:block;}
 
 #needlock{position:absolute;left:50%;top:62%;transform:translateX(-50%);z-index:7;
-          font-family:var(--mono);font-size:clamp(11px,1.5vmin,14px);letter-spacing:.16em;
-          text-transform:uppercase;color:var(--bone);background:rgba(10,6,4,.72);
-          border:1px solid rgba(240,200,131,.45);padding:9px 16px;display:none;
+          font-family:var(--ui);font-weight:700;font-size:clamp(11px,1.5vmin,13px);
+          color:#000;background:var(--w95);box-shadow:var(--out);padding:9px 16px;display:none;
           text-align:center;pointer-events:none;animation:pisca 1.9s ease-in-out infinite;}
 #needlock.on{display:block;}
 @keyframes pisca{0%,100%{opacity:.55}50%{opacity:1}}
 @media (prefers-reduced-motion:reduce){#needlock{animation:none}}
 
 .chk{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;}
-.chk input{accent-color:var(--sand);width:15px;height:15px;cursor:pointer;}
-.chk input:focus-visible{outline:2px solid var(--gold);outline-offset:2px;}
+.chk input{accent-color:var(--w95-nav);width:14px;height:14px;cursor:pointer;}
+.chk input:focus-visible{outline:1px dotted #000;outline-offset:2px;}
 
-#nogl{position:absolute;inset:0;display:grid;place-items:center;z-index:40;padding:6vw;
-      font-family:var(--mono);color:var(--bone);text-align:center;line-height:1.8;display:none;}
+#nogl{position:absolute;inset:0;place-items:center;z-index:40;padding:6vw;background:var(--w95-desk);
+      font-family:var(--ui);color:#000;text-align:center;line-height:1.8;display:none;}
+#nogl div{background:var(--w95);box-shadow:var(--out);padding:26px 30px;max-width:60ch;}
 
-/* the version switch, on both builds */
-.verline{margin:18px 0 0;font-size:clamp(10px,1.3vmin,12px);color:var(--dust);line-height:1.7;}
-.verline b{color:var(--sand);font-weight:400;}
-.verlink{color:var(--gold);text-decoration:none;border-bottom:1px solid rgba(255,209,102,.45);
-         margin-left:8px;white-space:nowrap;}
-.verlink:hover,.verlink:focus-visible{color:#fff;border-bottom-color:#fff;outline:none;}
-.vernote{display:block;margin-top:4px;color:#8a7157;}
 </style>
 
 <div id="wrap">
@@ -197,26 +251,29 @@ button:focus-visible{box-shadow:0 0 0 3px rgba(255,209,102,.35);}
   <div id="cross"><i class="a"></i><i class="a s2"></i><i class="b"></i><i class="b s2"></i><i class="dot"></i></div>
 
   <div id="hud">
+    <!-- three readouts, and nothing else. Life only appears in Boss Master,
+         where not knowing whether the next shot kills you is not a design
+         choice, it is just unfair. -->
     <div id="tl">
       <div class="stat"><span class="k">Mines left</span><span class="v mines" id="sMines">0</span></div>
       <div class="stat"><span class="k">Safe blocks</span><span class="v left" id="sLeft">0</span></div>
+      <div class="stat foe-only"><span class="k">Life</span><span class="v life" id="sLife">♥♥</span></div>
     </div>
-    <div id="planes">Plane arrows <b id="sPlanes">on</b></div>
     <div id="tr">
-      <div class="stat"><span class="k">Gold</span><span class="v gold" id="sGold">0</span></div>
       <div class="stat"><span class="k">Time</span><span class="v time" id="sTime">0:00</span></div>
     </div>
-    <div id="tip">Aim at a block and shoot. Hit a number to light up what it counts — if its mines are already flagged, the shot spreads and clears the rest.</div>
-    <div id="charge"><i id="chargeFill"></i></div>
-    <div id="bar"><i id="barFill"></i></div>
   </div>
 
+  <div id="hurt"></div>
   <div id="toast" role="status" aria-live="polite"></div>
   <div id="needlock">Click the screen to lock the mouse</div>
 
   <!-- ========== MENU ========== -->
   <div class="screen on" id="menu">
     <div class="panel">
+      <div class="titlebar"><span>Minesweeper — Three Planes</span>
+        <span class="btns"><i>_</i><i>□</i><i>×</i></span></div>
+      <div class="body">
       <p class="eyebrow">Someone locked you in here</p>
       <h1>Minesweeper<em>Three Planes</em></h1>
       <p class="lede">You are <b>inside</b> the board. Sand above, sand below, sand all around —
@@ -227,12 +284,28 @@ button:focus-visible{box-shadow:0 0 0 3px rgba(255,209,102,.35);}
 
       <div class="rule"></div>
 
-      <div class="diffs" role="group" aria-label="Dificuldade">
+      <div class="diffs" role="group" aria-label="Difficulty">
         <button data-d="0" class="sel">Apprentice</button>
         <button data-d="1">Sorcerer</button>
         <button data-d="2">Arcane</button>
+        <button data-d="3">Custom</button>
+        <button data-d="4">Boss Master</button>
       </div>
       <p class="diffnote" id="dNote"></p>
+
+      <!-- only shown when Custom is the chosen difficulty -->
+      <div id="customBox">
+        <div class="opt"><label for="cnx">Width</label>
+          <input type="range" id="cnx" min="6" max="20" value="12"><span id="cnxV">12</span></div>
+        <div class="opt"><label for="cnz">Depth</label>
+          <input type="range" id="cnz" min="6" max="20" value="12"><span id="cnzV">12</span></div>
+        <div class="opt"><label for="cny">Layers</label>
+          <input type="range" id="cny" min="2" max="5" value="3"><span id="cnyV">3</span></div>
+        <div class="opt"><label for="cde">Mines</label>
+          <input type="range" id="cde" min="6" max="32" value="13"><span id="cdeV">13%</span></div>
+        <div class="opt"><label class="chk" for="cbo"><input type="checkbox" id="cbo">Boss Master rules (things come out of the blocks you flag)</label></div>
+        <p class="diffnote" id="cWarn"></p>
+      </div>
 
       <div class="rule"></div>
 
@@ -244,9 +317,12 @@ button:focus-visible{box-shadow:0 0 0 3px rgba(255,209,102,.35);}
         <div><kbd>Left click</kbd>break a block · hitting a number lights its neighbors<br>
           (with all its mines flagged, the shot spreads and clears the rest)</div>
         <div><kbd>Right click</kbd>flag a mine</div>
+        <div><kbd>H</kbd>hint · lights the reasoning and plays the move</div>
         <div><kbd>T</kbd>plane arrows · <kbd>I</kbd>invert mouse</div>
-        <div><kbd>M</kbd>sound · <kbd>R</kbd>restart · <kbd>Esc</kbd>pause</div>
+        <div><kbd>M</kbd>sound · <kbd>R</kbd>restart · <kbd>Esc</kbd>menu and settings</div>
       </div>
+
+      <div class="rule"></div>
 
       <div class="opt">
         <label for="sens">Sensitivity</label>
@@ -256,20 +332,29 @@ button:focus-visible{box-shadow:0 0 0 3px rgba(255,209,102,.35);}
       <div class="opt">
         <label class="chk" for="inv"><input type="checkbox" id="inv">Invert vertical mouse axis</label>
       </div>
+      <div class="opt">
+        <label for="mus">Music</label>
+        <input type="range" id="mus" min="0" max="100" value="25">
+        <span id="musV" style="font-variant-numeric:tabular-nums">25%</span>
+        <button id="btnMusic" class="big">Music: on</button>
+      </div>
 
       <div class="rule"></div>
       <button class="go" id="btnStart">Enter the cave</button>
-      <p class="verline">You are playing the <b>stable</b> version.
-        <a class="verlink" href="beta.html">Try the beta &rsaquo;</a>
-        <span class="vernote">Windows 95 colors, a hint button, custom boards and Boss Master — rougher, and changing.</span></p>
+      </div>
     </div>
   </div>
 
   <!-- ========== PAUSE ========== -->
   <div class="screen" id="pause">
     <div class="panel">
+      <div class="titlebar"><span>Paused</span>
+        <span class="btns"><i>_</i><i>□</i><i>×</i></span></div>
+      <div class="body">
       <p class="eyebrow">The cave waits</p>
       <h1 style="font-size:clamp(30px,6.4vmin,64px)">Paused</h1>
+      <p class="diffnote" id="pauseStat"></p>
+      <div class="rule"></div>
       <div class="opt">
         <label for="sens2">Sensitivity</label>
         <input type="range" id="sens2" min="4" max="40" value="14">
@@ -278,11 +363,22 @@ button:focus-visible{box-shadow:0 0 0 3px rgba(255,209,102,.35);}
       <div class="opt">
         <label class="chk" for="inv2"><input type="checkbox" id="inv2">Invert vertical mouse axis</label>
       </div>
+      <div class="opt">
+        <label for="mus2">Music</label>
+        <input type="range" id="mus2" min="0" max="100" value="25">
+        <span id="musV2" style="font-variant-numeric:tabular-nums">25%</span>
+        <button id="btnMusic2" class="big">Music: on</button>
+      </div>
+      <div class="opt">
+        <button id="btnArrows2">Plane arrows: on</button>
+        <button id="btnSound2">Sound: on</button>
+      </div>
       <div class="rule"></div>
       <div class="diffs">
         <button class="go" id="btnResume">Resume</button>
         <button id="btnRestart">Restart</button>
         <button id="btnMenu">Menu</button>
+      </div>
       </div>
     </div>
   </div>
@@ -290,7 +386,11 @@ button:focus-visible{box-shadow:0 0 0 3px rgba(255,209,102,.35);}
   <!-- ========== GAME OVER ========== -->
   <div class="screen" id="over">
     <div class="panel">
+      <div class="titlebar"><span id="overBar">Minesweeper</span>
+        <span class="btns"><i>_</i><i>□</i><i>×</i></span></div>
+      <div class="body">
       <p class="eyebrow" id="overEye">Plane breached</p>
+      <div id="overClock"><span id="overTime">0:00</span><b id="overBest"></b></div>
       <h1 id="overTitle">You are sand now</h1>
       <p class="lede" id="overText" style="margin-left:auto;margin-right:auto"></p>
       <div class="rule"></div>
@@ -298,11 +398,12 @@ button:focus-visible{box-shadow:0 0 0 3px rgba(255,209,102,.35);}
         <button class="go" id="btnAgain">Again</button>
         <button id="btnMenu2">Menu</button>
       </div>
+      </div>
     </div>
   </div>
 
   <div id="flash"></div>
-  <div id="nogl">Your browser could not start WebGL 2.<br>Try an up-to-date Chrome, Edge or Firefox with hardware acceleration enabled.</div>
+  <div id="nogl"><div>Your browser could not start WebGL 2.<br>Try an up-to-date Chrome, Edge or Firefox with hardware acceleration enabled.</div></div>
 </div>
 
 <script>
@@ -328,7 +429,8 @@ const CHARGE_T= 0.50;   // seconds of space held
 const REACH   = 13*BLOCK;
 const NUM_R   = 0.45;   // number hit radius: smaller than the glyph (~0.52),
                         // or the number steals shots aimed at the block behind
-const ECHO_DUR= 2.2;    // echo duration on neighboring blocks
+const ECHO_DUR= 3.45;   // echo duration on neighboring blocks (75% of 4.6)
+const HINT_DUR= 9.0;    // hints hold longer: you are meant to read them
 const FUSE_T  = 0.85;   // the hit mine glows before taking everything
 
 /* Mine density has a floor: with 26 neighbors, P(zero block) = (1-d)^26,
@@ -337,8 +439,13 @@ const FUSE_T  = 0.85;   // the hit mine glows before taking everything
 const DIFFS = [
   {name:"Apprentice", nx:10, nz:10, ny:3, dens:0.105},
   {name:"Sorcerer",   nx:12, nz:12, ny:3, dens:0.130},
-  {name:"Arcane",     nx:14, nz:14, ny:3, dens:0.160}
+  {name:"Arcane",     nx:14, nz:14, ny:3, dens:0.160},
+  // mutable: the menu sliders write straight into this one
+  {name:"Custom",     nx:12, nz:12, ny:3, dens:0.130, custom:true, boss:false},
+  {name:"Boss Master",nx:13, nz:13, ny:3, dens:0.140, boss:true}
 ];
+const CUSTOM = 3, BOSS = 4;
+const LIM = {nx:[6,20], nz:[6,20], ny:[2,5], dens:[6,32]};   // dens in whole %
 
 const SOLID=0, AIR=1, MARKED=2;
 
@@ -386,14 +493,6 @@ const lerp=(a,b,t)=>a+(b-a)*t;
 let seed=1;
 function rnd(){ seed = (seed*1664525+1013904223)>>>0; return seed/4294967296; }
 
-function hsl2rgb(h,s,l){
-  h=((h%360)+360)%360/360;
-  const q = l<0.5 ? l*(1+s) : l+s-l*s, p = 2*l-q;
-  const f=(t)=>{ t=(t+1)%1; if(t<1/6)return p+(q-p)*6*t; if(t<0.5)return q;
-                 if(t<2/3)return p+(q-p)*(2/3-t)*6; return p; };
-  return [f(h+1/3), f(h), f(h-1/3)];
-}
-
 /* ==========================================================================
    2. WEBGL — context and programs
    ========================================================================== */
@@ -427,9 +526,10 @@ layout(location=5) in vec4 iM2;
 layout(location=6) in vec4 iM3;
 layout(location=7) in vec3 iColor;
 layout(location=8) in vec4 iParams;
+layout(location=9) in vec3 iHi;
 uniform mat4 uProj, uView;
 uniform vec3 uHover;
-out vec3 vN, vW, vC;
+out vec3 vN, vW, vC, vHi;
 out vec2 vUV;
 out float vSeed, vEmis, vMark, vEcho, vHover;
 void main(){
@@ -437,7 +537,7 @@ void main(){
   vec4 wp = M * vec4(aPos,1.0);
   vW = wp.xyz;
   vN = normalize(mat3(M) * aNormal);
-  vUV = aUV; vC = iColor;
+  vUV = aUV; vC = iColor; vHi = iHi;
   vSeed = iParams.x; vEmis = iParams.y; vMark = iParams.z; vEcho = iParams.w;
   vHover = 1.0 - step(0.4, distance(iM3.xyz, uHover));
   gl_Position = uProj * uView * wp;
@@ -445,11 +545,11 @@ void main(){
 
 const FS_CUBE = `#version 300 es
 precision highp float;
-in vec3 vN, vW, vC;
+in vec3 vN, vW, vC, vHi;
 in vec2 vUV;
 in float vSeed, vEmis, vMark, vEcho, vHover;
 uniform vec3 uCam, uSun, uFog;
-uniform float uTime, uOutline;
+uniform float uTime, uOutline, uAlpha;
 out vec4 frag;
 float hash(vec2 p, float s){ return fract(sin(dot(p, vec2(127.1,311.7)) + s*13.37) * 43758.5453); }
 void main(){
@@ -491,9 +591,21 @@ void main(){
   /* --- emissive (crystals, mines, gold) --- */
   lit = mix(lit, base*1.15 + vec3(0.18,0.09,0.03), vEmis);
 
-  /* --- flag rune --- */
-  float pulse = 0.5 + 0.5*sin(uTime*5.2 + vSeed*6.0);
-  lit = mix(lit, vec3(0.66,0.34,0.98)*(0.55+0.55*pulse), vMark*0.72);
+  /* --- flagged block: the raised cell, lifted straight off the old board ---
+     Gray face, light on two edges and dark on the other two. Those bevel
+     lines are the whole reason a flagged block still reads as a flagged
+     block when the violet pulse is at its dimmest. */
+  if(vMark > 0.5){
+    float bw = 0.10;
+    float lt = max(step(1.0-bw, vUV.y), step(vUV.x, bw));         // top and left
+    float dk = min(max(step(vUV.y, bw), step(1.0-bw, vUV.x)), 1.0-lt);
+    float pulse = 0.5 + 0.5*sin(uTime*4.4 + vSeed*6.0);
+    vec3 face = vec3(0.74,0.73,0.75) * (0.70 + 0.26*ndl);
+    face = mix(face, vec3(0.60,0.36,0.86), 0.16 + 0.20*pulse);    // the violet is still here
+    face = mix(face, vec3(1.00,1.00,1.00), lt*0.80);
+    face = mix(face, vec3(0.26,0.25,0.28), dk*0.80);
+    lit = mix(lit, face, 0.90);
+  }
 
   /* --- contorno preto assado na face --- */
   float e = min(min(vUV.x, 1.0-vUV.x), min(vUV.y, 1.0-vUV.y));
@@ -503,13 +615,17 @@ void main(){
   lit = mix(outc, lit, edge);
   lit += vHover * 0.16 * vec3(1.0,0.85,0.55);
 
-  /* Echo: the blocks the number you hit is counting. Cyan along the edges,
-     clearly different from the flat purple of a block flagged as a mine. */
-  float ep = 0.55 + 0.45*sin(uTime*8.5);
-  lit += vec3(0.28,0.92,1.0) * vEcho * (0.20 + 0.55*(1.0-edge)) * (0.60 + 0.40*ep);
+  /* Echo: the blocks the number you shot is counting, in that number's own
+     hue. Knocking the sand back first is what buys the contrast — additive
+     light alone just washes pale sandstone out to white. */
+  float eg = clamp(vEcho, 0.0, 1.0);
+  float ep = 0.58 + 0.42*sin(uTime*7.0);
+  float halo = 0.26 + 0.85*(1.0-edge);
+  lit = mix(lit, lit*0.34, eg*0.62);
+  lit += vHi * eg * halo * (0.55 + 0.45*ep) * 0.95;
 
   float f = 1.0 - exp(-pow(d*0.0135, 2.0));
-  frag = vec4(mix(lit, uFog, clamp(f,0.0,1.0)), 1.0);
+  frag = vec4(mix(lit, uFog, clamp(f,0.0,1.0)), uAlpha);
 }`;
 
 /* ---- billboards (numbers, arrows, glows) ---- */
@@ -546,7 +662,13 @@ void main(){
   if(vMode > 0.5){
     frag = vec4(vCol.rgb * t.a * vCol.a, t.a * vCol.a);
   } else {
-    vec3 col = vCol.rgb * t.r + vec3(0.045,0.028,0.024) * t.g;
+    /* Half the Windows 95 palette is dark — navy, maroon, black. A dark
+       outline would swallow those digits whole against shaded sandstone,
+       so the outline flips to bone as soon as the fill itself is dark. */
+    float lum = dot(vCol.rgb, vec3(0.30,0.59,0.11));
+    vec3 oc = mix(vec3(0.97,0.95,0.90), vec3(0.045,0.028,0.024),
+                  smoothstep(0.13,0.32,lum));
+    vec3 col = vCol.rgb * t.r + oc * t.g;
     frag = vec4(col, t.a * vCol.a);
   }
 }`;
@@ -558,7 +680,8 @@ const uC = {
   proj:gl.getUniformLocation(pCube,'uProj'), view:gl.getUniformLocation(pCube,'uView'),
   cam:gl.getUniformLocation(pCube,'uCam'),   sun:gl.getUniformLocation(pCube,'uSun'),
   fog:gl.getUniformLocation(pCube,'uFog'),   time:gl.getUniformLocation(pCube,'uTime'),
-  hover:gl.getUniformLocation(pCube,'uHover'), outline:gl.getUniformLocation(pCube,'uOutline')
+  hover:gl.getUniformLocation(pCube,'uHover'), outline:gl.getUniformLocation(pCube,'uOutline'),
+  alpha:gl.getUniformLocation(pCube,'uAlpha')
 };
 const uB = {
   proj:gl.getUniformLocation(pBB,'uProj'), view:gl.getUniformLocation(pBB,'uView'),
@@ -589,7 +712,7 @@ function buildCube(){
 }
 const CUBE = buildCube();
 
-const CUBE_STRIDE = 23; // mat4(16) + color(3) + params(4: seed, emis, flag, echo)
+const CUBE_STRIDE = 26; // mat4(16) + color(3) + params(4: seed, emis, flag, echo) + highlight(3)
 function makeCubeBatch(max){
   const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
   const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb);
@@ -610,6 +733,7 @@ function makeCubeBatch(max){
   }
   gl.enableVertexAttribArray(7); gl.vertexAttribPointer(7,3,gl.FLOAT,false,IS,64); gl.vertexAttribDivisor(7,1);
   gl.enableVertexAttribArray(8); gl.vertexAttribPointer(8,4,gl.FLOAT,false,IS,76); gl.vertexAttribDivisor(8,1);
+  gl.enableVertexAttribArray(9); gl.vertexAttribPointer(9,3,gl.FLOAT,false,IS,92); gl.vertexAttribDivisor(9,1);
   gl.bindVertexArray(null);
   return {vao, inst, data:new Float32Array(max*CUBE_STRIDE), max, count:0};
 }
@@ -700,12 +824,15 @@ function buildAtlas(){
     x.beginPath(); x.arc(0,0,34,0,7); x.fill();
     x.restore();
   }
-  // flag rune — cut diamond
+  // flag — pole and base in the outline channel, pennant in the fill channel
   {
     const [ox,oy]=at(T_RUNE); x.save(); x.translate(ox+TILE/2, oy+TILE/2);
-    x.beginPath(); x.moveTo(0,-48); x.lineTo(40,0); x.lineTo(0,48); x.lineTo(-40,0); x.closePath();
-    x.lineJoin='round'; x.lineWidth=18; x.strokeStyle=LINE; x.stroke();
-    x.fillStyle=FILL; x.fill();
+    x.fillStyle=LINE;
+    x.fillRect(-5,-48,10,70);      // pole
+    x.fillRect(-20,22,40,10);      // base, upper step
+    x.fillRect(-34,32,68,13);      // base, lower step
+    x.fillStyle=FILL;
+    x.beginPath(); x.moveTo(5,-50); x.lineTo(-46,-26); x.lineTo(5,-2); x.closePath(); x.fill();
     x.restore();
   }
   // radial glow (only alpha matters)
@@ -751,14 +878,43 @@ function uvOf(i){
 }
 const UVS = []; for(let i=0;i<64;i++) UVS.push(uvOf(i));
 
-/* Number color ramp: cyan (few mines) to magenta (many).
-   The useful range is 1-12; past that it saturates at the hot end. */
+/* The Windows 95 number colors, straight off the old board.
+   The original only ever had to name eight of them; with 26 neighbors we can
+   go higher, so counts past 8 repeat the same eight hues one "octave" lighter
+   each time. 1-8 stay exactly the colors you remember, and 9+ still reads as
+   its own tier instead of colliding with the low numbers. */
+const W95NUM = [
+  [0x00,0x00,0xff],  // 1 blue
+  [0x00,0x80,0x00],  // 2 green
+  [0xff,0x00,0x00],  // 3 red
+  [0x00,0x00,0x80],  // 4 navy
+  [0x80,0x00,0x00],  // 5 maroon
+  [0x00,0x80,0x80],  // 6 teal
+  [0x00,0x00,0x00],  // 7 black
+  [0x80,0x80,0x80]   // 8 gray
+];
 const NUMCOL = [];
 for(let n=0;n<=26;n++){
-  if(n===0){ NUMCOL.push([0.62,0.62,0.62]); continue; }
-  const t=Math.min(1,(n-1)/11);
-  NUMCOL.push(hsl2rgb(192-214*t, 0.88, 0.635));
+  if(n===0){ NUMCOL.push([0.50,0.50,0.50]); continue; }
+  const b = W95NUM[(n-1)%8], k = 0.44*(((n-1)/8)|0);
+  NUMCOL.push([0,1,2].map(c => { const v=b[c]/255; return v + (1-v)*k; }));
 }
+
+/* Highlight hue for a number: its own color pushed to full brightness.
+   Navy, maroon and black would light a block up as nothing at all, so the
+   hue is kept and only the value is raised. Blue and navy therefore glow
+   alike — they are the same hue, and the digit in the middle tells them
+   apart anyway. */
+function hiFrom(c){
+  const m = Math.max(c[0], c[1], c[2]);
+  if(m < 0.02) return [0.88,0.88,0.94];   // 7 is black: glow bone-white
+  return [c[0]/m, c[1]/m, c[2]/m];
+}
+const NUMHI = NUMCOL.map(hiFrom);
+const HI_CLUE  = [0.30,0.85,1.00];  // hint: the numbers that prove it
+const HI_TGT   = [0.10,0.90,0.32];  // hint: the block they prove is safe
+const HI_MINE  = [0.88,0.24,1.00];  // hint: the block they prove is a mine
+const HI_GUESS = [1.00,0.72,0.16];  // hint: no proof, only the safest bet
 
 /* ==========================================================================
    4. CAVE MATERIALS
@@ -774,6 +930,123 @@ const BEDROCK   = [0.19,0.14,0.13];
 const BEDCRYST  = [0.82,0.54,0.19];
 
 /* ==========================================================================
+   4b. ENEMY TYPES  (Boss Master)
+   ==========================================================================
+   Four families, three variants each. A variant differs in exactly four
+   things: how long the enemy must hold its aim before firing, how often it
+   fires, how big it is, and how saturated and detailed its body is.
+
+   The aim lock is the whole game. The enemy aims at where you ARE, waits out
+   its lock, then fires at that remembered point — so standing still is what
+   gets you hit, and the shot goes through to whatever was behind you if you
+   moved. Variant III holds for 0.42 s, which in practice means it hits you
+   unless you are already moving when it fires. Variant I holds for 3 s, so it
+   only ever catches someone who has stopped to think. */
+const FAM_FLAG=0, FAM_ORB=1, FAM_SLUG=2, FAM_FINAL=3;
+const EN_MAX   = 22;    // live enemies at once
+const EN_PARTS = 16;    // most cubes any one body is built from
+const ESHOT_SPD = 34;   // m/s — fast, but the lock is the real threat
+
+const TIERS = [
+  {tag:'I',   lock:3.00, rate:4.2, sat:0.50, scale:0.84, detail:0},
+  {tag:'II',  lock:1.70, rate:2.8, sat:0.78, scale:1.00, detail:1},
+  {tag:'III', lock:0.42, rate:1.7, sat:1.00, scale:1.18, detail:2}
+];
+const FAMS = [
+  {fam:FAM_FLAG,  name:'Bannerman', col:[0.95,0.17,0.13], r:1.05, speed:0,   range:46},
+  {fam:FAM_ORB,   name:'Wanderer',  col:[0.38,0.70,1.00], r:1.05, speed:2.2, range:42},
+  {fam:FAM_SLUG,  name:'Creeper',   col:[0.50,0.94,0.34], r:1.90, speed:1.5, range:40},
+  {fam:FAM_FINAL, name:'Archon',    col:[0.82,0.40,1.00], r:1.15, speed:3.4, range:56}
+];
+/* saturation pulls the family hue toward gray for the lesser variants, so you
+   can read what is about to shoot you from across the cave */
+function tint(c, sat, lift){
+  const g = (c[0]+c[1]+c[2])/3;
+  return [0,1,2].map(k => Math.min(1, (g + (c[k]-g)*sat) * (lift||1)));
+}
+const ETYPES = [];
+for(const f of FAMS) for(let t=0;t<3;t++){
+  const T = TIERS[t];
+  ETYPES.push({
+    id:ETYPES.length, fam:f.fam, tier:t,
+    name:f.name+' '+T.tag,
+    col:tint(f.col, T.sat), colDim:tint(f.col, T.sat, 0.45),
+    r:f.r*T.scale, speed:f.speed*(0.8+0.3*t), range:f.range,
+    lock:T.lock, rate:T.rate, detail:T.detail, scale:T.scale
+  });
+}
+const etype = (fam,tier) => ETYPES[fam*3+tier];
+
+/* Bodies, in the enemy's own space: +Y is up (for the slug, "up" is whatever
+   surface it is stuck to), +Z is forward. Same part format as the staff.
+   [ x,y,z, rx,ry,rz, sx,sy,sz, color, emissive, minDetail, isWeakPoint ] */
+function bodyOf(T){
+  const c = T.col, d = T.detail, s = T.scale;
+  const dark = [c[0]*0.30+0.06, c[1]*0.30+0.05, c[2]*0.30+0.05];
+  const metal= [0.34,0.30,0.28];
+  const P_ = [];
+  const add = (x,y,z, sx,sy,sz, col, emis, weak) =>
+    P_.push([x*s,y*s,z*s, 0,0,0, sx*s,sy*s,sz*s, col, emis||0, weak||false]);
+
+  if(T.fam===FAM_FLAG){
+    add(0,-1.05,0,  1.10,0.34,1.10, dark, 0);            // foot
+    add(0,-0.10,0,  0.24,1.85,0.24, metal, 0);           // pole
+    add(0, 0.62,0,  0.56,0.48,0.56, dark, 0);            // head
+    add(0, 0.62,0.34, 0.26,0.26,0.16, c, 0.85);          // eye
+    if(d>=1) add(0,1.02,0, 0.20,0.34,0.20, metal, 0);    // finial
+    if(d>=2){ add(0.34,-0.55,0, 0.20,0.70,0.20, metal,0);
+              add(-0.34,-0.55,0, 0.20,0.70,0.20, metal,0); }
+    // the banner: the weak point, and also the ammunition
+    add(0.78,0.46,0, 1.06,0.66,0.12, c, 0.35, true);
+    if(d>=2) add(1.28,0.46,0, 0.20,0.66,0.10, c, 0.5, true);
+  }
+  else if(T.fam===FAM_ORB){
+    add(0,0,0, 1.30,1.30,1.30, c, 0.10);                 // core
+    add(0,0.08,0.70, 0.44,0.44,0.24, [1,1,1], 0.9);      // eye
+    if(d>=1){ add(0.72,0,0, 0.30,0.86,0.86, dark,0);
+              add(-0.72,0,0, 0.30,0.86,0.86, dark,0);
+              add(0,0.72,0, 0.86,0.30,0.86, dark,0); }
+    if(d>=2){ add(0,-0.72,0, 0.86,0.30,0.86, dark,0);
+              add(0,0,-0.72, 0.86,0.86,0.30, dark,0);
+              add(0.52,0.52,0.52, 0.34,0.34,0.34, c, 0.6);
+              add(-0.52,0.52,-0.52, 0.34,0.34,0.34, c, 0.6); }
+  }
+  else if(T.fam===FAM_SLUG){
+    /* two players wide, half a player tall: 4 m by 1 m, hugging the surface */
+    add(0,0,0,      2.10,0.50,1.10, c, 0.06);            // trunk
+    add(-1.55,-0.05,0, 0.90,0.42,0.95, dark, 0);         // tail
+    add( 1.55,-0.05,0, 0.90,0.42,0.95, dark, 0);         // head
+    add( 1.85,0.02,0.30, 0.36,0.28,0.20, [1,1,1], 0.8);  // eye
+    // antennas: these are what shoot
+    add(-0.55,0.62,0, 0.16,0.80,0.16, metal, 0);
+    add( 0.55,0.62,0, 0.16,0.80,0.16, metal, 0);
+    add(-0.55,1.06,0, 0.28,0.28,0.28, c, 0.9);
+    add( 0.55,1.06,0, 0.28,0.28,0.28, c, 0.9);
+    if(d>=1){ add(-1.00,0.30,0, 0.50,0.36,0.90, c, 0.2);
+              add( 1.00,0.30,0, 0.50,0.36,0.90, c, 0.2); }
+    if(d>=2){ add(0,0.42,0, 1.20,0.34,0.80, c, 0.35);
+              add(-2.00,-0.10,0, 0.44,0.30,0.60, dark,0);
+              add( 2.10,-0.10,0, 0.34,0.26,0.50, dark,0); }
+  }
+  else {  // FAM_FINAL — a flier the size of the player
+    add(0,0,0, 0.80,1.30,0.80, c, 0.18);                 // body
+    add(0,0.86,0, 0.62,0.44,0.62, dark, 0);              // crown
+    add(0,0.30,0.48, 0.34,0.34,0.20, [1,1,1], 1.0);      // eye
+    add( 0.92,0.24,0, 0.90,0.16,0.62, c, 0.45);          // wings
+    add(-0.92,0.24,0, 0.90,0.16,0.62, c, 0.45);
+    if(d>=1){ add( 1.62,0.42,0, 0.52,0.14,0.44, c, 0.7);
+              add(-1.62,0.42,0, 0.52,0.14,0.44, c, 0.7);
+              add(0,-0.92,0, 0.40,0.60,0.40, dark, 0); }
+    if(d>=2){ add(0,1.24,0, 0.26,0.40,0.26, c, 0.95);
+              add( 0.58,-0.70,0.30, 0.24,0.50,0.24, c, 0.5);
+              add(-0.58,-0.70,0.30, 0.24,0.50,0.24, c, 0.5);
+              add(0,0.30,-0.62, 0.46,0.46,0.30, c, 0.6); }
+  }
+  return P_;
+}
+const EBODY = ETYPES.map(bodyOf);
+
+/* ==========================================================================
    5. GAME STATE
    ========================================================================== */
 const G = {
@@ -785,10 +1058,13 @@ const G = {
   t0:0, elapsed:0,
   arrows:true, muted:false, sens:0.0014, invY:false,
   dirty:true, cells:null,
+  hint:null, hints:0, beacon:null, ghost:[], hintArrow:null,
+  boss:false, flagsPlaced:0, kills:0, deathBy:'mine',
+  musVol:25, musMuted:false, best:{},
   boom:0, win:false, shake:0, slowmo:1, fuse:0, boomCell:null
 };
 const P = { x:0,y:0,z:0, vx:0,vy:0,vz:0, yaw:0,pitch:0, ground:false, bob:0, step:0,
-            coyote:0, jumpY0:0 };
+            coyote:0, jumpY0:0, hp:2, hurtT:0 };
 const IN = { f:0,b:0,l:0,r:0, sprint:false,
              jumpHeld:false, jumpT:0, jumpFired:false, surged:true, jumpBuf:0 };
 
@@ -805,7 +1081,10 @@ function genWorld(d){
   const N = G.nx*G.ny*G.nz;
   G.mine=new Uint8Array(N); G.cnt=new Uint8Array(N);
   G.st=new Uint8Array(N);   G.mat=new Uint8Array(N);
-  G.echoT=new Float32Array(N); G.echoUntil=0;
+  G.echoT=new Float32Array(N); G.echoD=new Float32Array(N);
+  G.echoC=new Float32Array(N*3); G.echoUntil=0;
+  G.hint=null; G.hints=0; G.beacon=null; G.ghost=[]; G.hintArrow=null;
+  G.numHit=new Float32Array(N);
   for(let i=0;i<N;i++) G.mat[i] = (rnd()<0.055) ? 4 : (rnd()*4)|0;
 
   const cx=(G.nx>>1), cz=(G.nz>>1), cy=1;
@@ -845,6 +1124,9 @@ function genWorld(d){
   G.revealed=0; G.marked=0; G.gold=0; G.win=false; G.boom=0; G.slowmo=1; G.shake=0;
   G.fuse=0; G.boomCell=null;
   G.elapsed=0; G.t0=performance.now();
+  G.boss = !!D.boss; G.flagsPlaced=0; G.kills=0; G.deathBy='mine';
+  enemies.length=0; eshots.length=0;
+  P.hp = 2; P.hurtT = 0;
 
   // starting chamber: 3x3 carved out of the middle layer
   for(const i of safe) revealAt(i, true);
@@ -885,6 +1167,37 @@ function revealAt(start, silent){
   }
   G.dirty=true;
   return opened;
+}
+
+/* ---------- block highlighting ----------
+   One channel for both the shot-a-number echo and the hint, so the two can
+   never light the same block in two colors at once. Each cell carries its own
+   expiry, its own total duration, and its own hue. */
+function setEcho(i, dur, col){
+  G.echoT[i] = tGlobal + dur;
+  G.echoD[i] = dur;
+  const o=i*3; G.echoC[o]=col[0]; G.echoC[o+1]=col[1]; G.echoC[o+2]=col[2];
+  if(G.echoT[i] > G.echoUntil) G.echoUntil = G.echoT[i];
+}
+const _ec=[0,0,0];
+function echoColOf(i){
+  const o=i*3; _ec[0]=G.echoC[o]; _ec[1]=G.echoC[o+1]; _ec[2]=G.echoC[o+2];
+  return _ec;
+}
+function clearEcho(){
+  G.echoT.fill(0); G.echoUntil=0; G.beacon=null; G.dirty=true;
+}
+
+/* Has this number already been answered — as many flags around it as it counts?
+   Nothing is claimed about whether those flags are right. */
+function numSatisfied(i,x,y,z){
+  let f=0;
+  for(let dy=-1;dy<=1;dy++) for(let dz=-1;dz<=1;dz++) for(let dx=-1;dx<=1;dx++){
+    if(!dx&&!dy&&!dz) continue;
+    const X=x+dx,Y=y+dy,Z=z+dz;
+    if(inside(X,Y,Z) && G.st[idx(X,Y,Z)]===MARKED) f++;
+  }
+  return f===G.cnt[i];
 }
 
 /* plane arrows: is there a mine in any of the 9 blocks above / below? */
@@ -1007,9 +1320,103 @@ const snd = (function(){
     const s=ac.createBufferSource(); s.buffer=b; return s;
   }
   const on = ()=> ensure() && !G.muted;
+
+  /* ---------------------------------------------------------------------
+     MUSIC — a loop built out of oscillators, like everything else here.
+     One bar of sixteenths: a pulse that never lets up, a bass that moves
+     with the chord, and a pad that changes root every bar so the same beat
+     keeps landing under different harmony. That is where the tension comes
+     from — the rhythm is fixed, the ground under it is not.
+     Its own gain node, so muting the sound effects does not mute the music
+     and the two volumes are independent.
+     --------------------------------------------------------------------- */
+  const SEMI = s => Math.pow(2, s/12);
+  const THEMES = [
+    // Apprentice: slow, wary, mostly space
+    {bpm: 84, root:55.00, prog:[0,0,-3,-5],  kick:[1,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0],
+     hat:0.30, lead:0.00, saw:0.10, pad:0.055},
+    // Sorcerer: it starts pushing
+    {bpm:102, root:58.27, prog:[0,-2,-4,-5], kick:[1,0,0,1,0,0,1,0,1,0,0,0,1,0,0,0],
+     hat:0.44, lead:0.16, saw:0.15, pad:0.060},
+    // Arcane: dense, no room to think
+    {bpm:120, root:61.74, prog:[0,-1,-5,-6], kick:[1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,1],
+     hat:0.58, lead:0.26, saw:0.20, pad:0.065},
+    // Boss Master: fastest, lowest, meanest
+    {bpm:140, root:49.00, prog:[0,-1,3,-4],  kick:[1,0,1,1,1,0,1,0,1,1,1,0,1,0,1,1],
+     hat:0.72, lead:0.38, saw:0.26, pad:0.075}
+  ];
+  let mBus=null, mTimer=0, mStep=0, mNext=0, mTheme=null, mVol=0.16, mMuted=false;
+
+  function mEnsure(){
+    if(!ensure()) return false;
+    if(!mBus){ mBus = ac.createGain(); mBus.gain.value = mMuted?0:mVol; mBus.connect(ac.destination); }
+    return true;
+  }
+  function blip(type, hz, t0, dur, peak, filt, q){
+    const o=ac.createOscillator(); o.type=type; o.frequency.setValueAtTime(hz, t0);
+    let node=o;
+    if(filt){ const f=ac.createBiquadFilter(); f.type='lowpass';
+              f.frequency.setValueAtTime(filt,t0); f.Q.value=q||1; o.connect(f); node=f; }
+    const g=ac.createGain();
+    g.gain.setValueAtTime(0.0001,t0);
+    g.gain.exponentialRampToValueAtTime(peak, t0+0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+    node.connect(g); g.connect(mBus);
+    o.start(t0); o.stop(t0+dur+0.02);
+  }
+  function mTick(){
+    if(!mTheme || !mBus) return;
+    const T=mTheme, spb=60/T.bpm, sixteenth=spb/4;
+    while(mNext < ac.currentTime + 0.20){
+      const t=mNext, s=mStep%16, bar=(mStep/16|0)%4;
+      const chord = T.root*SEMI(T.prog[bar]);
+
+      if(T.kick[s]){                                  // the pulse
+        const o=ac.createOscillator(); o.type='sine';
+        o.frequency.setValueAtTime(128,t); o.frequency.exponentialRampToValueAtTime(38,t+0.10);
+        const g=ac.createGain();
+        g.gain.setValueAtTime(0.0001,t);
+        g.gain.exponentialRampToValueAtTime(0.5,t+0.006);
+        g.gain.exponentialRampToValueAtTime(0.0001,t+0.16);
+        o.connect(g); g.connect(mBus); o.start(t); o.stop(t+0.2);
+      }
+      if(s%2===1 && Math.random()<T.hat){             // offbeat tick
+        const n=noise(0.03);
+        const f=ac.createBiquadFilter(); f.type='highpass'; f.frequency.value=6500;
+        const g=ac.createGain();
+        g.gain.setValueAtTime(0.10,t); g.gain.exponentialRampToValueAtTime(0.0001,t+0.035);
+        n.connect(f); f.connect(g); g.connect(mBus); n.start(t); n.stop(t+0.05);
+      }
+      if(s===0||s===3||s===6||s===8||s===11||s===14)  // bass, syncopated
+        blip('sawtooth', chord, t, 0.20, T.saw, 420, 4);
+      if(s===0){                                      // pad: the harmony that moves
+        blip('triangle', chord*2,        t, spb*3.6, T.pad, 900);
+        blip('triangle', chord*2*SEMI(3),t, spb*3.6, T.pad*0.8, 900);
+        blip('triangle', chord*2*SEMI(7),t, spb*3.6, T.pad*0.6, 900);
+      }
+      if(T.lead>0 && (s===7||s===13) && Math.random()<T.lead)
+        blip('square', chord*4*SEMI(bar%2?3:7), t, 0.14, 0.05, 2600);
+
+      mNext += sixteenth; mStep++;
+    }
+  }
+
   return {
     resume(){ if(ensure() && ac.state==='suspended') ac.resume(); },
     setMute(m){ if(master) master.gain.value = m?0:0.5; },
+    /* Custom boards pass null and stay silent, on purpose: it is the mode you
+       build to sit and think in. */
+    music(themeIdx){
+      if(themeIdx===null || themeIdx===undefined){ this.musicStop(); return; }
+      if(!mEnsure()) return;
+      mTheme = THEMES[Math.max(0, Math.min(THEMES.length-1, themeIdx))];
+      mStep=0; mNext=ac.currentTime+0.08;
+      clearInterval(mTimer); mTimer=setInterval(mTick, 25);
+    },
+    musicStop(){ clearInterval(mTimer); mTimer=0; mTheme=null; },
+    musicVol(v){ mVol=v; if(mBus) mBus.gain.value = mMuted?0:v; },
+    musicMute(m){ mMuted=m; if(mBus) mBus.gain.value = m?0:mVol; },
+    musicIsMuted(){ return mMuted; },
     shot(){ if(!on())return;
       const o=ac.createOscillator(); o.type='sawtooth';
       o.frequency.setValueAtTime(760, ac.currentTime);
@@ -1077,6 +1484,42 @@ const snd = (function(){
       o.frequency.exponentialRampToValueAtTime(1720, ac.currentTime+0.16);
       env(o,0.004,0.24,0.09); o.start(); o.stop(ac.currentTime+0.3);
     },
+    /* ---- Boss Master ---- */
+    spawn(){ if(!on())return;
+      const o=ac.createOscillator(); o.type='sawtooth';
+      o.frequency.setValueAtTime(90, ac.currentTime);
+      o.frequency.exponentialRampToValueAtTime(420, ac.currentTime+0.3);
+      const f=ac.createBiquadFilter(); f.type='lowpass'; f.frequency.value=1400;
+      o.connect(f); env(f,0.01,0.42,0.13); o.start(); o.stop(ac.currentTime+0.5);
+    },
+    elock(){ if(!on())return;   // the tick that says: start moving
+      const o=ac.createOscillator(); o.type='square'; o.frequency.value=1560;
+      env(o,0.002,0.07,0.045); o.start(); o.stop(ac.currentTime+0.1);
+    },
+    efire(hz){ if(!on())return;
+      const o=ac.createOscillator(); o.type='sawtooth';
+      o.frequency.setValueAtTime(hz||300, ac.currentTime);
+      o.frequency.exponentialRampToValueAtTime((hz||300)*0.35, ac.currentTime+0.18);
+      const f=ac.createBiquadFilter(); f.type='bandpass'; f.frequency.value=(hz||300)*2.4; f.Q.value=1.6;
+      o.connect(f); env(f,0.003,0.2,0.11); o.start(); o.stop(ac.currentTime+0.26);
+    },
+    ekill(){ if(!on())return;
+      [520,330,190].forEach((hz,i)=>{
+        const o=ac.createOscillator(); o.type='triangle'; o.frequency.value=hz;
+        const g=ac.createGain(); const t0=ac.currentTime+i*0.05;
+        g.gain.setValueAtTime(0.0001,t0);
+        g.gain.exponentialRampToValueAtTime(0.13,t0+0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001,t0+0.26);
+        o.connect(g); g.connect(master); o.start(t0); o.stop(t0+0.3);
+      });
+    },
+    hurt(){ if(!on())return;
+      const o=ac.createOscillator(); o.type='sawtooth';
+      o.frequency.setValueAtTime(320, ac.currentTime);
+      o.frequency.exponentialRampToValueAtTime(60, ac.currentTime+0.45);
+      const f=ac.createBiquadFilter(); f.type='lowpass'; f.frequency.value=900;
+      o.connect(f); env(f,0.005,0.55,0.24); o.start(); o.stop(ac.currentTime+0.6);
+    },
     whisper(){ if(!on())return;
       const o=ac.createOscillator(); o.type='sawtooth'; o.frequency.value=58;
       const o2=ac.createOscillator(); o2.type='sawtooth'; o2.frequency.value=61.5;
@@ -1093,20 +1536,28 @@ const snd = (function(){
 /* ==========================================================================
    9. DRAW BATCHES
    ========================================================================== */
-const worldB  = makeCubeBatch(16*5*16 + 64);
+/* Sized for the largest board Custom allows: 20 x 5 x 20 interior plus the
+   one-block bedrock shell around it, i.e. 22 * 7 * 22. */
+const worldB  = makeCubeBatch(22*7*22 + 64);
+/* Empty cells the hint wants you to look at. Air has nothing to draw, so the
+   hint draws the space itself: a translucent block where a block would be. */
+const ghostB  = makeCubeBatch(64);
 const debris  = makeCubeBatch(MAXP);
 const viewB   = makeCubeBatch(48);
-const glyphB  = makeBBBatch(2600);
+const enemyB  = makeCubeBatch(EN_MAX*EN_PARTS);
+const glyphB  = makeBBBatch(6800);
 const glowB   = makeBBBatch(MAXS + 500);
 const boomB   = makeBBBatch(4);   // the hit mine, drawn over everything
 
 function rebuildWorld(){
   const d = worldB.data; let n=0;
-  const put=(px,py,pz,s,col,seedv,emis,mark,echo)=>{
+  const put=(px,py,pz,s,col,seedv,emis,mark,echo,hi)=>{
     const o=n*CUBE_STRIDE;
     composeAA(d,o, px,py,pz, s,s,s);
     d[o+16]=col[0]; d[o+17]=col[1]; d[o+18]=col[2];
     d[o+19]=seedv;  d[o+20]=emis;   d[o+21]=mark;  d[o+22]=echo||0;
+    if(hi){ d[o+23]=hi[0]; d[o+24]=hi[1]; d[o+25]=hi[2]; }
+    else  { d[o+23]=d[o+24]=d[o+25]=0; }
     n++;
   };
   // bedrock: a one-block shell around everything
@@ -1129,10 +1580,13 @@ function rebuildWorld(){
       continue;
     }
     const m=MATS[G.mat[i]];
-    const echo = G.echoT[i] > tGlobal ? (G.echoT[i]-tGlobal)/ECHO_DUR : 0;
+    /* Full strength for the first two thirds, then fade: the light has to
+       hold long enough to walk around the block and look at it. */
+    const left = G.echoT[i] - tGlobal;
+    const echo = left > 0 ? Math.min(1, left/(G.echoD[i]*0.34 || 1)) : 0;
     put((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, BLOCK,
         m.c, ((i*2654435761)>>>0 %1000)/1000, m.gold?0.16:0,
-        G.st[i]===MARKED?1:0, echo);
+        G.st[i]===MARKED?1:0, echo, echo>0 ? echoColOf(i) : null);
   }
   worldB.count=n;
   G.dirty=false;
@@ -1196,6 +1650,7 @@ function buildViewModel(t, speed, aspect){
     mulM(_S,_L,d,o);
     d[o+16]=s[9][0]; d[o+17]=s[9][1]; d[o+18]=s[9][2];
     d[o+19]=i*0.17;  d[o+20]=s[10]?(0.72+0.28*Math.sin(t*3.1)):0;  d[o+21]=0; d[o+22]=0;
+    d[o+23]=d[o+24]=d[o+25]=0;
   }
   viewB.count=STAFF.length;
 }
@@ -1272,6 +1727,7 @@ let hover = {hit:false};
 
 function shoot(){
   if(G.state!=='play') return;
+  G.hint = null; G.beacon = null;   // the board is about to change under the deduction
   recoil = 1;
   snd.shot();
   const r=aimRay();
@@ -1287,6 +1743,29 @@ function shoot(){
     addS(P.x+r.dx*t, P.y+EYE+r.dy*t, P.z+r.dz*t, 0,0,0,
          0.34+0.20*(1-i/(n-1)), 0.11+0.05*rnd(), [0.86,0.62,1.0], T_GLOW, 0.40);
   }
+  /* Enemies come first, but only if one is genuinely nearer than whatever
+     block the ray would otherwise have hit — otherwise you would shoot
+     through walls at things you cannot see. */
+  const foe = rayEnemy(r.ox,r.oy,r.oz, r.dx,r.dy,r.dz, Math.min(REACH, dist));
+  if(foe){
+    const e=foe.e, T=ETYPES[e.t];
+    addS(e.x,e.y,e.z, 0,0,0, 1.8, 0.28, [1,0.9,0.6], T_GLOW, 0.8);
+    if(foe.weak){
+      // straight through the banner: it does not matter how tough the body is
+      toast('Banner down.', 1400);
+      killEnemy(e, foe.i);
+    } else {
+      e.hp--; e.flash=0.25;
+      if(e.hp<=0) killEnemy(e, foe.i);
+      else{
+        snd.clink();
+        for(let k=0;k<7;k++)
+          addP(e.x,e.y,e.z, (rnd()-.5)*9,(rnd()-.5)*9+3,(rnd()-.5)*9, 0.2, 0.5, T.col, 0.6);
+      }
+    }
+    return;
+  }
+
   if(!hit.hit) return;
 
   if(hit.kind==='num'){ hitNumber(hit.x,hit.y,hit.z); return; }
@@ -1308,6 +1787,7 @@ function shoot(){
    - otherwise it simply lights the neighbors up for a few seconds.
    Flagged the wrong ones? The spread finds the real mine and the cave goes. */
 function hitNumber(x,y,z){
+  G.numHit[idx(x,y,z)] = tGlobal;   // shot: come back to full size for a moment
   const need = G.cnt[idx(x,y,z)];
   let marcadas = 0;
   const abrir = [];
@@ -1339,9 +1819,13 @@ function hitNumber(x,y,z){
   return abrir.length;
 }
 
-/* Just lights up: no flagging, no revealing, costs nothing. */
+/* Just lights up: no flagging, no revealing, costs nothing.
+   The blocks glow in the shot number's own color, so two numbers lit at the
+   same time stay told apart, and the light lasts long enough to walk around
+   the group and look at it from the other side. */
 function pingNumber(x,y,z){
-  const until = tGlobal + ECHO_DUR;
+  G.numHit[idx(x,y,z)] = tGlobal;
+  const c = G.cnt[idx(x,y,z)], hi = NUMHI[c] || HI_CLUE;
   let n=0;
   for(let dy=-1;dy<=1;dy++) for(let dz=-1;dz<=1;dz++) for(let dx=-1;dx<=1;dx++){
     if(!dx&&!dy&&!dz) continue;
@@ -1349,26 +1833,646 @@ function pingNumber(x,y,z){
     if(!inside(X,Y,Z)) continue;
     const j=idx(X,Y,Z);
     if(G.st[j]===AIR) continue;
-    G.echoT[j]=until; n++;
+    setEcho(j, ECHO_DUR, hi); n++;
   }
-  G.echoUntil = Math.max(G.echoUntil, until);
   G.dirty=true;
   snd.scan();
-  addS((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, 0,0,0, 1.7, 0.4,
-       [0.35,0.95,1.0], T_GLOW, 0.55);
+  addS((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, 0,0,0, 1.7, 0.4, hi, T_GLOW, 0.55);
   return n;
 }
 
 function mark(){
   if(G.state!=='play') return;
+  G.hint = null; G.beacon = null;
   const r=aimRay();
   const hit = raycast(r.ox,r.oy,r.oz, r.dx,r.dy,r.dz, REACH, false);
   if(!hit.hit || hit.kind!=='block') return;
   const i=idx(hit.x,hit.y,hit.z);
   if(G.st[i]===AIR) return;
-  G.st[i] = (G.st[i]===MARKED) ? SOLID : MARKED;
-  G.marked += (G.st[i]===MARKED) ? 1 : -1;
+  const wasFlag = G.st[i]===MARKED;
+  G.st[i] = wasFlag ? SOLID : MARKED;
+  G.marked += wasFlag ? -1 : 1;
   G.dirty=true; snd.mark();
+  if(!wasFlag) maybeSpawn(i, hit.x, hit.y, hit.z);
+}
+
+/* ==========================================================================
+   12b. HINT — the deduction, shown before it is played
+   ==========================================================================
+   The solver is only ever allowed to look at what the player can already see:
+   the revealed numbers and the flags they placed themselves. It never reads
+   G.mine. Two rules, ordered by how obvious they are to a human:
+
+     rule 1  one number whose count is already satisfied by flags
+             -> every other block touching it is safe
+     rule 1b one number whose count equals flags + hidden
+             -> every hidden block touching it is a mine
+     rule 2  two overlapping numbers, the subset rule
+             -> the blocks one covers and the other does not
+
+   Returns {nums:[revealed cells used], target, mine} or null. */
+function cellXYZ(i){
+  return [i%G.nx, (i/(G.nx*G.nz))|0, ((i/G.nx)|0)%G.nz];
+}
+function nbrsOf(i){
+  const [x,y,z]=cellXYZ(i), out=[];
+  for(let dy=-1;dy<=1;dy++) for(let dz=-1;dz<=1;dz++) for(let dx=-1;dx<=1;dx++){
+    if(!dx&&!dy&&!dz) continue;
+    const X=x+dx,Y=y+dy,Z=z+dz;
+    if(inside(X,Y,Z)) out.push(idx(X,Y,Z));
+  }
+  return out;
+}
+/* A clue is a revealed number with at least one unknown block left around it.
+   `need` is how many of those unknowns are mines. */
+function gatherClues(){
+  const out=[], N=G.nx*G.ny*G.nz;
+  for(let i=0;i<N;i++){
+    if(G.st[i]!==AIR || G.cnt[i]===0) continue;
+    let flagged=0; const h=[];
+    for(const j of nbrsOf(i)){
+      if(G.st[j]===MARKED) flagged++;
+      else if(G.st[j]===SOLID) h.push(j);
+    }
+    if(h.length) out.push({i, need:G.cnt[i]-flagged, h, set:new Set(h)});
+  }
+  return out;
+}
+/* The hidden blocks of the 3x3 plane `dy` steps from a number. */
+function planeHidden(x,y,z,dy){
+  const out=[];
+  for(let dz=-1;dz<=1;dz++) for(let dx=-1;dx<=1;dx++){
+    const X=x+dx, Y=y+dy, Z=z+dz;
+    if(inside(X,Y,Z) && G.st[idx(X,Y,Z)]===SOLID) out.push(idx(X,Y,Z));
+  }
+  return out;
+}
+
+function findHint(){
+  const clues = gatherClues();
+  const N = G.nx*G.ny*G.nz;
+
+  /* Prefer the block the player is looking at, then the nearest one: a hint
+     you have to go hunting for is not much of a hint. */
+  const aimed = (hover.hit && hover.kind==='block') ? idx(hover.x,hover.y,hover.z) : -1;
+  const score = t => {
+    if(t===aimed) return -1;
+    const [x,y,z]=cellXYZ(t);
+    return Math.hypot((x+0.5)*BLOCK-P.x, (y+0.5)*BLOCK-P.y, (z+0.5)*BLOCK-P.z);
+  };
+  let best=null;
+  const put = o => { const s=score(o.target); if(!best || s<best.s){ o.s=s; best=o; } };
+  const offer = (nums, targets, mine, extra) => {
+    for(const t of targets) put(Object.assign({nums, target:t, mine}, extra||{}));
+  };
+
+  /* ---- rule 0: read the arrows ----
+     An arrow is a statement about a whole plane of nine blocks, so its absence
+     is the most spatial fact on the board. No arrow up means not one of the
+     nine blocks overhead is a mine — all of them are safe, whatever the number
+     says. This is the deduction you can see rather than count. */
+  for(let i=0;i<N;i++){
+    if(G.st[i]!==AIR || G.cnt[i]===0) continue;
+    const [x,y,z]=cellXYZ(i);
+    const [up,dn]=planeFlags(x,y,z);
+    if(!up) offer([i], planeHidden(x,y,z,+1), false, {rule:'plane', dir:+1, up, dn});
+    if(!dn) offer([i], planeHidden(x,y,z,-1), false, {rule:'plane', dir:-1, up, dn});
+  }
+  if(best) return best;
+
+  /* ---- rule 0b: no arrows at all means every mine it counts is in its own
+     plane. If exactly that many blocks are left there, they are all mines. --- */
+  for(let i=0;i<N;i++){
+    if(G.st[i]!==AIR || G.cnt[i]===0) continue;
+    const [x,y,z]=cellXYZ(i);
+    const [up,dn]=planeFlags(x,y,z);
+    if(up || dn) continue;
+    let flagged=0; const hid=[];
+    for(let dz=-1;dz<=1;dz++) for(let dx=-1;dx<=1;dx++){
+      if(!dx&&!dz) continue;
+      const X=x+dx, Z=z+dz;
+      if(!inside(X,y,Z)) continue;
+      const j=idx(X,y,Z);
+      if(G.st[j]===MARKED) flagged++;
+      else if(G.st[j]===SOLID) hid.push(j);
+    }
+    const need = G.cnt[i]-flagged;
+    if(hid.length && need===hid.length) offer([i], hid, true,  {rule:'plane-mine', dir:0, up, dn});
+    else if(hid.length && need===0)     offer([i], hid, false, {rule:'plane-safe', dir:0, up, dn});
+  }
+  if(best) return best;
+
+  if(!clues.length) return null;
+
+  for(const c of clues){
+    if(c.need===0)               offer([c.i], c.h, false, {rule:'count'});
+    else if(c.need===c.h.length) offer([c.i], c.h, true,  {rule:'count'});
+  }
+  if(best) return best;
+
+  // rule 2: A's unknowns are a subset of B's
+  for(const a of clues) for(const b of clues){
+    if(a===b || a.h.length >= b.h.length) continue;
+    const [ax,ay,az]=cellXYZ(a.i), [bx,by,bz]=cellXYZ(b.i);
+    if(Math.abs(ax-bx)>2 || Math.abs(ay-by)>2 || Math.abs(az-bz)>2) continue;
+    let sub=true;
+    for(const j of a.h) if(!b.set.has(j)){ sub=false; break; }
+    if(!sub) continue;
+    const diff = b.h.filter(j => !a.set.has(j));
+    if(!diff.length) continue;
+    const dneed = b.need - a.need;
+    if(dneed===0)                offer([a.i,b.i], diff, false, {rule:'subset'});
+    else if(dneed===diff.length) offer([a.i,b.i], diff, true,  {rule:'subset'});
+  }
+  return best;
+}
+
+/* Nothing is provable. That is not a bug — it is true of every opening, and
+   of the odd stand-off later on. So instead of shrugging, rank the hidden
+   blocks by the worst risk any single number puts on them and name the
+   calmest one. This is a guess and is dressed as one: amber, never green,
+   and the player has to pull the trigger themselves. */
+function findGuess(){
+  const clues = gatherClues(), N = G.nx*G.ny*G.nz;
+  const risk = new Float32Array(N).fill(-1);
+  for(const c of clues){
+    const r = c.need / c.h.length;
+    for(const j of c.h) if(r > risk[j]) risk[j] = r;
+  }
+  let hidden=0;
+  for(let i=0;i<N;i++) if(G.st[i]===SOLID) hidden++;
+  if(!hidden) return null;
+  /* A block no number touches is worth the plain remaining density, and
+     nothing cleverer. Trying to discount it by what the clues already
+     account for double-counts wildly here: with 26 neighbors the clue sets
+     overlap so heavily that subtracting each need in turn drives the
+     estimate to zero and makes every interior block look free. */
+  const inner = Math.max(0, G.mines - G.marked) / hidden;
+
+  let best=null;
+  for(let i=0;i<N;i++){
+    if(G.st[i]!==SOLID) continue;
+    const r = risk[i] >= 0 ? risk[i] : inner;
+    const [x,y,z]=cellXYZ(i);
+    const d = Math.hypot((x+0.5)*BLOCK-P.x, (y+0.5)*BLOCK-P.y, (z+0.5)*BLOCK-P.z);
+    if(!best || r < best.r - 1e-6 || (Math.abs(r-best.r) < 1e-6 && d < best.d))
+      best = {target:i, r, d};
+  }
+  if(!best) return null;
+  best.nums = clues.filter(c => c.set.has(best.target)).map(c => c.i);
+  return best;
+}
+
+/* First press paints the deduction, second press plays it. */
+/* A hint is a thing you look at, not a line of text. The number that proves
+   the move glows in the air where it floats, the arrow it is leaning on (or
+   the plane whose arrow is missing) is drawn big beside it, and the block it
+   proves flashes as it goes. One press shows the reasoning and plays it. */
+function addGhost(i, col, dur, big){
+  G.ghost.push({i, col, until:tGlobal+dur, born:tGlobal, big:!!big});
+}
+function burstAt(x,y,z, col, n){
+  const cx=(x+0.5)*BLOCK, cy=(y+0.5)*BLOCK, cz=(z+0.5)*BLOCK;
+  addS(cx,cy,cz, 0,0,0, 5.0, 0.45, col, T_GLOW, 0.9);
+  for(let k=0;k<(n||26);k++){
+    const a=rnd()*6.283, b=Math.acos(2*rnd()-1), sp=7+rnd()*13;
+    addS(cx,cy,cz, Math.sin(b)*Math.cos(a)*sp, Math.cos(b)*sp, Math.sin(b)*Math.sin(a)*sp,
+         0.8+rnd()*0.9, 0.5+rnd()*0.5, col, T_SPARK, 0.85);
+  }
+}
+
+function askHint(){
+  if(G.state!=='play') return;
+  const h = findHint();
+  if(!h){
+    /* No proof to offer, so no button to press twice: a guess is the
+       player's call to make, not the staff's. */
+    G.hint=null;
+    const g = findGuess();
+    if(!g){ toast('Nothing left to open.'); snd.clink(); return; }
+    clearEcho();
+    G.ghost.length=0; G.hintArrow=null;
+    for(const i of g.nums){ setEcho(i, HINT_DUR, HI_CLUE); addGhost(i, HI_CLUE, HINT_DUR); }
+    setEcho(g.target, HINT_DUR, HI_GUESS);
+    addGhost(g.target, HI_GUESS, HINT_DUR, true);
+    G.hints++; G.dirty=true; snd.clink();
+    G.beacon = {i:g.target, col:HI_GUESS, until:tGlobal+HINT_DUR};
+    const [x,y,z]=cellXYZ(g.target);
+    addS((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, 0,0,0, 2.0, 0.6, HI_GUESS, T_GLOW, 0.55);
+    /* The number is an upper bound, not a probability: it is the worst any
+       single number nearby makes the block look. Measured over 40 boards the
+       amber block turns out to be a mine about half as often as it says, and
+       less than half as often as a blind pick. Overstating is the safe way
+       to be wrong about this. */
+    toast(`Nothing is provable from here. The amber block is the safest guess I can find — no worse than about ${Math.round(g.r*100)}% odds of a mine. Your shot to take.`, 5600);
+    return;
+  }
+
+  clearEcho();
+  G.ghost.length = 0;
+  G.hints++;
+
+  /* the proof: the empty spaces the numbers occupy, lit from the inside */
+  for(const i of h.nums){
+    setEcho(i, HINT_DUR, HI_CLUE);
+    addGhost(i, HI_CLUE, HINT_DUR);
+    G.numHit[i] = tGlobal;            // and shown at full size while it argues
+  }
+  /* the plane it is arguing about, drawn as a big arrow beside the number */
+  if(h.rule==='plane') G.hintArrow = {i:h.nums[0], dir:h.dir, until:tGlobal+HINT_DUR};
+  else G.hintArrow = null;
+
+  const [x,y,z] = cellXYZ(h.target);
+  const col = h.mine ? HI_MINE : HI_TGT;
+  setEcho(h.target, HINT_DUR, col);
+  G.beacon = {i:h.target, col, until:tGlobal+HINT_DUR};
+  G.dirty = true;
+  snd.scan();
+
+  /* ...and then it plays the move, because a proof you still have to execute
+     is just homework */
+  if(h.mine){
+    if(G.st[h.target]===SOLID){ G.st[h.target]=MARKED; G.marked++; maybeSpawn(h.target,x,y,z); }
+    snd.mark();
+    burstAt(x,y,z, HI_MINE, 20);
+    addGhost(h.target, HI_MINE, HINT_DUR, true);
+  } else {
+    recoil=1; snd.shot();
+    revealAt(h.target,false);
+    burstAt(x,y,z, HI_TGT, 30);
+    addGhost(h.target, HI_TGT, HINT_DUR, true);   // the space it used to fill
+    checkWin();
+  }
+
+  const many = h.nums.length>1;
+  toast(
+    h.rule==='plane'
+      ? (h.dir>0
+         ? `That ${G.cnt[h.nums[0]]} has no arrow up, so not one of the nine blocks above it is a mine. Cleared the one overhead.`
+         : `That ${G.cnt[h.nums[0]]} has no arrow down, so not one of the nine blocks below it is a mine. Cleared the one underneath.`)
+    : h.rule==='plane-mine'
+      ? `That ${G.cnt[h.nums[0]]} has no arrows at all, so every mine it counts sits in its own plane — and only that many blocks are left there. Flagged.`
+    : h.rule==='plane-safe'
+      ? `That ${G.cnt[h.nums[0]]} has no arrows, so it counts only its own plane, and its mines are already flagged. Cleared.`
+    : h.mine
+      ? `The ${many?'two numbers':'number'} in blue only add up if that block is a mine. Flagged.`
+      : `The ${many?'two numbers':'number'} in blue already have all their mines. Cleared.`,
+    5200);
+}
+
+/* ==========================================================================
+   12c. BOSS MASTER — the things that come out of the blocks you flag
+   ========================================================================== */
+const enemies=[], eshots=[];
+
+function solidAtWorld(x,y,z){
+  return isSolidCell(Math.floor(x/BLOCK), Math.floor(y/BLOCK), Math.floor(z/BLOCK));
+}
+/* local X -> right, Y -> up, Z -> forward. Euler angles cannot express the
+   slug stuck to a wall, so enemies get a basis matrix instead. */
+function frameM(out, px,py,pz, fx,fy,fz, ux,uy,uz, s){
+  let rx=uy*fz-uz*fy, ry=uz*fx-ux*fz, rz=ux*fy-uy*fx;
+  const rl=Math.hypot(rx,ry,rz)||1; rx/=rl; ry/=rl; rz/=rl;
+  out[0]=rx*s;  out[1]=ry*s;  out[2]=rz*s;  out[3]=0;
+  out[4]=ux*s;  out[5]=uy*s;  out[6]=uz*s;  out[7]=0;
+  out[8]=fx*s;  out[9]=fy*s;  out[10]=fz*s; out[11]=0;
+  out[12]=px;   out[13]=py;   out[14]=pz;   out[15]=1;
+}
+const _E=new Float32Array(16), _EL=new Float32Array(16);
+
+/* Where the shot leaves from: the banner for a Bannerman, an antenna tip for
+   a Creeper, the eye for the other two. */
+function muzzleOf(e, out){
+  const T=ETYPES[e.t], s=T.scale;
+  let lx=0, ly=0, lz=0.7;
+  if(T.fam===FAM_FLAG){ lx=0.78; ly=0.46; lz=0; }
+  else if(T.fam===FAM_SLUG){ lx=(e.ant?0.55:-0.55); ly=1.06; lz=0; }
+  else if(T.fam===FAM_FINAL){ ly=0.30; lz=0.62; }
+  frameM(_E, e.x,e.y,e.z, e.fx,e.fy,e.fz, e.ux,e.uy,e.uz, 1);
+  out[0] = _E[0]*lx*s + _E[4]*ly*s + _E[8]*lz*s  + e.x;
+  out[1] = _E[1]*lx*s + _E[5]*ly*s + _E[9]*lz*s  + e.y;
+  out[2] = _E[2]*lx*s + _E[6]*ly*s + _E[10]*lz*s + e.z;
+}
+const _mz=[0,0,0];
+
+function correctFlagFrac(){
+  if(!G.mines) return 0;
+  let ok=0;
+  for(let i=0;i<G.st.length;i++) if(G.st[i]===MARKED && G.mine[i]) ok++;
+  return ok/G.mines;
+}
+/* the block you just flagged has a 6-or-higher number showing next to it */
+function touchesBigNumber(cell){
+  for(const j of nbrsOf(cell)) if(G.st[j]===AIR && G.cnt[j]>=6) return true;
+  return false;
+}
+
+function spawnEnemy(fam, tier, cell){
+  if(enemies.length >= EN_MAX) return null;
+  const T = etype(fam, tier);
+  const [bx,by,bz] = cellXYZ(cell);
+  const cx=(bx+0.5)*BLOCK, cy=(by+0.5)*BLOCK, cz=(bz+0.5)*BLOCK;
+  // come out of the face pointing at the player, so you see it arrive
+  let nx=P.x-cx, ny=(P.y+EYE)-cy, nz=P.z-cz;
+  const ax=Math.abs(nx), ay=Math.abs(ny), az=Math.abs(nz);
+  let f=[0,0,0];
+  if(ax>=ay&&ax>=az) f=[Math.sign(nx)||1,0,0];
+  else if(ay>=az)    f=[0,Math.sign(ny)||1,0];
+  else               f=[0,0,Math.sign(nz)||1];
+  // never emerge into rock
+  if(solidAtWorld(cx+f[0]*BLOCK, cy+f[1]*BLOCK, cz+f[2]*BLOCK)){
+    let alt=null;
+    for(const g of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]])
+      if(!solidAtWorld(cx+g[0]*BLOCK, cy+g[1]*BLOCK, cz+g[2]*BLOCK)){ alt=g; break; }
+    if(!alt) return null;
+    f=alt;
+  }
+  const hp = T.fam===FAM_FLAG  ? 1 + Math.round(2*correctFlagFrac())
+           : T.fam===FAM_FINAL ? tier+3
+           : tier+1;
+  // up: for a wall-hugger, "up" is the face normal; for the rest, the world up
+  const wall = Math.abs(f[1]) < 0.5;
+  const up = (T.fam===FAM_FLAG || T.fam===FAM_SLUG) ? f.slice()
+           : [0,1,0];
+  let fw = (T.fam===FAM_FLAG || T.fam===FAM_SLUG)
+         ? (wall ? [0,1,0] : [1,0,0]) : [-f[0],-f[1],-f[2]];
+  if(Math.abs(fw[0]*up[0]+fw[1]*up[1]+fw[2]*up[2]) > 0.9) fw=[0,0,1];
+  const e = {
+    t:T.id, fam:T.fam, tier, hp, maxhp:hp, cell,
+    x:cx, y:cy, z:cz,
+    tx:cx+f[0]*BLOCK*0.72, ty:cy+f[1]*BLOCK*0.72, tz:cz+f[2]*BLOCK*0.72,
+    ux:up[0], uy:up[1], uz:up[2],
+    fx:fw[0], fy:fw[1], fz:fw[2],
+    vx:0, vy:0, vz:0,
+    state:'emerge', age:0, emerge:0,
+    cool: T.rate*(0.5+rnd()*0.6),
+    lock:0, lockMax:0, aim:null, ant:false,
+    banner:1, bannerT:0, flash:0, hop:0
+  };
+  enemies.push(e);
+  snd.spawn();
+  for(let k=0;k<16;k++)
+    addP(cx,cy,cz, (rnd()-.5)*7+f[0]*5, (rnd()-.5)*7+f[1]*5, (rnd()-.5)*7+f[2]*5,
+         0.3+rnd()*0.4, 0.7, T.col, 0.5);
+  return e;
+}
+
+/* Called every time the player plants a flag. This is the only way anything
+   ever spawns: the mines you mark are the doors. */
+function maybeSpawn(cell, x,y,z){
+  if(!G.boss || G.state!=='play') return;
+  G.flagsPlaced++;
+  if(enemies.length >= EN_MAX) return;
+  const frac = correctFlagFrac();
+  /* The Archon: only from the sixth flag on, only off a flag that touches a
+     6 or higher, and only one time in twenty even then. */
+  if(G.flagsPlaced>=6 && touchesBigNumber(cell) && rnd()<0.05){
+    const e = spawnEnemy(FAM_FINAL, frac<0.34?0:frac<0.7?1:2, cell);
+    if(e){ toast('An Archon just came out of that one.', 3600); snd.fanfare(); }
+    return;
+  }
+  if(rnd() > 0.58) return;
+  const fam = [FAM_FLAG, FAM_ORB, FAM_SLUG][(rnd()*3)|0];
+  // the deeper you are into the board, the nastier the variant
+  const roll = frac*0.75 + Math.min(0.35, G.elapsed/420) + (rnd()-0.5)*0.28;
+  spawnEnemy(fam, roll<0.36?0:roll<0.72?1:2, cell);
+}
+
+function canSee(e){
+  const ty=P.y+EYE*0.62;
+  let dx=P.x-e.x, dy=ty-e.y, dz=P.z-e.z;
+  const d=Math.hypot(dx,dy,dz);
+  if(d<0.6) return true;
+  if(d>ETYPES[e.t].range) return false;
+  dx/=d; dy/=d; dz/=d;
+  const h=raycast(e.x,e.y,e.z, dx,dy,dz, d, false);
+  return !h.hit || h.t >= d-0.7;
+}
+
+function enemyFire(e){
+  const T=ETYPES[e.t];
+  muzzleOf(e, _mz);
+  let dx=e.aim[0]-_mz[0], dy=e.aim[1]-_mz[1], dz=e.aim[2]-_mz[2];
+  const d=Math.hypot(dx,dy,dz)||1;
+  eshots.push({x:_mz[0], y:_mz[1], z:_mz[2],
+               dx:dx/d, dy:dy/d, dz:dz/d, life:3.2, col:T.col,
+               sz: T.fam===FAM_FLAG ? 0.55 : 0.34});
+  snd.efire(T.fam===FAM_FLAG ? 180 : T.fam===FAM_SLUG ? 260 : 340);
+  if(T.fam===FAM_FLAG){ e.banner=0; e.bannerT=1.05; }   // it throws its banner
+  e.cool = T.rate*(0.78+rnd()*0.5);
+  e.aim=null; e.lock=0;
+}
+
+function killEnemy(e, i){
+  const T=ETYPES[e.t];
+  for(let k=0;k<22;k++){
+    const a=rnd()*6.283, b=Math.acos(2*rnd()-1), sp=5+rnd()*11;
+    addP(e.x,e.y,e.z, Math.sin(b)*Math.cos(a)*sp, Math.cos(b)*sp+3, Math.sin(b)*Math.sin(a)*sp,
+         0.22+rnd()*0.5, 0.9+rnd()*0.7, T.col, 0.6);
+  }
+  addS(e.x,e.y,e.z, 0,0,0, 3.4, 0.42, T.col, T_GLOW, 0.8);
+  G.gold += 8 + ((rnd()*18)|0);
+  G.kills++;
+  snd.ekill();
+  enemies.splice(i,1);
+}
+
+function hurtPlayer(){
+  if(G.state!=='play') return;
+  P.hp--;
+  G.shake = Math.max(G.shake, 0.55);
+  P.hurtT = 1.0;
+  snd.hurt();
+  if(P.hp<=0){
+    G.state='over'; G.win=false; G.deathBy='shot';
+    G.slowmo=0.35; G.shake=1;
+    snd.boom();
+    for(let k=0;k<120;k++){
+      const a=rnd()*6.283, b=Math.acos(2*rnd()-1), sp=8+rnd()*24;
+      addS(P.x, P.y+EYE, P.z, Math.sin(b)*Math.cos(a)*sp, Math.cos(b)*sp, Math.sin(b)*Math.sin(a)*sp,
+           0.9+rnd()*1.4, 0.9+rnd()*1.1, [1.0,0.28,0.20], T_GLOW, 0.5);
+    }
+    flashScreen();
+    showOver(false);
+  } else {
+    toast('Hit. One more and you are done.', 2600);
+  }
+}
+
+/* An enemy shot does to the cave exactly what yours does — including setting
+   off a mine, which ends the run just as surely as walking into one. */
+function enemyShotEnv(cx,cy,cz){
+  if(!inside(cx,cy,cz)){ snd.clink(); return; }
+  const i=idx(cx,cy,cz);
+  if(G.st[i]===MARKED){ snd.clink(); return; }   // a flag shrugs it off
+  if(G.st[i]===AIR) return;
+  if(G.mine[i]){ detonate(cx,cy,cz); return; }
+  revealAt(i,false);
+  checkWin();
+}
+
+function hitsPlayer(x,y,z){
+  const cy = Math.max(P.y, Math.min(y, P.y+P_H));
+  const dx=x-P.x, dy=y-cy, dz=z-P.z, R=P_R+0.30;
+  return dx*dx+dy*dy+dz*dz <= R*R;
+}
+
+function updateEShots(dt){
+  for(let i=eshots.length-1;i>=0;i--){
+    const s=eshots[i];
+    s.life-=dt;
+    if(s.life<=0){ eshots.splice(i,1); continue; }
+    const travel = ESHOT_SPD*dt;
+    const steps = Math.max(1, Math.ceil(travel/0.45));
+    let gone=false;
+    for(let k=0;k<steps && !gone;k++){
+      s.x += s.dx*travel/steps; s.y += s.dy*travel/steps; s.z += s.dz*travel/steps;
+      if(G.state==='play' && hitsPlayer(s.x,s.y,s.z)){ hurtPlayer(); gone=true; break; }
+      const cx=Math.floor(s.x/BLOCK), cy=Math.floor(s.y/BLOCK), cz=Math.floor(s.z/BLOCK);
+      if(isSolidCell(cx,cy,cz)){
+        addS(s.x,s.y,s.z, 0,0,0, 1.5, 0.3, s.col, T_GLOW, 0.7);
+        enemyShotEnv(cx,cy,cz);
+        gone=true;
+      }
+    }
+    if(gone){ eshots.splice(i,1); continue; }
+    if(rnd()<0.6) addS(s.x,s.y,s.z, 0,0,0, s.sz*2.2, 0.16, s.col, T_GLOW, 0.5);
+  }
+}
+
+function moveOrb(e, dt, T){
+  // bounces around slowly, the way a player hopping about would
+  e.vy -= GRAV*0.55*dt;
+  e.hop -= dt;
+  if(e.hop<=0){
+    const a=rnd()*6.283;
+    e.vx=Math.cos(a)*T.speed; e.vz=Math.sin(a)*T.speed; e.vy=5.2+rnd()*2.4;
+    e.hop = 1.4+rnd()*1.8;
+  }
+  const nx=e.x+e.vx*dt, ny=e.y+e.vy*dt, nz=e.z+e.vz*dt;
+  if(solidAtWorld(nx,e.y,e.z)) e.vx=-e.vx; else e.x=nx;
+  if(solidAtWorld(e.x,ny,e.z)){ if(e.vy<0){ e.vy=0; e.hop=Math.min(e.hop,0.25); } else e.vy=-e.vy*0.3; }
+  else e.y=ny;
+  if(solidAtWorld(e.x,e.y,nz)) e.vz=-e.vz; else e.z=nz;
+}
+
+function moveSlug(e, dt, T){
+  /* Crawls across surfaces: when the ground runs out it wraps around the
+     edge, when a wall gets in the way it climbs it. Turning means swapping
+     "up" and "forward" — no gravity involved anywhere. */
+  const sp = T.speed*dt;
+  const nx=e.x+e.fx*sp, ny=e.y+e.fy*sp, nz=e.z+e.fz*sp;
+  const ahead = solidAtWorld(nx+e.fx*1.3, ny+e.fy*1.3, nz+e.fz*1.3);
+  const under = solidAtWorld(nx-e.ux*1.3, ny-e.uy*1.3, nz-e.uz*1.3);
+  if(ahead){                       // climb: the wall becomes the new floor
+    const of=[e.fx,e.fy,e.fz];
+    e.fx=e.ux; e.fy=e.uy; e.fz=e.uz;
+    e.ux=-of[0]; e.uy=-of[1]; e.uz=-of[2];
+  } else if(!under){               // fall around the lip
+    const ou=[e.ux,e.uy,e.uz];
+    e.ux=e.fx; e.uy=e.fy; e.uz=e.fz;
+    e.fx=-ou[0]; e.fy=-ou[1]; e.fz=-ou[2];
+  } else { e.x=nx; e.y=ny; e.z=nz; }
+}
+
+function moveFinal(e, dt, T){
+  // holds a distance and circles: never lands, never touches you
+  let dx=P.x-e.x, dy=(P.y+EYE)-e.y, dz=P.z-e.z;
+  const d=Math.hypot(dx,dy,dz)||1;
+  const want = 9.0;
+  const push = (d-want)/want;
+  const ax=Math.cos(tGlobal*0.7+e.age), az=Math.sin(tGlobal*0.7+e.age);
+  e.vx += ((dx/d)*push*T.speed + ax*T.speed*0.5 - e.vx)*Math.min(1,dt*1.7);
+  e.vy += ((dy/d)*push*T.speed*0.6 + Math.sin(tGlobal*1.3+e.age)*0.8 - e.vy)*Math.min(1,dt*1.7);
+  e.vz += ((dz/d)*push*T.speed + az*T.speed*0.5 - e.vz)*Math.min(1,dt*1.7);
+  const nx=e.x+e.vx*dt, ny=e.y+e.vy*dt, nz=e.z+e.vz*dt;
+  if(solidAtWorld(nx,e.y,e.z)) e.vx=-e.vx*0.6; else e.x=nx;
+  if(solidAtWorld(e.x,ny,e.z)) e.vy=-e.vy*0.6; else e.y=ny;
+  if(solidAtWorld(e.x,e.y,nz)) e.vz=-e.vz*0.6; else e.z=nz;
+}
+
+function updateEnemies(dt){
+  updateEShots(dt);
+  if(!G.boss) return;
+  for(let i=enemies.length-1;i>=0;i--){
+    const e=enemies[i], T=ETYPES[e.t];
+    e.age+=dt;
+    if(e.flash>0) e.flash-=dt;
+
+    if(e.state==='emerge'){
+      e.emerge = Math.min(1, e.emerge + dt/0.75);
+      e.x += (e.tx-e.x)*Math.min(1,dt*5); e.y += (e.ty-e.y)*Math.min(1,dt*5);
+      e.z += (e.tz-e.z)*Math.min(1,dt*5);
+      if(e.emerge>=1) e.state='live';
+      continue;
+    }
+    if(G.state!=='play') continue;
+
+    // ---- move ----
+    if(T.fam===FAM_ORB)        moveOrb(e, dt, T);
+    else if(T.fam===FAM_SLUG)  moveSlug(e, dt, T);
+    else if(T.fam===FAM_FINAL) moveFinal(e, dt, T);
+    // FAM_FLAG stays on the face it came out of, as it should
+
+    // ---- face the player (around its own up axis) ----
+    if(T.fam!==FAM_SLUG){
+      let dx=P.x-e.x, dy=(P.y+EYE)-e.y, dz=P.z-e.z;
+      const d=Math.hypot(dx,dy,dz)||1;
+      dx/=d; dy/=d; dz/=d;
+      const k = Math.min(1, dt*(T.fam===FAM_FLAG?3.2:5.0));
+      e.fx += (dx-e.fx)*k; e.fy += (dy-e.fy)*k; e.fz += (dz-e.fz)*k;
+      const l=Math.hypot(e.fx,e.fy,e.fz)||1; e.fx/=l; e.fy/=l; e.fz/=l;
+      if(Math.abs(e.fx*e.ux+e.fy*e.uy+e.fz*e.uz)>0.97){ e.ux=0; e.uy=1; e.uz=0; }
+    }
+
+    // ---- the banner grows back, with a small glow while it does ----
+    if(T.fam===FAM_FLAG && e.banner<1){
+      e.bannerT-=dt;
+      if(e.bannerT<=0){ e.banner=1; addS(e.x,e.y,e.z, 0,0,0, 1.5, 0.35, T.col, T_GLOW, 0.65); }
+    }
+
+    // ---- aim and fire ----
+    if(e.aim){
+      e.lock -= dt;
+      if(e.lock<=0) enemyFire(e);
+    } else {
+      e.cool -= dt;
+      const ready = T.fam!==FAM_FLAG || e.banner>=1;   // no banner, no shot
+      if(e.cool<=0 && ready && canSee(e)){
+        /* Aim at where the player IS. Whether that is where they will BE is
+           the entire question, and the lock time is how long they have. */
+        e.aim = [P.x, P.y+EYE*0.62, P.z];
+        e.lockMax = T.lock*(0.86+0.28*rnd());
+        e.lock = e.lockMax;
+        e.ant = !e.ant;
+        snd.elock();
+      }
+    }
+  }
+}
+
+/* The player's ray against enemies. Returns the nearest, and whether it went
+   through a Bannerman's banner — which kills it outright, however many hits
+   its body would otherwise have taken. */
+function rayEnemy(ox,oy,oz, dx,dy,dz, maxD){
+  let best=null;
+  for(let i=0;i<enemies.length;i++){
+    const e=enemies[i], T=ETYPES[e.t];
+    const test=(px,py,pz,r,weak)=>{
+      const vx=px-ox, vy=py-oy, vz=pz-oz;
+      const tc=vx*dx+vy*dy+vz*dz;
+      if(tc<0.2 || tc>maxD) return;
+      const qx=dx*tc-vx, qy=dy*tc-vy, qz=dz*tc-vz;
+      if(qx*qx+qy*qy+qz*qz > r*r) return;
+      if(!best || tc<best.t) best={t:tc, e, i, weak};
+    };
+    test(e.x, e.y, e.z, T.r, false);
+    if(T.fam===FAM_FLAG && e.banner>=1){
+      muzzleOf(e, _mz);
+      test(_mz[0], _mz[1], _mz[2], 0.62*T.scale, true);
+    }
+  }
+  return best;
 }
 
 function checkWin(){
@@ -1451,42 +2555,124 @@ function flashScreen(){
   });
 }
 function showOver(win){
+  snd.musicStop();
   const el=$('over');
   el.classList.toggle('win', win);
-  $('overEye').textContent = win ? 'The three planes open' : 'Plane breached';
-  $('overTitle').textContent = win ? 'The sand let you go' : 'You are sand now';
-  const mm=Math.floor(G.elapsed/60), ss=Math.floor(G.elapsed%60);
-  $('overText').textContent = win
-    ? `${G.mines} mines mapped, ${G.gold} gold in your pocket, ${mm}:${String(ss).padStart(2,'0')} in the labyrinth. Whatever locked you in is not pleased.`
-    : `You lasted ${mm}:${String(ss).padStart(2,'0')} and opened ${G.revealed} of ${G.safeTotal} blocks. ${G.mines-G.marked} mines were still unflagged.`;
+  const shot = !win && G.deathBy==='shot';
+  $('overBar').textContent = win ? 'You win' : shot ? 'Shot down' : 'Plane breached';
+  $('overEye').textContent = win ? 'The three planes open' : shot ? 'Something got you first' : 'Plane breached';
+  $('overTitle').textContent = win ? 'The sand let you go' : shot ? 'Shot down' : 'You are sand now';
+  /* The clock is the score. On a win it is a record to beat; on a death it is
+     how long you lasted, which is the only number worth keeping from a loss. */
+  $('overTime').textContent = fmtTime(G.elapsed);
+  const bestEl = $('overBest'), key = bestKey();
+  bestEl.classList.remove('new');
+  if(win){
+    const prev = G.best[key];
+    if(prev===undefined || G.elapsed < prev){
+      G.best[key] = G.elapsed; saveCfg();
+      bestEl.textContent = prev===undefined ? 'FIRST CLEAR' : `BEST — beat ${fmtTime(prev)}`;
+      bestEl.classList.add('new');
+    } else bestEl.textContent = `BEST ${fmtTime(prev)}`;
+  } else {
+    const prev = G.best[key];
+    bestEl.textContent = prev===undefined ? 'SURVIVED' : `BEST CLEAR ${fmtTime(prev)}`;
+  }
+
+  const hint = G.hints ? ` ${G.hints} hint${G.hints>1?'s':''} taken.` : ' No hints taken.';
+  const bag = G.boss ? ` ${G.kills} of them went down with you.` : '';
+  $('overText').textContent = (win
+    ? `${G.mines} mines mapped and ${G.gold} gold in your pocket. Whatever locked you in is not pleased.`
+    : shot
+    ? `You stood still one second too long. ${G.revealed} of ${G.safeTotal} blocks opened.`
+    : `You opened ${G.revealed} of ${G.safeTotal} blocks. ${G.mines-G.marked} mines were still unflagged.`) + hint + bag;
   setTimeout(()=>{ el.classList.add('on'); document.exitPointerLock&&document.exitPointerLock(); }, win?900:2100);
+}
+function fmtTime(sec){
+  const mm=Math.floor(sec/60), ss=Math.floor(sec%60);
+  return mm+':'+String(ss).padStart(2,'0');
+}
+function bestKey(){
+  const D=DIFFS[G.diff];
+  return G.diff===CUSTOM ? `c${D.nx}x${D.ny}x${D.nz}@${Math.round(D.dens*100)}${D.boss?'b':''}` : 'd'+G.diff;
 }
 function setScreen(s){
   G.state=s;
+  if(s==='pause'){
+    syncToggles();
+    $('pauseStat').textContent =
+      `${DIFFS[G.diff].name} · ${fmtTime(G.elapsed)} on the clock · ` +
+      `${G.revealed} of ${G.safeTotal} blocks opened · ${Math.max(0,G.mines-G.marked)} mines unflagged`;
+  }
   elMenu.classList.toggle('on', s==='menu');
   elPause.classList.toggle('on', s==='pause');
   if(s!=='over') elOver.classList.remove('on');
   elHud.classList.toggle('on', s==='play');
+  elHud.classList.toggle('boss', !!G.boss);
   elCross.classList.toggle('on', s==='play');
+  if(s!=='play') $('hurt').style.opacity='0';
   canvas.style.cursor = (s==='play') ? 'none' : 'default';
 }
 function updateHUD(){
   $('sMines').textContent = Math.max(0, G.mines - G.marked);
   $('sLeft').textContent  = Math.max(0, G.safeTotal - G.revealed);
-  $('sGold').textContent  = G.gold;
   const mm=Math.floor(G.elapsed/60), ss=Math.floor(G.elapsed%60);
   $('sTime').textContent = mm+':'+String(ss).padStart(2,'0');
-  $('barFill').style.width = (100*G.revealed/G.safeTotal).toFixed(1)+'%';
+  if(G.boss){
+    const life = $('sLife');
+    life.textContent = P.hp>0 ? '♥'.repeat(P.hp) : '—';
+    life.classList.toggle('low', P.hp<=1);
+    $('hurt').style.opacity = P.hurtT>0 ? (0.30+0.55*P.hurtT).toFixed(2) : '0';
+  }
 }
 function updateDiffNote(){
   const D=DIFFS[G.diff], n=D.nx*D.ny*D.nz, m=Math.round(n*D.dens);
-  $('dNote').textContent = `${D.nx} × ${D.ny} × ${D.nz} = ${n} blocks · ${m} mines (${(D.dens*100).toFixed(1)}%) · cave ${D.nx*BLOCK} × ${D.ny*BLOCK} × ${D.nz*BLOCK} m`;
+  const boss = (D.boss ? ' · they come out of the blocks you flag' : '');
+  $('dNote').textContent = `${D.nx} × ${D.ny} × ${D.nz} = ${n} blocks · ${m} mines (${(D.dens*100).toFixed(1)}%) · cave ${D.nx*BLOCK} × ${D.ny*BLOCK} × ${D.nz*BLOCK} m${boss}`;
 }
+/* Custom writes straight into its DIFFS entry, so genWorld needs no special
+   case at all — it is just another difficulty whose numbers you picked. */
+function syncCustom(){
+  const D=DIFFS[CUSTOM];
+  $('cnx').value=D.nx; $('cnxV').textContent=D.nx;
+  $('cnz').value=D.nz; $('cnzV').textContent=D.nz;
+  $('cny').value=D.ny; $('cnyV').textContent=D.ny;
+  const pct=Math.round(D.dens*100);
+  $('cde').value=pct; $('cdeV').textContent=pct+'%';
+  $('cbo').checked=!!D.boss;
+  $('customBox').classList.toggle('on', G.diff===CUSTOM);
+  /* Below about 10% the first flood fill opens the whole cave at once — the
+     percolation threshold at 26 neighbors. Their board, their call, but they
+     should know before they press start. */
+  const warn = $('cWarn');
+  if(pct < 10){
+    warn.className='diffnote warn';
+    warn.textContent = `At ${pct}% mines the first opening is likely to cascade through most of the cave — below 26-neighbor percolation, around 10%, a board mostly solves itself.`;
+  } else { warn.className='diffnote'; warn.textContent=''; }
+  if(G.diff===CUSTOM) updateDiffNote();
+  saveCfg();
+}
+function bindCustom(id, key, fmt){
+  $(id).addEventListener('input', e=>{
+    const v=+e.target.value;
+    DIFFS[CUSTOM][key] = (key==='dens') ? v/100 : v;
+    syncCustom();
+  });
+}
+bindCustom('cnx','nx'); bindCustom('cnz','nz'); bindCustom('cny','ny'); bindCustom('cde','dens');
+$('cbo').addEventListener('change', e=>{ DIFFS[CUSTOM].boss=e.target.checked; syncCustom(); });
+$('mus').addEventListener('input',  e=>syncMusic(+e.target.value, null));
+$('mus2').addEventListener('input', e=>syncMusic(+e.target.value, null));
+$('btnMusic').addEventListener('click',  ()=>syncMusic(null, !G.musMuted));
+$('btnMusic2').addEventListener('click', ()=>syncMusic(null, !G.musMuted));
+$('btnArrows2').addEventListener('click', ()=>{ G.arrows=!G.arrows; syncToggles(); });
+$('btnSound2').addEventListener('click', ()=>{ G.muted=!G.muted; snd.setMute(G.muted); syncToggles(); });
 
 document.querySelectorAll('.diffs [data-d]').forEach(b=>{
   b.addEventListener('click', ()=>{
     document.querySelectorAll('.diffs [data-d]').forEach(o=>o.classList.remove('sel'));
-    b.classList.add('sel'); G.diff = +b.dataset.d; updateDiffNote();
+    b.classList.add('sel'); G.diff = +b.dataset.d;
+    updateDiffNote(); syncCustom();
   });
 });
 let toastT=0;
@@ -1495,8 +2681,32 @@ function toast(msg, ms){
   clearTimeout(toastT); toastT=setTimeout(()=>w.classList.remove('on'), ms||2000);
 }
 function saveCfg(){
-  try{ localStorage.setItem('campominado3d',
-       JSON.stringify({s:+$('sens').value, i:G.invY})); }catch(e){}
+  try{ localStorage.setItem('campominado3d', JSON.stringify({
+    s:+$('sens').value, i:G.invY, mv:G.musVol, mm:G.musMuted,
+    cu:{nx:DIFFS[CUSTOM].nx, nz:DIFFS[CUSTOM].nz, ny:DIFFS[CUSTOM].ny,
+        dens:DIFFS[CUSTOM].dens, boss:DIFFS[CUSTOM].boss},
+    best:G.best
+  })); }catch(e){}
+}
+/* Music is background by default; the slider goes all the way to the front. */
+function syncMusic(v, muted){
+  if(v!==null && v!==undefined) G.musVol = Math.max(0, Math.min(100, v))|0;
+  if(muted!==null && muted!==undefined) G.musMuted = !!muted;
+  for(const id of ['mus','mus2']) $(id).value = G.musVol;
+  for(const id of ['musV','musV2']) $(id).textContent = G.musVol + '%';
+  for(const id of ['btnMusic','btnMusic2']){
+    $(id).textContent = G.musMuted ? 'Music: off' : 'Music: on';
+    $(id).classList.toggle('sel', G.musMuted);
+  }
+  /* 25 is the default and it sits well under the game; the slider still runs
+     all the way to the front for anyone who wants it there. */
+  snd.musicVol(G.musVol/100 * 0.55);
+  snd.musicMute(G.musMuted);
+  saveCfg();
+}
+function syncToggles(){
+  $('btnArrows2').textContent = 'Plane arrows: ' + (G.arrows?'on':'off');
+  $('btnSound2').textContent  = 'Sound: ' + (G.muted?'off':'on');
 }
 function syncSens(v){
   G.sens = v/10000;
@@ -1514,25 +2724,40 @@ function loadCfg(){
   try{ c = JSON.parse(localStorage.getItem('campominado3d')||'null'); }catch(e){}
   syncSens(c && c.s>=4 && c.s<=40 ? c.s : 14);
   syncInv(c ? !!c.i : false);
+  if(c && c.cu){
+    const u=c.cu, D=DIFFS[CUSTOM];
+    D.nx=clampI(u.nx,LIM.nx); D.nz=clampI(u.nz,LIM.nz); D.ny=clampI(u.ny,LIM.ny);
+    D.dens=Math.max(LIM.dens[0],Math.min(LIM.dens[1],Math.round((u.dens||0.13)*100)))/100;
+    D.boss=!!u.boss;
+  }
+  if(c && c.best) G.best = c.best;
+  syncMusic(c && typeof c.mv==='number' ? c.mv : 25, c ? !!c.mm : false);
+  syncCustom();
 }
+const clampI=(v,r)=> Math.max(r[0], Math.min(r[1], (+v)|0)) || r[0];
 $('sens').addEventListener('input', e=>syncSens(+e.target.value));
 $('sens2').addEventListener('input', e=>syncSens(+e.target.value));
 $('inv').addEventListener('change', e=>syncInv(e.target.checked));
 $('inv2').addEventListener('change', e=>syncInv(e.target.checked));
 
+/* One theme per mode. Custom passes null and plays nothing: it is the board
+   you build to sit and think on. */
+function themeFor(d){
+  if(d===CUSTOM) return null;
+  return d===BOSS ? 3 : d;
+}
 function startGame(){
   seed = (Date.now()>>>0) ^ 0x9e3779b9;
   genWorld(G.diff);
   setScreen('play');
-  $('tip').classList.remove('fade');
-  setTimeout(()=>$('tip').classList.add('fade'), 9000);
   snd.resume();
+  snd.music(themeFor(G.diff));
   tryLock();
 }
 $('btnStart').addEventListener('click', startGame);
 $('btnAgain').addEventListener('click', ()=>{ elOver.classList.remove('on'); startGame(); });
-$('btnMenu').addEventListener('click', ()=>setScreen('menu'));
-$('btnMenu2').addEventListener('click', ()=>{ elOver.classList.remove('on'); setScreen('menu'); });
+$('btnMenu').addEventListener('click', ()=>{ snd.musicStop(); setScreen('menu'); });
+$('btnMenu2').addEventListener('click', ()=>{ snd.musicStop(); elOver.classList.remove('on'); setScreen('menu'); });
 $('btnRestart').addEventListener('click', startGame);
 $('btnResume').addEventListener('click', ()=>{ setScreen('play'); tryLock(); });
 
@@ -1634,10 +2859,9 @@ window.addEventListener('keydown', e=>{
       break;
     case 'KeyE': if(dragLook) shoot(); break;
     case 'KeyQ': if(dragLook) mark(); break;
+    case 'KeyH': askHint(); break;
     case 'KeyT':
       G.arrows=!G.arrows;
-      $('sPlanes').textContent = G.arrows?'on':'off';
-      $('planes').classList.toggle('off', !G.arrows);
       toast('Plane arrows '+(G.arrows?'on':'off'));
       break;
     case 'KeyI':
@@ -1733,6 +2957,9 @@ const SUN = (()=>{ const v=[0.42,0.86,0.29]; const l=Math.hypot(...v); return [v
 const FOG = [0.235,0.155,0.115];
 
 let last=performance.now(), nextWhisper=25+Math.random()*30, tGlobal=0;
+/* x,y,z,r,g,b per lit number — collected in the glyph pass, spent in the
+   additive pass, so a highlighted digit gets a halo behind it too. */
+const litNums=[];
 
 function frame(now){
   requestAnimationFrame(frame);
@@ -1748,14 +2975,15 @@ function frame(now){
     updateJump(dt);
     physics(dt);
     tickGround(dt);
+    if(P.hurtT>0) P.hurtT -= dt;
     G.elapsed = Math.max(0, (now - G.t0)/1000);
     updateHUD();
-    $('charge').classList.toggle('on', IN.jumpHeld && IN.jumpFired && !IN.surged);
-    $('chargeFill').style.width = (100*Math.min(1, IN.jumpT/CHARGE_T)).toFixed(0)+'%';
 
     nextWhisper -= dt;
     if(nextWhisper<=0){ snd.whisper(); nextWhisper = 34+Math.random()*46; }
   }
+
+  if(G.boss || eshots.length) updateEnemies(sim);
 
   if(G.fuse > 0){
     G.fuse -= dt; G.dirty = true;
@@ -1800,9 +3028,13 @@ function frame(now){
     const r=aimRay();
     hover = raycast(r.ox,r.oy,r.oz, r.dx,r.dy,r.dz, REACH, true);
     const k = hover.hit ? hover.kind : null;
-    elCross.classList.toggle('bad',  k===null || k==='bedrock');
-    elCross.classList.toggle('num',  k==='num');
-    elCross.classList.toggle('mark', k==='block' && G.st[idx(hover.x,hover.y,hover.z)]===MARKED);
+    const foe = enemies.length
+      ? rayEnemy(r.ox,r.oy,r.oz, r.dx,r.dy,r.dz, Math.min(REACH, hover.hit?hover.t:REACH))
+      : null;
+    elCross.classList.toggle('foe',  !!foe);
+    elCross.classList.toggle('bad',  !foe && (k===null || k==='bedrock'));
+    elCross.classList.toggle('num',  !foe && k==='num');
+    elCross.classList.toggle('mark', !foe && k==='block' && G.st[idx(hover.x,hover.y,hover.z)]===MARKED);
   } else hover={hit:false};
 
   if(G.echoUntil + 0.1 > tGlobal) G.dirty = true;   // echo alive: rebuild
@@ -1825,6 +3057,7 @@ function frame(now){
   gl.uniform3fv(uC.fog, FOG);
   gl.uniform1f(uC.time, tGlobal);
   gl.uniform1f(uC.outline, 1.0);
+  gl.uniform1f(uC.alpha, 1.0);
   if(hover.hit && hover.kind==='block' && G.state==='play')
     gl.uniform3f(uC.hover,(hover.x+0.5)*BLOCK,(hover.y+0.5)*BLOCK,(hover.z+0.5)*BLOCK);
   else gl.uniform3f(uC.hover, 1e9,1e9,1e9);
@@ -1839,12 +3072,84 @@ function frame(now){
       compose(d,o, p.x,p.y,p.z, p.rx,p.ry,p.rz, p.s*k,p.s*k,p.s*k);
       d[o+16]=p.c[0]; d[o+17]=p.c[1]; d[o+18]=p.c[2];
       d[o+19]=(i*0.137)%1; d[o+20]=p.e; d[o+21]=0; d[o+22]=0;
+      d[o+23]=d[o+24]=d[o+25]=0;
       n++;
     }
     debris.count=n;
     gl.uniform3f(uC.hover, 1e9,1e9,1e9);
+    // (ghosts are drawn after everything solid, further down)
     gl.uniform1f(uC.outline, 1.6);
     drawCubes(debris);
+  }
+
+  // ------- enemies -------
+  if(enemies.length){
+    const d=enemyB.data; let n=0;
+    for(const e of enemies){
+      const T=ETYPES[e.t], parts=EBODY[e.t];
+      // while emerging it grows out of the block instead of popping into place
+      const grow = e.state==='emerge' ? 0.25+0.75*e.emerge : 1;
+      frameM(_E, e.x,e.y,e.z, e.fx,e.fy,e.fz, e.ux,e.uy,e.uz, grow);
+      /* the tell: it brightens as the lock runs down, so the shot is never
+         a surprise — only your standing still is */
+      const aimK = e.aim ? 1 - e.lock/Math.max(0.05,e.lockMax) : 0;
+      const flash = e.flash>0 ? e.flash/0.25 : 0;
+      for(let p=0;p<parts.length && n<enemyB.max;p++){
+        const s=parts[p];
+        if(s[11] && !e.banner) continue;            // banner is in flight
+        compose(_EL,0, s[0],s[1],s[2], s[3],s[4],s[5], s[6],s[7],s[8]);
+        mulM(_E,_EL,d,n*CUBE_STRIDE);
+        const o=n*CUBE_STRIDE, c=s[9];
+        d[o+16]=Math.min(1,c[0]+flash*0.8); d[o+17]=Math.min(1,c[1]+flash*0.8);
+        d[o+18]=Math.min(1,c[2]+flash*0.8);
+        d[o+19]=(e.t*0.11+p*0.13)%1;
+        d[o+20]=Math.min(1, s[10] + aimK*0.55 + flash);
+        d[o+21]=0; d[o+22]=0;
+        d[o+23]=d[o+24]=d[o+25]=0;
+        n++;
+      }
+    }
+    enemyB.count=n;
+    gl.uniform1f(uC.outline, 1.25);
+    drawCubes(enemyB);
+    gl.uniform1f(uC.outline, 1.0);
+  }
+
+  /* ------- ghost blocks: the hint drawn into empty space -------
+     A revealed cell is air and has nothing to render, so a hint that wants to
+     point at one has to put the block back. These are the spaces the hint is
+     talking about, lit from inside and see-through. */
+  if(G.ghost.length){
+    const d=ghostB.data; let n=0;
+    for(let k=G.ghost.length-1;k>=0;k--){
+      const g=G.ghost[k];
+      if(tGlobal > g.until){ G.ghost.splice(k,1); continue; }
+      if(n>=ghostB.max) continue;
+      const [gx,gy,gz]=cellXYZ(g.i);
+      const age=tGlobal-g.born;
+      // a hard pop on arrival, then it settles and breathes
+      const pop = age<0.30 ? 1.0+0.55*(1-age/0.30)*(g.big?1.6:1) : 1.0;
+      const s = BLOCK*0.90*pop;
+      const o = n*CUBE_STRIDE;
+      composeAA(d,o, (gx+0.5)*BLOCK,(gy+0.5)*BLOCK,(gz+0.5)*BLOCK, s,s,s);
+      d[o+16]=g.col[0]; d[o+17]=g.col[1]; d[o+18]=g.col[2];
+      d[o+19]=0; d[o+20]=1; d[o+21]=0; d[o+22]=0;
+      d[o+23]=d[o+24]=d[o+25]=0;
+      n++;
+    }
+    ghostB.count=n;
+    if(n){
+      const pulse = 0.30 + 0.17*Math.sin(tGlobal*6.5);
+      gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.depthMask(false); gl.disable(gl.CULL_FACE);
+      gl.uniform1f(uC.alpha, pulse);
+      gl.uniform1f(uC.outline, 0.45);
+      drawCubes(ghostB);
+      gl.uniform1f(uC.alpha, 1.0);
+      gl.uniform1f(uC.outline, 1.0);
+      gl.depthMask(true); gl.enable(gl.CULL_FACE); gl.disable(gl.BLEND);
+    }
+    G.dirty = true;
   }
 
   // ------- glyphs: numbers, arrows, mines -------
@@ -1856,6 +3161,7 @@ function frame(now){
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, atlasTex);
   gl.uniform1i(uB.tex, 0);
 
+  litNums.length=0;
   {
     const d=glyphB.data; let n=0;
     const put=(x,y,z,sw,sh,tile,col,a,rot)=>{
@@ -1873,7 +3179,20 @@ function frame(now){
         const i=idx(x,y,z);
         const cx=(x+0.5)*BLOCK, cy=(y+0.5)*BLOCK, cz=(z+0.5)*BLOCK;
         if(G.st[i]!==AIR){
-          if(showMines && G.mine[i]) put(cx,cy,cz, 2.0,2.0, T_MINE, [1.0,0.32,0.16], 1, 0);
+          if(showMines && G.mine[i]){ put(cx,cy,cz, 2.0,2.0, T_MINE, [1.0,0.32,0.16], 1, 0); continue; }
+          /* The flag sits just outside the face nearest the camera: a
+             billboard at the block center would be buried inside solid rock. */
+          if(G.st[i]===MARKED && G.state==='play'){
+            const dcam=Math.hypot(cx-camX, cy-camY, cz-camZ);
+            if(dcam>40) continue;
+            const fx=camX-cx, fy=camY-cy, fz=camZ-cz;
+            const ax=Math.abs(fx), ay=Math.abs(fy), az=Math.abs(fz);
+            const off = BLOCK*0.5 + 0.55;
+            const px = (ax>=ay&&ax>=az) ? cx+Math.sign(fx)*off : cx;
+            const py = (ay>ax&&ay>=az)  ? cy+Math.sign(fy)*off : cy;
+            const pz = (az>ax&&az>ay)   ? cz+Math.sign(fz)*off : cz;
+            put(px,py,pz, 1.25,1.25, T_RUNE, [0.92,0.10,0.09], clamp(1.30-dcam/34,0.40,1), 0);
+          }
           continue;
         }
         if(G.mine[i]){ if(showMines) put(cx,cy,cz, 2.2,2.2, T_MINE, [1.0,0.30,0.14], 1, 0); continue; }
@@ -1882,8 +3201,39 @@ function frame(now){
         const dcam=Math.hypot(cx-camX, cy-camY, cz-camZ);
         if(dcam>44) continue;
         /* distant ones recede so they do not fight the block in front */
-        const al = clamp(1.30 - dcam/38, 0.34, 1);
-        put(cx,cy,cz, 1.05,1.05, c, NUMCOL[c], al, 0);
+        let al = clamp(1.30 - dcam/38, 0.34, 1);
+        /* A number whose mines are all flagged has said everything it has to
+           say, so it steps back: 20% smaller, 75% opacity. Shooting it brings
+           it all the way back for a second, then it takes another second to
+           settle again. Done for the whole board, it turns a wall of digits
+           into just the ones still asking you something. */
+        let size = 1.05;
+        if(numSatisfied(i,x,y,z)){
+          const th = tGlobal - G.numHit[i];
+          const k = (th>=0 && th<1) ? 1 : (th>=1 && th<2) ? (2-th) : 0;
+          size *= 0.80 + 0.20*k;
+          al   *= 0.75 + 0.25*k;
+        }
+        /* A number the hint is leaning on takes the hint color and grows:
+           the blocks around it are solid and can glow, a revealed cell is
+           empty air and only has its digit to say anything with. */
+        if(G.echoT[i] > tGlobal){
+          const hc = echoColOf(i);
+          put(cx,cy,cz, 1.55,1.55, c, hc, al, 0);
+          litNums.push(cx,cy,cz, hc[0],hc[1],hc[2]);
+        } else {
+          put(cx,cy,cz, size,size, c, NUMCOL[c], al, 0);
+        }
+        /* The hint's own arrow, drawn big whether or not plane arrows are on:
+           it is the whole argument, so it has to be visible even to a player
+           who turned the little ones off. It points at the plane the number
+           says nothing lives in — the plane the hint just cleared. */
+        if(G.hintArrow && G.hintArrow.i===i && tGlobal < G.hintArrow.until){
+          const dir=G.hintArrow.dir;
+          const bob=Math.sin(tGlobal*3.4)*0.16;
+          put(cx, cy + dir*(1.35+bob), cz, 1.5,1.5,
+              dir>0?T_UP:T_DOWN, HI_CLUE, 1, 0);
+        }
         if(G.arrows){
           const [up,dn]=planeFlags(x,y,z);
           const A=0.52, R=0.80;
@@ -1924,6 +3274,49 @@ function frame(now){
     for(const s of sprites){
       const k = Math.min(1, s.l/Math.min(0.5, s.ml));
       put(s.x,s.y,s.z, s.s*(0.6+0.6*k), s.tile, s.c, k*0.95*s.a);
+    }
+    {
+      const pul = 0.62 + 0.38*Math.sin(tGlobal*7.0);
+      for(let i=0;i<litNums.length;i+=6)
+        put(litNums[i],litNums[i+1],litNums[i+2], 3.2, T_GLOW,
+            [litNums[i+3],litNums[i+4],litNums[i+5]], 0.42*pul);
+    }
+    /* Enemy shots in flight, and the aim beam. The beam is the contract with
+       the player: it appears the moment an enemy locks on, follows the point
+       it committed to, and brightens as its lock runs out. If you are still
+       standing on that point when it fills, that is on you. */
+    for(const s of eshots) put(s.x,s.y,s.z, s.sz*3.4, T_GLOW, s.col, 0.85);
+    for(const e of enemies){
+      if(!e.aim || e.state!=='live') continue;
+      const k = 1 - e.lock/Math.max(0.05, e.lockMax);
+      muzzleOf(e, _mz);
+      const dx=e.aim[0]-_mz[0], dy=e.aim[1]-_mz[1], dz=e.aim[2]-_mz[2];
+      const len=Math.hypot(dx,dy,dz)||1;
+      const beads=Math.min(30, Math.max(4, (len/1.5)|0));
+      const col=ETYPES[e.t].col;
+      for(let b=0;b<=beads;b++){
+        const f=b/beads;
+        put(_mz[0]+dx*f, _mz[1]+dy*f, _mz[2]+dz*f,
+            0.30+0.55*k, T_GLOW, col, (0.10+0.42*k)*(1-0.45*f));
+      }
+      put(e.aim[0], e.aim[1], e.aim[2], 1.4+2.2*k, T_GLOW, col, 0.22+0.5*k);
+    }
+
+    /* Beacon on the hinted block. Without it a target you happen to be seeing
+       edge-on — a floor or ceiling block — is a sliver you have to hunt for,
+       and a hint you have to hunt for is not a hint. Sits just off the face
+       nearest the camera, since the block itself is solid. */
+    if(G.beacon && tGlobal < G.beacon.until && G.state==='play'){
+      const [bx,by,bz]=cellXYZ(G.beacon.i);
+      const ccx=(bx+0.5)*BLOCK, ccy=(by+0.5)*BLOCK, ccz=(bz+0.5)*BLOCK;
+      const fx=camX-ccx, fy=camY-ccy, fz=camZ-ccz;
+      const ax=Math.abs(fx), ay=Math.abs(fy), az=Math.abs(fz);
+      const off = BLOCK*0.5 + 0.5;
+      const pul = 0.55 + 0.45*Math.sin(tGlobal*5.0);
+      put((ax>=ay&&ax>=az) ? ccx+Math.sign(fx)*off : ccx,
+          (ay>ax&&ay>=az)  ? ccy+Math.sign(fy)*off : ccy,
+          (az>ax&&az>ay)   ? ccz+Math.sign(fz)*off : ccz,
+          3.6+1.4*pul, T_GLOW, G.beacon.col, 0.40*pul);
     }
     if(G.state!=='menu'){
       for(const m of dust){
