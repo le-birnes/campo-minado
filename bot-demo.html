@@ -1,6 +1,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Minesweeper — Three Planes</title>
+<title>Minesweeper — Three Planes (bot demo)</title>
 
 <style>
 /* ============================================================
@@ -242,6 +242,13 @@ kbd{font-family:var(--mono);font-size:.92em;background:var(--w95);color:#000;
       font-family:var(--ui);color:#000;text-align:center;line-height:1.8;display:none;}
 #nogl div{background:var(--w95);box-shadow:var(--out);padding:26px 30px;max-width:60ch;}
 
+
+#botTag{position:absolute;left:50%;transform:translateX(-50%);top:10px;z-index:9;pointer-events:none;
+        font-family:var(--ui);font-weight:700;font-size:12px;letter-spacing:.08em;color:#000;
+        background:var(--gold);padding:4px 12px;box-shadow:var(--out);}
+#botSay{position:absolute;left:50%;transform:translateX(-50%);top:38px;z-index:9;pointer-events:none;
+        font-family:var(--ui);font-size:12px;color:#000;background:var(--w95);
+        padding:5px 12px;box-shadow:var(--out);max-width:70vw;text-align:center;}
 </style>
 
 <div id="wrap">
@@ -265,6 +272,8 @@ kbd{font-family:var(--mono);font-size:.92em;background:var(--w95);color:#000;
   </div>
 
   <div id="hurt"></div>
+  <div id="botTag">BOT PLAYING — watch only</div>
+  <div id="botSay">booting…</div>
   <div id="toast" role="status" aria-live="polite"></div>
   <div id="needlock">Click the screen to lock the mouse</div>
 
@@ -3420,6 +3429,204 @@ setScreen('menu');
   spin();
 })();
 requestAnimationFrame(frame);
+
+/* ============================================================
+   WATCHABLE BOT
+   It only ever sets the same inputs a player does -- yaw, pitch,
+   the movement flags -- and calls shoot() and mark(). The game's
+   own frame() does the physics and the drawing, so what you are
+   watching is the real thing being played, not a replay.
+   Priorities, in order: kill whatever spawned, flag every mine
+   it can prove, then clear blanks wholesale by shooting numbers
+   whose flags already add up.
+   ============================================================ */
+const say = m => { const e=document.getElementById('botSay'); if(e) e.textContent = m; };
+const B = { path:[], goal:null, act:null, mode:'', stuckT:0, lastD:1e9, cool:0 };
+
+function bCell(){ return [Math.floor(P.x/BLOCK), Math.floor((P.y+0.2)/BLOCK), Math.floor(P.z/BLOCK)]; }
+function bAimAt(x,y,z){
+  const dx=x-P.x, dy=y-(P.y+EYE), dz=z-P.z, h=Math.hypot(dx,dz);
+  P.yaw=Math.atan2(-dx,-dz); P.pitch=Math.max(-1.5,Math.min(1.5,Math.atan2(dy,h)));
+}
+function bRoute(from,to){
+  const N=G.nx*G.ny*G.nz, prev=new Int32Array(N).fill(-1), seen=new Uint8Array(N);
+  const q=[from]; seen[from]=1;
+  for(let qi=0; qi<q.length; qi++){
+    const i=q[qi];
+    if(i===to){ const p=[]; let c=i; while(c!==from){ p.push(c); c=prev[c]; } return p.reverse(); }
+    const [x,y,z]=cellXYZ(i);
+    for(const [dx,dy,dz] of [[1,0,0],[-1,0,0],[0,0,1],[0,0,-1],[0,1,0],[0,-1,0]]){
+      const X=x+dx,Y=y+dy,Z=z+dz;
+      if(!inside(X,Y,Z)) continue;
+      const j=idx(X,Y,Z);
+      if(seen[j] || G.st[j]!==AIR) continue;
+      seen[j]=1; prev[j]=i; q.push(j);
+    }
+  }
+  return null;
+}
+function bSeeBlock(cell){
+  const [tx,ty,tz]=cellXYZ(cell);
+  const cx=(tx+.5)*BLOCK, cy=(ty+.5)*BLOCK, cz=(tz+.5)*BLOCK;
+  const pts=[[cx,cy,cz]];
+  for(const o of [[.34,0,0],[-.34,0,0],[0,.34,0],[0,-.34,0],[0,0,.34],[0,0,-.34]])
+    pts.push([cx+o[0]*BLOCK, cy+o[1]*BLOCK, cz+o[2]*BLOCK]);
+  for(const [ax,ay,az] of pts){
+    let vx=ax-P.x, vy=ay-(P.y+EYE), vz=az-P.z;
+    const d=Math.hypot(vx,vy,vz)||1;
+    const h=raycast(P.x,P.y+EYE,P.z, vx/d,vy/d,vz/d, REACH, true);
+    if(h.hit && h.kind==='block' && h.x===tx && h.y===ty && h.z===tz){ bAimAt(ax,ay,az); return true; }
+  }
+  return false;
+}
+function bSeeNum(cell){
+  const [tx,ty,tz]=cellXYZ(cell);
+  const cx=(tx+.5)*BLOCK, cy=(ty+.5)*BLOCK, cz=(tz+.5)*BLOCK;
+  let vx=cx-P.x, vy=cy-(P.y+EYE), vz=cz-P.z;
+  const d=Math.hypot(vx,vy,vz)||1;
+  const h=raycast(P.x,P.y+EYE,P.z, vx/d,vy/d,vz/d, REACH, true);
+  if(h.hit && h.kind==='num' && h.x===tx && h.y===ty && h.z===tz){ bAimAt(cx,cy,cz); return true; }
+  return false;
+}
+function bNear(list){
+  return list.sort((a,b)=>{
+    const A=cellXYZ(a.cell), B2=cellXYZ(b.cell);
+    return Math.hypot((A[0]+.5)*BLOCK-P.x,(A[1]+.5)*BLOCK-P.y,(A[2]+.5)*BLOCK-P.z)
+         - Math.hypot((B2[0]+.5)*BLOCK-P.x,(B2[1]+.5)*BLOCK-P.y,(B2[2]+.5)*BLOCK-P.z);
+  });
+}
+function bMines(){
+  const N=G.nx*G.ny*G.nz, out=[], seen=new Set();
+  for(let i=0;i<N;i++){
+    if(G.st[i]!==AIR || G.cnt[i]===0) continue;
+    let f=0; const h=[];
+    for(const j of nbrsOf(i)){ if(G.st[j]===MARKED) f++; else if(G.st[j]===SOLID) h.push(j); }
+    if(h.length && G.cnt[i]-f===h.length)
+      for(const j of h) if(!seen.has(j)){ seen.add(j); out.push({cell:j, kind:'flag'}); }
+  }
+  return bNear(out);
+}
+function bChords(){
+  const N=G.nx*G.ny*G.nz, out=[];
+  for(let i=0;i<N;i++){
+    if(G.st[i]!==AIR || G.cnt[i]===0) continue;
+    let f=0, hid=0;
+    for(const j of nbrsOf(i)){ if(G.st[j]===MARKED) f++; else if(G.st[j]===SOLID) hid++; }
+    if(hid && f===G.cnt[i]) out.push({cell:i, kind:'chord'});
+  }
+  return bNear(out);
+}
+function bFrontier(){
+  const N=G.nx*G.ny*G.nz, out=[];
+  for(let i=0;i<N;i++){
+    if(G.st[i]!==SOLID) continue;
+    for(const j of nbrsOf(i)) if(G.st[j]===AIR){ out.push({cell:i, kind:'guess'}); break; }
+  }
+  return bNear(out).slice(0,20);
+}
+
+function bPick(){
+  if(G.boss && enemies.length){
+    let n=null;
+    for(const e of enemies){
+      const d=Math.hypot(e.x-P.x,e.y-P.y,e.z-P.z);
+      if(!n || d<n.d) n={e,d};
+    }
+    if(n){ B.act={kind:'foe', e:n.e}; B.mode='killing what came out of a flag'; return true; }
+  }
+  let m=bMines();
+  if(m.length){ B.act=m[0]; B.mode='flagging a mine it can prove'; return true; }
+  m=bChords();
+  if(m.length){ B.act=m[0]; B.mode='shooting a number that already adds up'; return true; }
+  m=bFrontier();
+  if(m.length){ B.act=m[Math.floor(Math.random()*Math.min(4,m.length))]; B.mode='nothing provable — taking a frontier block'; return true; }
+  B.act=null; return false;
+}
+
+function bWalkToward(x,y,z){
+  const dx=x-P.x, dz=z-P.z, d=Math.hypot(dx,dz);
+  P.yaw=Math.atan2(-dx,-dz);
+  IN.f=1; IN.b=IN.l=IN.r=0;
+  IN.jumpHeld = (y > P.y+0.6 && P.ground);
+  return d;
+}
+function bStop(){ IN.f=IN.b=IN.l=IN.r=0; IN.jumpHeld=false; }
+
+let bTick = 0;
+setInterval(()=>{
+  if(G.state!=='play'){
+    bStop();
+    if(G.state==='over'){
+      say('game over — restarting in a moment');
+      if(!B.cool){ B.cool=1; setTimeout(()=>{ B.cool=0; document.getElementById('over').classList.remove('on'); startGame(); }, 3500); }
+    }
+    return;
+  }
+  bTick++;
+
+  // enemies always take over
+  if(G.boss && enemies.length && (!B.act || B.act.kind!=='foe')) { B.act=null; B.path=[]; }
+  if(!B.act && !bPick()){ say('nothing left it can do'); bStop(); return; }
+
+  if(B.act.kind==='foe'){
+    const e=B.act.e;
+    if(enemies.indexOf(e)<0){ B.act=null; B.path=[]; return; }
+    const d=Math.hypot(e.x-P.x,e.y-P.y,e.z-P.z);
+    let vx=e.x-P.x, vy=e.y-(P.y+EYE), vz=e.z-P.z;
+    const dd=Math.hypot(vx,vy,vz)||1;
+    const h=raycast(P.x,P.y+EYE,P.z, vx/dd,vy/dd,vz/dd, dd, false);
+    const clear = !h.hit || h.t>=dd-1.2;
+    say(`${B.mode} — ${ETYPES[e.t].name}, ${d.toFixed(0)} m`);
+    if(clear && d<REACH){ bStop(); bAimAt(e.x,e.y,e.z); shoot(); }
+    else bWalkToward(e.x, e.y, e.z);
+    return;
+  }
+
+  const target=B.act.cell;
+  const seen = B.act.kind==='chord' ? bSeeNum(target) : bSeeBlock(target);
+  const [tx,ty,tz]=cellXYZ(target);
+  say(`${B.mode} — block ${tx},${ty},${tz}`);
+
+  if(seen){
+    bStop();
+    if(B.act.kind==='flag') mark(); else shoot();
+    B.act=null; B.path=[]; B.stuckT=0;
+    return;
+  }
+
+  // walk: route through what it has opened, one waypoint at a time
+  if(!B.path.length){
+    const c=bCell();
+    if(!inside(c[0],c[1],c[2])){ B.act=null; return; }
+    const from=idx(c[0],c[1],c[2]);
+    if(G.st[from]!==AIR){ B.act=null; return; }
+    let best=null;
+    for(let r=1;r<=3 && !best;r++)
+      for(let dy=-r;dy<=r && !best;dy++) for(let dz=-r;dz<=r && !best;dz++) for(let dx=-r;dx<=r;dx++){
+        const X=tx+dx,Y=ty+dy,Z=tz+dz;
+        if(!inside(X,Y,Z)) continue;
+        const j=idx(X,Y,Z);
+        if(G.st[j]!==AIR) continue;
+        const p=bRoute(from,j);
+        if(p){ best=p; break; }
+      }
+    if(!best){ B.act=null; B.stuckT=0; return; }
+    B.path=best; B.lastD=1e9; B.stuckT=0;
+  }
+  const w=B.path[0], [wx,wy,wz]=cellXYZ(w);
+  const d=bWalkToward((wx+.5)*BLOCK, wy*BLOCK, (wz+.5)*BLOCK);
+  if(d<1.3 && Math.abs(P.y-wy*BLOCK)<BLOCK*0.9){ B.path.shift(); B.stuckT=0; B.lastD=1e9; return; }
+  if(d < B.lastD-0.05){ B.lastD=d; B.stuckT=0; }
+  else if(++B.stuckT > 34){ B.act=null; B.path=[]; B.stuckT=0; }   // give up, pick something else
+}, 45);
+
+setTimeout(()=>{
+  G.diff = 4;                       // Boss Master, so the enemies show up
+  document.querySelectorAll('.diffs [data-d]').forEach(o=>o.classList.remove('sel'));
+  const b=document.querySelector('[data-d="4"]'); if(b) b.classList.add('sel');
+  updateDiffNote(); syncCustom(); startGame();
+  say('starting Boss Master');
+}, 700);
 
 })();
 </script>
