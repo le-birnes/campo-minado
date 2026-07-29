@@ -314,9 +314,10 @@ kbd{font-family:var(--mono);font-size:.92em;background:var(--w95);color:#000;
         <div><kbd>Shift</kbd>sprint</div>
         <div><kbd>Space</kbd>jump · hold 0.5 s midair to rise higher</div>
         <div><kbd>Mouse</kbd>aim</div>
-        <div><kbd>Left click</kbd>break a block · hitting a number lights its neighbors<br>
-          (with all its mines flagged, the shot spreads and clears the rest)</div>
-        <div><kbd>Right click</kbd>flag a mine</div>
+        <div><kbd>Left click</kbd>break a block · shoot a number whose mines are<br>
+          all flagged and the shot spreads, clearing the rest</div>
+        <div><kbd>Right click</kbd>flag a mine · on a number, light up the<br>
+          blocks it is counting</div>
         <div><kbd>H</kbd>hint · lights the reasoning and plays the move</div>
         <div><kbd>T</kbd>plane arrows · <kbd>I</kbd>invert mouse</div>
         <div><kbd>M</kbd>sound · <kbd>R</kbd>restart · <kbd>Esc</kbd>menu and settings</div>
@@ -428,8 +429,15 @@ const SPD_SPR = 8.2;
 const CHARGE_T= 0.50;   // seconds of space held
 const REACH   = 13*BLOCK;
 const NUM_R   = 0.45;   // number hit radius: smaller than the glyph (~0.52),
+                        // (see MARK_NUM_R for the tighter right-click radius)
                         // or the number steals shots aimed at the block behind
 const ECHO_DUR= 3.45;   // echo duration on neighboring blocks (75% of 4.6)
+/* Right click has to serve flagging first. Numbers sit at cell centres and
+   your eye sits 0.28 m below them, so a level shot at a block down the row
+   grazes every number on the way: at the full radius a third of right clicks
+   aimed at a wall were being eaten by a digit. Tighter here means you have to
+   be looking straight at the number to light it up, and everything else flags. */
+const MARK_NUM_R = 0.20;
 const HINT_DUR= 9.0;    // hints hold longer: you are meant to read them
 const FUSE_T  = 0.85;   // the hit mine glows before taking everything
 
@@ -1216,7 +1224,7 @@ function planeFlags(x,y,z){
 /* ==========================================================================
    6. RAY — voxel DDA
    ========================================================================== */
-function raycast(ox,oy,oz, dx,dy,dz, maxD, wantNum){
+function raycast(ox,oy,oz, dx,dy,dz, maxD, wantNum, numR){
   let x=Math.floor(ox/BLOCK), y=Math.floor(oy/BLOCK), z=Math.floor(oz/BLOCK);
   const sx=Math.sign(dx)||1, sy=Math.sign(dy)||1, sz=Math.sign(dz)||1;
   const tdx=Math.abs(BLOCK/(dx||1e-9)), tdy=Math.abs(BLOCK/(dy||1e-9)), tdz=Math.abs(BLOCK/(dz||1e-9));
@@ -1235,7 +1243,8 @@ function raycast(ox,oy,oz, dx,dy,dz, maxD, wantNum){
         const tc = vx*dx+vy*dy+vz*dz;
         if(tc>0.5 && tc<maxD){
           const px=dx*tc-vx, py=dy*tc-vy, pz=dz*tc-vz;
-          if(px*px+py*py+pz*pz <= NUM_R*NUM_R)
+          const nr = numR || NUM_R;
+          if(px*px+py*py+pz*pz <= nr*nr)
             return {hit:true, kind:'num', x,y,z, t:tc};
         }
       }
@@ -1804,7 +1813,14 @@ function hitNumber(x,y,z){
     else abrir.push([j,X,Y,Z]);
   }
 
-  if(marcadas !== need || !abrir.length){ pingNumber(x,y,z); return 0; }
+  /* Left click on a number is the destructive half: it only does anything when
+     the count already adds up. Lighting the neighbours up moved to right
+     click, so a shot that proves nothing now just rings off the digit. */
+  if(marcadas !== need || !abrir.length){
+    G.numHit[idx(x,y,z)] = tGlobal;
+    snd.clink();
+    return 0;
+  }
 
   // the count adds up: spread
   for(const [j,X,Y,Z] of abrir){
@@ -1844,11 +1860,16 @@ function pingNumber(x,y,z){
   return n;
 }
 
+/* Right click does two things, and which one depends on what you are pointing
+   at. On a block it plants or lifts a flag. On a number it lights up the
+   blocks that number is counting — the look-but-don't-touch action, which is
+   why it belongs on the button that never breaks anything. */
 function mark(){
   if(G.state!=='play') return;
   G.hint = null; G.beacon = null;
   const r=aimRay();
-  const hit = raycast(r.ox,r.oy,r.oz, r.dx,r.dy,r.dz, REACH, false);
+  const hit = raycast(r.ox,r.oy,r.oz, r.dx,r.dy,r.dz, REACH, true, MARK_NUM_R);
+  if(hit.hit && hit.kind==='num'){ pingNumber(hit.x,hit.y,hit.z); return; }
   if(!hit.hit || hit.kind!=='block') return;
   const i=idx(hit.x,hit.y,hit.z);
   if(G.st[i]===AIR) return;
