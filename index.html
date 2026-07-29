@@ -3128,8 +3128,14 @@ function frame(now){
       const [gx,gy,gz]=cellXYZ(g.i);
       const age=tGlobal-g.born;
       // a hard pop on arrival, then it settles and breathes
-      const pop = age<0.30 ? 1.0+0.55*(1-age/0.30)*(g.big?1.6:1) : 1.0;
-      const s = BLOCK*0.90*pop;
+      const pop = age<0.30 ? 1.0+0.45*(1-age/0.30)*(g.big?1.5:1) : 1.0;
+      /* A ghost you are standing next to fills the screen and blinds you, so
+         it shrinks away as you close on it — by the time you are inside the
+         cell there is nothing left to see through. */
+      const dc = Math.hypot((gx+0.5)*BLOCK-camX, (gy+0.5)*BLOCK-camY, (gz+0.5)*BLOCK-camZ);
+      const near = clamp((dc - BLOCK*0.55) / (BLOCK*1.7), 0, 1);
+      if(near <= 0.02) continue;
+      const s = BLOCK*0.86*pop*near;
       const o = n*CUBE_STRIDE;
       composeAA(d,o, (gx+0.5)*BLOCK,(gy+0.5)*BLOCK,(gz+0.5)*BLOCK, s,s,s);
       d[o+16]=g.col[0]; d[o+17]=g.col[1]; d[o+18]=g.col[2];
@@ -3139,7 +3145,7 @@ function frame(now){
     }
     ghostB.count=n;
     if(n){
-      const pulse = 0.30 + 0.17*Math.sin(tGlobal*6.5);
+      const pulse = 0.20 + 0.12*Math.sin(tGlobal*6.5);
       gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       gl.depthMask(false); gl.disable(gl.CULL_FACE);
       gl.uniform1f(uC.alpha, pulse);
