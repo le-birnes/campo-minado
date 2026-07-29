@@ -1,11 +1,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Campo Minado — Três Planos</title>
+<title>Minesweeper — Three Planes</title>
 
 <style>
 /* ============================================================
-   CAMPO MINADO / TRÊS PLANOS
-   Paleta: areia, ocre, brasa, ouro, violeta arcano, fuligem
+   MINESWEEPER / THREE PLANES
+   Palette: sand, ochre, ember, gold, arcane violet, soot
    ============================================================ */
 :root{
   --sand:#d9a44c;
@@ -29,7 +29,7 @@ html,body{margin:0;padding:0;height:100%;background:var(--soot);overflow:hidden;
 #wrap{position:fixed;inset:0;overflow:hidden;background:var(--soot);}
 canvas#gl{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:none;}
 
-/* ---------- aura da entidade (presença, não personagem) ---------- */
+/* ---------- the entity's aura (a presence, not a character) ---------- */
 #aura{
   position:absolute;inset:-15%;pointer-events:none;z-index:2;
   background:
@@ -49,7 +49,7 @@ canvas#gl{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:
      display:grid;grid-template-columns:1fr auto 1fr;grid-template-rows:auto 1fr auto;
      gap:8px;opacity:0;transition:opacity .45s ease;}
 #hud.on{opacity:1;}
-/* véu escuro nas bordas: sem ele o HUD âmbar some no arenito âmbar */
+/* dark veil at the edges: without it the amber HUD vanishes into amber sandstone */
 #hud::before,#hud::after{content:"";position:absolute;left:0;right:0;height:118px;pointer-events:none;z-index:-1;}
 #hud::before{top:0;background:linear-gradient(180deg,rgba(9,5,4,.78),rgba(9,5,4,0));}
 #hud::after{bottom:0;background:linear-gradient(0deg,rgba(9,5,4,.62),rgba(9,5,4,0));}
@@ -71,7 +71,7 @@ canvas#gl{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:
 #planes b{color:var(--sand);font-weight:400;}
 #planes.off b{color:#5b4736;text-decoration:line-through;}
 
-/* barra de progresso — quantos blocos seguros restam */
+/* progress bar — how many safe blocks are left */
 #bar{grid-column:1/-1;grid-row:3;height:3px;background:rgba(255,255,255,.07);position:relative;align-self:end;}
 #bar i{position:absolute;inset:0 auto 0 0;width:0%;background:linear-gradient(90deg,var(--ochre),var(--sand),var(--gold));
        transition:width .25s ease;}
@@ -91,8 +91,8 @@ canvas#gl{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:
 #cross{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:6;pointer-events:none;
        width:42px;height:42px;opacity:0;transition:opacity .3s;}
 #cross.on{opacity:1;}
-/* contorno escuro sólido: a mira precisa aparecer tanto no arenito claro
-   quanto no fundo escuro da caverna */
+/* solid dark outline: the crosshair has to read against pale sandstone
+   as well as against the dark back of the cave */
 #cross .a,#cross .b{position:absolute;background:var(--sand-hi);
                     outline:1px solid rgba(0,0,0,.8);
                     box-shadow:0 0 7px rgba(255,150,60,.85);}
@@ -147,7 +147,7 @@ button:focus-visible{box-shadow:0 0 0 3px rgba(255,209,102,.35);}
 .opt{display:flex;align-items:center;gap:14px;margin-top:14px;font-size:clamp(10px,1.35vmin,13px);color:#bda488;}
 .opt input[type=range]{accent-color:var(--sand);width:150px;}
 
-/* fim de jogo — brega e faiscante, de propósito */
+/* game over — corny and flashy, on purpose */
 #over .panel{text-align:center;}
 #over h1{animation:jolt .16s steps(2) infinite;}
 @keyframes jolt{0%{transform:translate(0,0)}50%{transform:translate(-3px,2px)}100%{transform:translate(2px,-2px)}}
@@ -186,108 +186,108 @@ button:focus-visible{box-shadow:0 0 0 3px rgba(255,209,102,.35);}
 
   <div id="hud">
     <div id="tl">
-      <div class="stat"><span class="k">Minas restantes</span><span class="v mines" id="sMines">0</span></div>
-      <div class="stat"><span class="k">Blocos seguros</span><span class="v left" id="sLeft">0</span></div>
+      <div class="stat"><span class="k">Mines left</span><span class="v mines" id="sMines">0</span></div>
+      <div class="stat"><span class="k">Safe blocks</span><span class="v left" id="sLeft">0</span></div>
     </div>
-    <div id="planes">Setas de plano <b id="sPlanes">ligadas</b></div>
+    <div id="planes">Plane arrows <b id="sPlanes">on</b></div>
     <div id="tr">
-      <div class="stat"><span class="k">Ouro</span><span class="v gold" id="sGold">0</span></div>
-      <div class="stat"><span class="k">Tempo</span><span class="v time" id="sTime">0:00</span></div>
+      <div class="stat"><span class="k">Gold</span><span class="v gold" id="sGold">0</span></div>
+      <div class="stat"><span class="k">Time</span><span class="v time" id="sTime">0:00</span></div>
     </div>
-    <div id="tip">Mire num bloco e atire. Acerte um número para acender o que ele conta — se as minas dele já estiverem marcadas, o tiro espalha e abre o resto.</div>
+    <div id="tip">Aim at a block and shoot. Hit a number to light up what it counts — if its mines are already flagged, the shot spreads and clears the rest.</div>
     <div id="charge"><i id="chargeFill"></i></div>
     <div id="bar"><i id="barFill"></i></div>
   </div>
 
   <div id="toast" role="status" aria-live="polite"></div>
-  <div id="needlock">Clique na tela para travar o mouse</div>
+  <div id="needlock">Click the screen to lock the mouse</div>
 
   <!-- ========== MENU ========== -->
   <div class="screen on" id="menu">
     <div class="panel">
-      <p class="eyebrow">Alguém te trancou aqui</p>
-      <h1>Campo Minado<em>Três Planos</em></h1>
-      <p class="lede">Você está <b>dentro</b> do tabuleiro. Areia acima, areia abaixo, areia em volta —
-        três camadas de blocos e um cajado. Cada bloco encosta em <b>26 outros</b> (3×3×3 menos ele mesmo),
-        então o número que aparece conta minas no seu plano, no teto <b>e</b> no chão.
-        Uma seta pra cima diz que há mina em algum dos 9 blocos do teto. Pra baixo, no chão.
-        Erre uma vez e a caverna inteira vira vidro.</p>
+      <p class="eyebrow">Someone locked you in here</p>
+      <h1>Minesweeper<em>Three Planes</em></h1>
+      <p class="lede">You are <b>inside</b> the board. Sand above, sand below, sand all around —
+        three layers of blocks and a staff. Every block touches <b>26 others</b> (3×3×3 minus itself),
+        so the number you uncover counts mines in your own plane, in the ceiling <b>and</b> in the floor.
+        An arrow pointing up means a mine sits in one of the 9 blocks overhead. Pointing down, in the floor.
+        Get it wrong once and the whole cave turns to glass.</p>
 
       <div class="rule"></div>
 
       <div class="diffs" role="group" aria-label="Dificuldade">
-        <button data-d="0" class="sel">Aprendiz</button>
-        <button data-d="1">Feiticeiro</button>
-        <button data-d="2">Arcano</button>
+        <button data-d="0" class="sel">Apprentice</button>
+        <button data-d="1">Sorcerer</button>
+        <button data-d="2">Arcane</button>
       </div>
       <p class="diffnote" id="dNote"></p>
 
       <div class="rule"></div>
 
       <div class="keys">
-        <div><kbd>W A S D</kbd>andar</div>
-        <div><kbd>Shift</kbd>correr</div>
-        <div><kbd>Espaço</kbd>pular · segure 0,5 s no ar pra subir mais</div>
-        <div><kbd>Mouse</kbd>mirar</div>
-        <div><kbd>Botão esq.</kbd>destruir bloco · acertar número acende os vizinhos<br>
-          (com as minas todas marcadas, o tiro espalha e abre o resto)</div>
-        <div><kbd>Botão dir.</kbd>marcar mina</div>
-        <div><kbd>T</kbd>setas de plano · <kbd>I</kbd>inverter mouse</div>
-        <div><kbd>M</kbd>som · <kbd>R</kbd>recomeçar · <kbd>Esc</kbd>pausa</div>
+        <div><kbd>W A S D</kbd>move</div>
+        <div><kbd>Shift</kbd>sprint</div>
+        <div><kbd>Space</kbd>jump · hold 0.5 s midair to rise higher</div>
+        <div><kbd>Mouse</kbd>aim</div>
+        <div><kbd>Left click</kbd>break a block · hitting a number lights its neighbors<br>
+          (with all its mines flagged, the shot spreads and clears the rest)</div>
+        <div><kbd>Right click</kbd>flag a mine</div>
+        <div><kbd>T</kbd>plane arrows · <kbd>I</kbd>invert mouse</div>
+        <div><kbd>M</kbd>sound · <kbd>R</kbd>restart · <kbd>Esc</kbd>pause</div>
       </div>
 
       <div class="opt">
-        <label for="sens">Sensibilidade</label>
+        <label for="sens">Sensitivity</label>
         <input type="range" id="sens" min="4" max="40" value="14">
         <span id="sensV" style="font-variant-numeric:tabular-nums">1.4</span>
       </div>
       <div class="opt">
-        <label class="chk" for="inv"><input type="checkbox" id="inv">Inverter o eixo vertical do mouse</label>
+        <label class="chk" for="inv"><input type="checkbox" id="inv">Invert vertical mouse axis</label>
       </div>
 
       <div class="rule"></div>
-      <button class="go" id="btnStart">Entrar na caverna</button>
+      <button class="go" id="btnStart">Enter the cave</button>
     </div>
   </div>
 
-  <!-- ========== PAUSA ========== -->
+  <!-- ========== PAUSE ========== -->
   <div class="screen" id="pause">
     <div class="panel">
-      <p class="eyebrow">A caverna espera</p>
-      <h1 style="font-size:clamp(30px,6.4vmin,64px)">Pausa</h1>
+      <p class="eyebrow">The cave waits</p>
+      <h1 style="font-size:clamp(30px,6.4vmin,64px)">Paused</h1>
       <div class="opt">
-        <label for="sens2">Sensibilidade</label>
+        <label for="sens2">Sensitivity</label>
         <input type="range" id="sens2" min="4" max="40" value="14">
         <span id="sensV2" style="font-variant-numeric:tabular-nums">1.4</span>
       </div>
       <div class="opt">
-        <label class="chk" for="inv2"><input type="checkbox" id="inv2">Inverter o eixo vertical do mouse</label>
+        <label class="chk" for="inv2"><input type="checkbox" id="inv2">Invert vertical mouse axis</label>
       </div>
       <div class="rule"></div>
       <div class="diffs">
-        <button class="go" id="btnResume">Continuar</button>
-        <button id="btnRestart">Recomeçar</button>
+        <button class="go" id="btnResume">Resume</button>
+        <button id="btnRestart">Restart</button>
         <button id="btnMenu">Menu</button>
       </div>
     </div>
   </div>
 
-  <!-- ========== FIM ========== -->
+  <!-- ========== GAME OVER ========== -->
   <div class="screen" id="over">
     <div class="panel">
-      <p class="eyebrow" id="overEye">Plano rompido</p>
-      <h1 id="overTitle">Você virou areia</h1>
+      <p class="eyebrow" id="overEye">Plane breached</p>
+      <h1 id="overTitle">You are sand now</h1>
       <p class="lede" id="overText" style="margin-left:auto;margin-right:auto"></p>
       <div class="rule"></div>
       <div class="diffs" style="justify-content:center">
-        <button class="go" id="btnAgain">De novo</button>
+        <button class="go" id="btnAgain">Again</button>
         <button id="btnMenu2">Menu</button>
       </div>
     </div>
   </div>
 
   <div id="flash"></div>
-  <div id="nogl">Seu navegador não abriu o WebGL 2.<br>Tente Chrome, Edge ou Firefox atualizados, com aceleração de hardware ligada.</div>
+  <div id="nogl">Your browser could not start WebGL 2.<br>Try an up-to-date Chrome, Edge or Firefox with hardware acceleration enabled.</div>
 </div>
 
 <script>
@@ -295,40 +295,40 @@ button:focus-visible{box-shadow:0 0 0 3px rgba(255,209,102,.35);}
 (function(){
 
 /* ==========================================================================
-   0. CONSTANTES DO MUNDO — proporções reais
+   0. WORLD CONSTANTS — real proportions
    ========================================================================== */
 const BLOCK   = 4.0;    // aresta do cubo, metros
 const P_H     = 2.0;    // altura do personagem
-const P_R     = 0.52;   // raio de colisão
-const EYE     = 1.72;   // altura dos olhos
-const GRAV    = 20.0;   // m/s² (pesado, pra pulo não flutuar)
-const JUMP_LO = 6.0;    // ápice do pulo curto = 3× a altura
-const JUMP_HI = 10.0;   // ápice do pulo carregado = 5× a altura
+const P_R     = 0.52;   // collision radius
+const EYE     = 1.72;   // eye height
+const GRAV    = 20.0;   // m/s^2 (heavy, so jumps do not float)
+const JUMP_LO = 6.0;    // short jump apex = 3x your height
+const JUMP_HI = 10.0;   // sustained jump apex = 5x your height
 const V_LO    = Math.sqrt(2*GRAV*JUMP_LO);
-const COYOTE  = 0.12;   // tolerância depois de sair da borda
-const JUMP_BUF= 0.18;   // tolerância antes de encostar no chão
+const COYOTE  = 0.12;   // grace after stepping off an edge
+const JUMP_BUF= 0.18;   // grace before touching down
 const SPD_RUN = 5.8;    // corrida de humano de 2 m
 const SPD_SPR = 8.2;
-const CHARGE_T= 0.50;   // segundos de espaço segurado
+const CHARGE_T= 0.50;   // seconds of space held
 const REACH   = 13*BLOCK;
-const NUM_R   = 0.45;   // raio de acerto do número: menor que o glifo (~0.52),
-                        // senão o número rouba tiros mirados no bloco atrás
-const ECHO_DUR= 2.2;    // duração do eco nos blocos vizinhos
-const FUSE_T  = 0.85;   // a mina acertada brilha antes de levar tudo
+const NUM_R   = 0.45;   // number hit radius: smaller than the glyph (~0.52),
+                        // or the number steals shots aimed at the block behind
+const ECHO_DUR= 2.2;    // echo duration on neighboring blocks
+const FUSE_T  = 0.85;   // the hit mine glows before taking everything
 
-/* Densidade tem piso: com 26 vizinhos, P(bloco zero) = (1-d)^26, e a
-   percolação de sítio nessa vizinhança vira em ~9,8%. Abaixo de ~10% de
-   minas o primeiro tiro abre a caverna inteira de uma vez. */
+/* Mine density has a floor: with 26 neighbors, P(zero block) = (1-d)^26,
+   and site percolation at that coordination turns over near 9.8%. Below
+   ~10% mines the first shot opens the entire cave in one go. */
 const DIFFS = [
-  {name:"Aprendiz",   nx:10, nz:10, ny:3, dens:0.105},
-  {name:"Feiticeiro", nx:12, nz:12, ny:3, dens:0.130},
-  {name:"Arcano",     nx:14, nz:14, ny:3, dens:0.160}
+  {name:"Apprentice", nx:10, nz:10, ny:3, dens:0.105},
+  {name:"Sorcerer",   nx:12, nz:12, ny:3, dens:0.130},
+  {name:"Arcane",     nx:14, nz:14, ny:3, dens:0.160}
 ];
 
 const SOLID=0, AIR=1, MARKED=2;
 
 /* ==========================================================================
-   1. MATEMÁTICA
+   1. MATH
    ========================================================================== */
 const m4 = {
   persp(fovy, asp, n, f){
@@ -349,7 +349,7 @@ function viewFrom(px,py,pz, yaw, pitch, out){
   out[3]=0;  out[7]=0;  out[11]=0;  out[15]=1;
   return {fx,fy,fz,rx,ry,rz,ux,uy,uz};
 }
-// matriz de instância: translação + rotação ZYX + escala, coluna-maior
+// instance matrix: translation + ZYX rotation + scale, column-major
 function compose(d,o, px,py,pz, rx,ry,rz, sx,sy,sz){
   const cx=Math.cos(rx),sx_=Math.sin(rx),cy=Math.cos(ry),sy_=Math.sin(ry),cz=Math.cos(rz),sz_=Math.sin(rz);
   const r00=cz*cy,             r01=cz*sy_*sx_-sz_*cx, r02=cz*sy_*cx+sz_*sx_;
@@ -380,7 +380,7 @@ function hsl2rgb(h,s,l){
 }
 
 /* ==========================================================================
-   2. WEBGL — contexto e programas
+   2. WEBGL — context and programs
    ========================================================================== */
 const canvas = document.getElementById('gl');
 const gl = canvas.getContext('webgl2', {antialias:true, alpha:false, powerPreference:'high-performance'});
@@ -400,7 +400,7 @@ function prog(vs, fs){
   return p;
 }
 
-/* ---- cubos (mundo, escombros, cajado) ---- */
+/* ---- cubes (world, debris, staff) ---- */
 const VS_CUBE = `#version 300 es
 precision highp float;
 layout(location=0) in vec3 aPos;
@@ -451,25 +451,25 @@ void main(){
 
   /* --- luz em degraus (cel) --- */
   float ndl  = max(dot(N, uSun), 0.0);
-  /* O sol vem de cima, então quase toda parede cai no degrau mais baixo.
-     Piso alto o bastante pra areia continuar areia na sombra. */
+  /* The sun comes from above, so nearly every wall lands in the lowest band.
+     Floor it high enough that sand still reads as sand in shadow. */
   float band = ndl > 0.70 ? 1.0 : (ndl > 0.33 ? 0.78 : 0.55);
-  /* Exposição calibrada pra somar ~1.0 no pior caso (face clara, virada pro
-     sol, encostada na lanterna). Acima disso o degrau some no branco. */
+  /* Exposure calibrated to sum to ~1.0 in the worst case (pale face, turned
+     to the sun, right up against the lantern). Past that the bands blow out. */
   vec3 sky = vec3(0.46,0.56,0.78), gnd = vec3(0.66,0.42,0.24);
   vec3 amb = mix(gnd, sky, N.y*0.5+0.5) * 0.36;
   vec3 lit = base * (amb + vec3(1.25,1.02,0.72) * band * 0.54);
 
-  /* --- lanterna do cajado, também em degraus --- */
+  /* --- staff lantern, banded as well --- */
   float d = distance(vW, uCam);
   float att = 1.0/(1.0 + d*d*0.0042);
   att = floor(att*5.0)/5.0;
   lit += base * vec3(1.0,0.70,0.34) * att * 0.20;
 
-  /* --- emissivo (cristais, minas, ouro) --- */
+  /* --- emissive (crystals, mines, gold) --- */
   lit = mix(lit, base*1.15 + vec3(0.18,0.09,0.03), vEmis);
 
-  /* --- runa de marcação --- */
+  /* --- flag rune --- */
   float pulse = 0.5 + 0.5*sin(uTime*5.2 + vSeed*6.0);
   lit = mix(lit, vec3(0.66,0.34,0.98)*(0.55+0.55*pulse), vMark*0.72);
 
@@ -481,8 +481,8 @@ void main(){
   lit = mix(outc, lit, edge);
   lit += vHover * 0.16 * vec3(1.0,0.85,0.55);
 
-  /* eco: os blocos que o número atingido está contando. Ciano nas bordas,
-     bem diferente do roxo chapado de bloco marcado como mina. */
+  /* Echo: the blocks the number you hit is counting. Cyan along the edges,
+     clearly different from the flat purple of a block flagged as a mine. */
   float ep = 0.55 + 0.45*sin(uTime*8.5);
   lit += vec3(0.28,0.92,1.0) * vEcho * (0.20 + 0.55*(1.0-edge)) * (0.60 + 0.40*ep);
 
@@ -490,7 +490,7 @@ void main(){
   frag = vec4(mix(lit, uFog, clamp(f,0.0,1.0)), 1.0);
 }`;
 
-/* ---- billboards (números, setas, brilhos) ---- */
+/* ---- billboards (numbers, arrows, glows) ---- */
 const VS_BB = `#version 300 es
 precision highp float;
 layout(location=0) in vec2 aCorner;
@@ -519,7 +519,7 @@ uniform sampler2D uTex;
 out vec4 frag;
 void main(){
   vec4 t = texture(uTex, vUV);
-  /* glifo corta cedo pra não gravar halo no z-buffer; brilho fica macio */
+  /* glyph cuts early so it writes no halo into the z-buffer; glow stays soft */
   if(t.a < (vMode > 0.5 ? 0.02 : 0.34)) discard;
   if(vMode > 0.5){
     frag = vec4(vCol.rgb * t.a * vCol.a, t.a * vCol.a);
@@ -567,7 +567,7 @@ function buildCube(){
 }
 const CUBE = buildCube();
 
-const CUBE_STRIDE = 23; // mat4(16) + color(3) + params(4: seed, emis, marca, eco)
+const CUBE_STRIDE = 23; // mat4(16) + color(3) + params(4: seed, emis, flag, echo)
 function makeCubeBatch(max){
   const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
   const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb);
@@ -628,7 +628,7 @@ function drawBBs(b){
 }
 
 /* ==========================================================================
-   3. ATLAS DE GLIFOS  (números 0–26, setas, mina, runa, brilho, moeda)
+   3. GLYPH ATLAS  (numbers 0-26, arrows, mine, rune, glow, coin)
    canal R = preenchimento, canal G = contorno
    ========================================================================== */
 const T_UP=27, T_DOWN=28, T_MINE=29, T_RUNE=30, T_GLOW=31, T_COIN=32, T_SPARK=33;
@@ -641,7 +641,7 @@ function buildAtlas(){
   const at = i => [ (i%ATLAS_N)*TILE, Math.floor(i/ATLAS_N)*TILE ];
   const FILL='#ff0000', LINE='#00ff00';
 
-  // números
+  // numbers
   for(let n=0;n<=26;n++){
     const [ox,oy]=at(n);
     x.save(); x.translate(ox,oy);
@@ -653,7 +653,7 @@ function buildAtlas(){
     x.fillStyle=FILL; x.fillText(s,0,0);
     x.restore();
   }
-  // setas
+  // arrows
   const arrow=(i,dir)=>{
     const [ox,oy]=at(i); x.save(); x.translate(ox+TILE/2, oy+TILE/2); x.scale(1,dir);
     x.beginPath();
@@ -664,7 +664,7 @@ function buildAtlas(){
   };
   arrow(T_UP,1); arrow(T_DOWN,-1);
 
-  // mina — esfera cravada
+  // mine — spiked sphere
   {
     const [ox,oy]=at(T_MINE); x.save(); x.translate(ox+TILE/2, oy+TILE/2);
     x.lineJoin='round'; x.lineCap='round';
@@ -678,7 +678,7 @@ function buildAtlas(){
     x.beginPath(); x.arc(0,0,34,0,7); x.fill();
     x.restore();
   }
-  // runa de marcação — losango cortado
+  // flag rune — cut diamond
   {
     const [ox,oy]=at(T_RUNE); x.save(); x.translate(ox+TILE/2, oy+TILE/2);
     x.beginPath(); x.moveTo(0,-48); x.lineTo(40,0); x.lineTo(0,48); x.lineTo(-40,0); x.closePath();
@@ -686,7 +686,7 @@ function buildAtlas(){
     x.fillStyle=FILL; x.fill();
     x.restore();
   }
-  // brilho radial (só alfa importa)
+  // radial glow (only alpha matters)
   {
     const [ox,oy]=at(T_GLOW);
     const g = x.createRadialGradient(ox+TILE/2, oy+TILE/2, 0, ox+TILE/2, oy+TILE/2, TILE/2);
@@ -695,13 +695,13 @@ function buildAtlas(){
     g.addColorStop(1,'rgba(255,255,255,0)');
     x.fillStyle=g; x.fillRect(ox,oy,TILE,TILE);
   }
-  // moeda
+  // coin
   {
     const [ox,oy]=at(T_COIN); x.save(); x.translate(ox+TILE/2, oy+TILE/2);
     x.beginPath(); x.arc(0,0,40,0,7); x.lineWidth=16; x.strokeStyle=LINE; x.stroke();
     x.fillStyle=FILL; x.fill(); x.restore();
   }
-  // faísca
+  // spark
   {
     const [ox,oy]=at(T_SPARK); x.save(); x.translate(ox+TILE/2, oy+TILE/2); x.rotate(Math.PI/4);
     x.fillStyle=FILL; x.fillRect(-26,-26,52,52); x.restore();
@@ -712,8 +712,8 @@ const atlasTex = gl.createTexture();
 {
   const c = buildAtlas();
   gl.bindTexture(gl.TEXTURE_2D, atlasTex);
-  // uvOf() conta v de baixo pra cima; a tela do canvas conta de cima pra baixo.
-  // Sem este flip cada tile lê a linha espelhada do atlas (e os números somem).
+  // uvOf() counts v bottom-up; the canvas counts top-down.
+  // Without this flip every tile reads the mirrored atlas row (and numbers vanish).
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
   gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,c);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
@@ -729,8 +729,8 @@ function uvOf(i){
 }
 const UVS = []; for(let i=0;i<64;i++) UVS.push(uvOf(i));
 
-/* rampa de cor dos números: ciano (poucas minas) → magenta (muitas).
-   O intervalo útil é 1–12; acima disso satura no extremo quente. */
+/* Number color ramp: cyan (few mines) to magenta (many).
+   The useful range is 1-12; past that it saturates at the hot end. */
 const NUMCOL = [];
 for(let n=0;n<=26;n++){
   if(n===0){ NUMCOL.push([0.62,0.62,0.62]); continue; }
@@ -739,20 +739,20 @@ for(let n=0;n<=26;n++){
 }
 
 /* ==========================================================================
-   4. MATERIAIS DA CAVERNA
+   4. CAVE MATERIALS
    ========================================================================== */
 const MATS = [
-  {c:[0.86,0.64,0.32]}, // arenito
-  {c:[0.94,0.75,0.42]}, // areia clara
-  {c:[0.72,0.44,0.20]}, // argila ocre
-  {c:[0.80,0.55,0.26]}, // arenito escuro
-  {c:[0.90,0.70,0.28], gold:true} // veio de ouro
+  {c:[0.86,0.64,0.32]}, // sandstone
+  {c:[0.94,0.75,0.42]}, // pale sand
+  {c:[0.72,0.44,0.20]}, // ochre clay
+  {c:[0.80,0.55,0.26]}, // dark sandstone
+  {c:[0.90,0.70,0.28], gold:true} // gold vein
 ];
 const BEDROCK   = [0.19,0.14,0.13];
 const BEDCRYST  = [0.82,0.54,0.19];
 
 /* ==========================================================================
-   5. ESTADO DO JOGO
+   5. GAME STATE
    ========================================================================== */
 const G = {
   state:'menu',          // menu | play | pause | over
@@ -773,7 +773,7 @@ const IN = { f:0,b:0,l:0,r:0, sprint:false,
 function idx(x,y,z){ return (y*G.nz + z)*G.nx + x; }
 function inside(x,y,z){ return x>=0&&y>=0&&z>=0&&x<G.nx&&y<G.ny&&z<G.nz; }
 function isSolidCell(x,y,z){
-  if(!inside(x,y,z)) return true;             // fora = rocha-mãe
+  if(!inside(x,y,z)) return true;             // outside = bedrock
   return G.st[idx(x,y,z)] !== AIR;
 }
 
@@ -790,9 +790,9 @@ function genWorld(d){
   const safe = new Set();
   for(let dx=-1;dx<=1;dx++) for(let dz=-1;dz<=1;dz++) safe.add(idx(cx+dx, cy, cz+dz));
 
-  /* Sorteia até que nenhum bloco da câmara inicial marque zero. Um zero ali
-     dispara a inundação já no nascimento e às vezes abre 3/4 da caverna de
-     uma vez — o tabuleiro é condicionado à abertura, como no campo minado 2D. */
+  /* Reroll until no block of the starting chamber reads zero. A zero there
+     fires the flood fill at birth and sometimes opens 3/4 of the cave at
+     once: the board is conditioned on the opening, as in 2D minesweeper. */
   const wanted = Math.round(N*D.dens);
   for(let attempt=1; ; attempt++){
     G.mine.fill(0);
@@ -824,7 +824,7 @@ function genWorld(d){
   G.fuse=0; G.boomCell=null;
   G.elapsed=0; G.t0=performance.now();
 
-  // câmara inicial: 3×3 escavado na camada do meio
+  // starting chamber: 3x3 carved out of the middle layer
   for(const i of safe) revealAt(i, true);
 
   P.x=(cx+0.5)*BLOCK; P.z=(cz+0.5)*BLOCK; P.y=cy*BLOCK;
@@ -834,7 +834,7 @@ function genWorld(d){
   G.dirty=true;
 }
 
-/* revela com inundação nos zeros (26 vizinhos) */
+/* reveals with flood fill through zeros (26 neighbors) */
 function revealAt(start, silent){
   if(G.st[start]===AIR) return;
   const stack=[start]; let opened=0;
@@ -860,7 +860,7 @@ function revealAt(start, silent){
   return opened;
 }
 
-/* setas de plano: há mina em algum dos 9 blocos acima / abaixo? */
+/* plane arrows: is there a mine in any of the 9 blocks above / below? */
 function planeFlags(x,y,z){
   let up=false, dn=false;
   for(let dz=-1;dz<=1;dz++) for(let dx=-1;dx<=1;dx++){
@@ -871,7 +871,7 @@ function planeFlags(x,y,z){
 }
 
 /* ==========================================================================
-   6. RAIO — DDA por vóxel
+   6. RAY — voxel DDA
    ========================================================================== */
 function raycast(ox,oy,oz, dx,dy,dz, maxD, wantNum){
   let x=Math.floor(ox/BLOCK), y=Math.floor(oy/BLOCK), z=Math.floor(oz/BLOCK);
@@ -883,8 +883,8 @@ function raycast(ox,oy,oz, dx,dy,dz, maxD, wantNum){
   for(let s=0;s<400;s++){
     if(isSolidCell(x,y,z))
       return {hit:true, kind: inside(x,y,z)?'block':'bedrock', x,y,z, t};
-    /* número flutuando nesta célula de ar: teste de esfera contra o centro.
-       O raio bate com o tamanho do glifo, então mirar ao lado pega o bloco. */
+    /* A number floating in this air cell: sphere test against its center.
+       The radius matches the glyph, so aiming beside it still hits the block. */
     if(wantNum && inside(x,y,z)){
       const i=idx(x,y,z);
       if(G.cnt[i]>0 && !G.mine[i]){
@@ -905,10 +905,10 @@ function raycast(ox,oy,oz, dx,dy,dz, maxD, wantNum){
 }
 
 /* ==========================================================================
-   7. PARTÍCULAS
+   7. PARTICLES
    ========================================================================== */
-const particles=[];  // cubos com rotação
-const sprites=[];    // brilhos aditivos
+const particles=[];  // cubes with rotation
+const sprites=[];    // additive glows
 const dust=[];
 const MAXP=2600, MAXS=1600;
 
@@ -947,7 +947,7 @@ function spawnCrumble(x,y,z,mat){
 }
 
 /* ==========================================================================
-   8. ÁUDIO — tudo sintetizado
+   8. AUDIO — everything synthesized
    ========================================================================== */
 const snd = (function(){
   let ac=null, master=null, drone=null;
@@ -956,7 +956,7 @@ const snd = (function(){
     try{
       ac = new (window.AudioContext||window.webkitAudioContext)();
       master = ac.createGain(); master.gain.value=0.5; master.connect(ac.destination);
-      // vento surdo da caverna
+      // dull cave wind
       const n = ac.createBufferSource(), buf = ac.createBuffer(1, ac.sampleRate*3, ac.sampleRate);
       const d = buf.getChannelData(0);
       for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*0.5;
@@ -1064,14 +1064,14 @@ const snd = (function(){
 })();
 
 /* ==========================================================================
-   9. LOTES DE DESENHO
+   9. DRAW BATCHES
    ========================================================================== */
 const worldB  = makeCubeBatch(16*5*16 + 64);
 const debris  = makeCubeBatch(MAXP);
 const viewB   = makeCubeBatch(48);
 const glyphB  = makeBBBatch(2600);
 const glowB   = makeBBBatch(MAXS + 500);
-const boomB   = makeBBBatch(4);   // a mina acertada, por cima de tudo
+const boomB   = makeBBBatch(4);   // the hit mine, drawn over everything
 
 function rebuildWorld(){
   const d = worldB.data; let n=0;
@@ -1082,7 +1082,7 @@ function rebuildWorld(){
     d[o+19]=seedv;  d[o+20]=emis;   d[o+21]=mark;  d[o+22]=echo||0;
     n++;
   };
-  // rocha-mãe: casca de um bloco em volta de tudo
+  // bedrock: a one-block shell around everything
   for(let y=-1;y<=G.ny;y++) for(let z=-1;z<=G.nz;z++) for(let x=-1;x<=G.nx;x++){
     if(inside(x,y,z)) continue;
     const s=(x*73856093 ^ y*19349663 ^ z*83492791)>>>0;
@@ -1090,7 +1090,7 @@ function rebuildWorld(){
     put((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, BLOCK,
         cryst?BEDCRYST:BEDROCK, (s%1000)/1000, cryst?1:0, 0, 0);
   }
-  // blocos do quebra-cabeça
+  // puzzle blocks
   for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
     const i=idx(x,y,z);
     if(G.st[i]===AIR) continue;
@@ -1112,25 +1112,25 @@ function rebuildWorld(){
 }
 
 /* ==========================================================================
-   10. CAJADO (view model) — 13% do canto inferior esquerdo
+   10. STAFF (view model) — 13% of the lower-left frame
    ========================================================================== */
-/* Peças no espaço LOCAL do cajado: eixo +Y, origem no centro da haste,
-   unidade = meia-altura da tela. Uma única matriz global põe tudo em cena,
-   então as peças não têm como se soltar umas das outras. */
+/* Parts in the staff's LOCAL space: +Y axis, origin at the center of the
+   shaft, unit = half the screen height. A single global matrix places the
+   whole thing, so the parts have no way to come apart from each other. */
 const STAFF = [
   // x, y, z,  rx, ry, rz,  sx, sy, sz,  cor, emissivo
-  [0,    0,    0,     0,0,0,          0.18,1.54,0.18, [0.30,0.19,0.115], 0], // haste
-  [0,   -0.20, 0,     0,0,0,          0.23,0.10,0.23, [0.62,0.42,0.18],  0], // anel baixo
-  [0,    0.28, 0,     0,0,0,          0.23,0.10,0.23, [0.62,0.42,0.18],  0], // anel alto
-  [0,    0.66, 0,     0,0,0,          0.25,0.20,0.25, [0.38,0.24,0.14],  0], // coroa
-  [0,    0.85, 0,     0.60,0.80,0.30, 0.235,0.235,0.235,[1.00,0.74,0.30], 1], // cristal
-  [0,    0.85, 0,    -0.40,0.30,0.90, 0.150,0.150,0.150,[1.00,0.94,0.72], 1], // núcleo
-  [0,   -0.42, 0,     0,0,0,          0.44,0.34,0.40, [0.27,0.19,0.18],  0], // punho
-  [0.02,-0.62, 0.02,  0,0,0,          0.36,0.26,0.35, [0.31,0.22,0.20],  0], // pulso
-  [0.06,-1.02, 0.06,  0,0,0,          0.34,0.62,0.34, [0.23,0.16,0.15],  0]  // antebraço
+  [0,    0,    0,     0,0,0,          0.18,1.54,0.18, [0.30,0.19,0.115], 0], // shaft
+  [0,   -0.20, 0,     0,0,0,          0.23,0.10,0.23, [0.62,0.42,0.18],  0], // lower ring
+  [0,    0.28, 0,     0,0,0,          0.23,0.10,0.23, [0.62,0.42,0.18],  0], // upper ring
+  [0,    0.66, 0,     0,0,0,          0.25,0.20,0.25, [0.38,0.24,0.14],  0], // crown
+  [0,    0.85, 0,     0.60,0.80,0.30, 0.235,0.235,0.235,[1.00,0.74,0.30], 1], // crystal
+  [0,    0.85, 0,    -0.40,0.30,0.90, 0.150,0.150,0.150,[1.00,0.94,0.72], 1], // core
+  [0,   -0.42, 0,     0,0,0,          0.44,0.34,0.40, [0.27,0.19,0.18],  0], // grip
+  [0.02,-0.62, 0.02,  0,0,0,          0.36,0.26,0.35, [0.31,0.22,0.20],  0], // wrist
+  [0.06,-1.02, 0.06,  0,0,0,          0.34,0.62,0.34, [0.23,0.16,0.15],  0]  // forearm
 ];
-const STAFF_TILT = [-0.12, 0.15, -0.705];   // rx, ry, rz — inclinação da haste
-const STAFF_DIR  = [0.648, 0.762];          // direção do eixo já projetada
+const STAFF_TILT = [-0.12, 0.15, -0.705];   // rx, ry, rz — shaft tilt
+const STAFF_DIR  = [0.648, 0.762];          // axis direction, already projected
 const STAFF_Z    = -0.90;
 
 let recoil=0, swayX=0, swayY=0;
@@ -1142,16 +1142,16 @@ function mulM(a,b,out,off){ // out = a*b, coluna-maior
 
 function buildViewModel(t, speed, aspect){
   const d=viewB.data;
-  const hh = -STAFF_Z * Math.tan(55*Math.PI/360);   // meia-altura do plano do cajado
+  const hh = -STAFF_Z * Math.tan(55*Math.PI/360);   // half-height of the staff plane
   const hw = hh*aspect;
 
-  const br  = Math.sin(t*1.15)*0.011;               // respiração
+  const br  = Math.sin(t*1.15)*0.011;               // breathing
   const br2 = Math.sin(t*0.62+1.1)*0.007;
   const brR = Math.sin(t*1.15)*0.015;
   const bx = Math.sin(P.bob)*0.026*speed;
   const by = Math.abs(Math.cos(P.bob))*0.020*speed;
 
-  // a ponta mira o canto inferior-esquerdo-central; o centro sai daí
+  // the tip aims at the lower center-left; the center follows from that
   const tipX = -0.34*hw, tipY = -0.34*hh;
   const cx = tipX - STAFF_DIR[0]*hh + (bx + br2 + swayX)*hh;
   const cy = tipY - STAFF_DIR[1]*hh + (by + br - recoil*0.11)*hh;
@@ -1174,7 +1174,7 @@ function buildViewModel(t, speed, aspect){
 }
 
 /* ==========================================================================
-   11. FÍSICA E COLISÃO
+   11. PHYSICS AND COLLISION
    ========================================================================== */
 function collideAxis(axis, delta){
   if(delta===0) return false;
@@ -1213,7 +1213,7 @@ function physics(dt){
   P.vy -= GRAV*dt;
   if(P.vy < -60) P.vy = -60;
 
-  // sub-passos pra não atravessar bloco
+  // substeps so we cannot tunnel through a block
   const dist = Math.hypot(P.vx,P.vy,P.vz)*dt;
   const steps = Math.max(1, Math.ceil(dist/0.4));
   const sdt = dt/steps;
@@ -1235,7 +1235,7 @@ function physics(dt){
 }
 
 /* ==========================================================================
-   12. AÇÕES — atirar e marcar
+   12. ACTIONS — shoot and flag
    ========================================================================== */
 function aimRay(){
   const cy=Math.cos(P.yaw), sy=Math.sin(P.yaw), cp=Math.cos(P.pitch), sp=Math.sin(P.pitch);
@@ -1248,8 +1248,8 @@ function shoot(){
   recoil = 1;
   snd.shot();
   const r=aimRay();
-  /* Raio refeito no instante do tiro. Reaproveitar o hover do último quadro
-     desenhado engole tiros sempre que dois cliques caem no mesmo quadro. */
+  /* Ray recast at the instant of the shot. Reusing the hover from the last
+     drawn frame swallows shots whenever two clicks land in the same frame. */
   const hit = raycast(r.ox,r.oy,r.oz, r.dx,r.dy,r.dz, REACH, true);
   const dist = hit.hit ? hit.t : REACH;
   const mx = P.x + r.dx*1.6, my = P.y+EYE + r.dy*1.6 - 0.22, mz = P.z + r.dz*1.6;
@@ -1263,7 +1263,7 @@ function shoot(){
   if(!hit.hit) return;
 
   if(hit.kind==='num'){ hitNumber(hit.x,hit.y,hit.z); return; }
-  if(hit.kind==='bedrock'){ snd.clink(); // rocha-mãe: não quebra
+  if(hit.kind==='bedrock'){ snd.clink(); // bedrock: does not break
     for(let i=0;i<8;i++) addS((hit.x+0.5)*BLOCK,(hit.y+0.5)*BLOCK,(hit.z+0.5)*BLOCK,
         (rnd()-.5)*5,(rnd()-.5)*5,(rnd()-.5)*5, 0.3, 0.28, [1,0.8,0.4], T_SPARK);
     return;
@@ -1275,11 +1275,11 @@ function shoot(){
   checkWin();
 }
 
-/* Acertar um número faz uma de duas coisas:
-   - se a conta já fecha (minas marcadas em volta == número), espalha o tiro
-     e derruba todo o resto que encosta nele;
-   - senão, só acende os vizinhos por alguns segundos.
-   Marcou errado? O espalho acha a mina de verdade e a caverna vai junto. */
+/* Hitting a number does one of two things:
+   - if the count already adds up (flagged mines around it == the number),
+     the shot spreads and clears everything else touching it;
+   - otherwise it simply lights the neighbors up for a few seconds.
+   Flagged the wrong ones? The spread finds the real mine and the cave goes. */
 function hitNumber(x,y,z){
   const need = G.cnt[idx(x,y,z)];
   let marcadas = 0;
@@ -1296,9 +1296,9 @@ function hitNumber(x,y,z){
 
   if(marcadas !== need || !abrir.length){ pingNumber(x,y,z); return 0; }
 
-  // a conta fecha: espalha
+  // the count adds up: spread
   for(const [j,X,Y,Z] of abrir){
-    if(G.mine[j]){ detonate(X,Y,Z); return -1; }   // marcação errada
+    if(G.mine[j]){ detonate(X,Y,Z); return -1; }   // wrong flag
   }
   for(const [j] of abrir) revealAt(j,false);
   snd.spread();
@@ -1312,7 +1312,7 @@ function hitNumber(x,y,z){
   return abrir.length;
 }
 
-/* Só acende: não marca, não revela, não gasta nada. */
+/* Just lights up: no flagging, no revealing, costs nothing. */
 function pingNumber(x,y,z){
   const until = tGlobal + ECHO_DUR;
   let n=0;
@@ -1348,7 +1348,7 @@ function checkWin(){
   if(G.revealed >= G.safeTotal){
     G.win=true; G.state='over'; G.boom=0.0001;
     snd.fanfare();
-    // chuva de ouro
+    // gold rain
     for(let k=0;k<260;k++){
       addS(rnd()*G.nx*BLOCK, G.ny*BLOCK+rnd()*10, rnd()*G.nz*BLOCK,
            (rnd()-.5)*1.5, -2-rnd()*4, (rnd()-.5)*1.5, 0.5, 4+rnd()*4, [1.0,0.82,0.28], T_COIN);
@@ -1357,8 +1357,8 @@ function checkWin(){
   }
 }
 
-/* Acertou a mina: ela acende primeiro. O jogador precisa ver QUAL bloco o
-   matou antes da caverna inteira virar poeira. Só depois vem o estouro. */
+/* Hit the mine: it lights up first. The player needs to see WHICH block
+   killed them before the whole cave turns to dust. Then the blast. */
 function detonate(bx,by,bz){
   G.state='over'; G.win=false; G.boomCell=[bx,by,bz]; G.fuse=FUSE_T;
   G.slowmo=0.55; G.shake=0.22; G.dirty=true;
@@ -1376,7 +1376,7 @@ function blast(){
   G.fuse=0; G.boom=0.0001; G.shake=1; G.slowmo=0.28;
   snd.boom();
   const ex=(bx+0.5)*BLOCK, ey=(by+0.5)*BLOCK, ez=(bz+0.5)*BLOCK;
-  // tudo que sobrou vira escombro
+  // everything still standing turns to debris
   for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
     const i=idx(x,y,z);
     if(G.st[i]===AIR) continue;
@@ -1389,11 +1389,11 @@ function blast(){
          BLOCK*(0.34+rnd()*0.30), 2.4+rnd()*2.4, c, G.mine[i]?1:0);
     G.st[i]=AIR;
   }
-  // onda de choque + fagulhas bregas
+  // shockwave + corny sparks
   for(let k=0;k<260;k++){
     const a=rnd()*6.283, b=Math.acos(2*rnd()-1), sp=16+rnd()*44;
     const dx=Math.sin(b)*Math.cos(a), dy=Math.cos(b), dz=Math.sin(b)*Math.sin(a);
-    const r0=2.0+rnd()*5.0;                       // ja nasce espalhado
+    const r0=2.0+rnd()*5.0;                       // born already spread out
     const hue = rnd();
     addS(ex+dx*r0, ey+dy*r0, ez+dz*r0, dx*sp, dy*sp, dz*sp,
          1.0+rnd()*1.8, 1.0+rnd()*1.8,
@@ -1426,12 +1426,12 @@ function flashScreen(){
 function showOver(win){
   const el=$('over');
   el.classList.toggle('win', win);
-  $('overEye').textContent = win ? 'Os três planos se abrem' : 'Plano rompido';
-  $('overTitle').textContent = win ? 'A areia te soltou' : 'Você virou areia';
+  $('overEye').textContent = win ? 'The three planes open' : 'Plane breached';
+  $('overTitle').textContent = win ? 'The sand let you go' : 'You are sand now';
   const mm=Math.floor(G.elapsed/60), ss=Math.floor(G.elapsed%60);
   $('overText').textContent = win
-    ? `${G.mines} minas mapeadas, ${G.gold} de ouro no bolso, ${mm}:${String(ss).padStart(2,'0')} de labirinto. A entidade não gostou.`
-    : `Você durou ${mm}:${String(ss).padStart(2,'0')} e abriu ${G.revealed} de ${G.safeTotal} blocos. Restavam ${G.mines-G.marked} minas por marcar.`;
+    ? `${G.mines} mines mapped, ${G.gold} gold in your pocket, ${mm}:${String(ss).padStart(2,'0')} in the labyrinth. Whatever locked you in is not pleased.`
+    : `You lasted ${mm}:${String(ss).padStart(2,'0')} and opened ${G.revealed} of ${G.safeTotal} blocks. ${G.mines-G.marked} mines were still unflagged.`;
   setTimeout(()=>{ el.classList.add('on'); document.exitPointerLock&&document.exitPointerLock(); }, win?900:2100);
 }
 function setScreen(s){
@@ -1453,7 +1453,7 @@ function updateHUD(){
 }
 function updateDiffNote(){
   const D=DIFFS[G.diff], n=D.nx*D.ny*D.nz, m=Math.round(n*D.dens);
-  $('dNote').textContent = `${D.nx} × ${D.ny} × ${D.nz} = ${n} blocos · ${m} minas (${(D.dens*100).toFixed(1)}%) · caverna de ${D.nx*BLOCK} × ${D.ny*BLOCK} × ${D.nz*BLOCK} metros`;
+  $('dNote').textContent = `${D.nx} × ${D.ny} × ${D.nz} = ${n} blocks · ${m} mines (${(D.dens*100).toFixed(1)}%) · cave ${D.nx*BLOCK} × ${D.ny*BLOCK} × ${D.nz*BLOCK} m`;
 }
 
 document.querySelectorAll('.diffs [data-d]').forEach(b=>{
@@ -1509,11 +1509,11 @@ $('btnMenu2').addEventListener('click', ()=>{ elOver.classList.remove('on'); set
 $('btnRestart').addEventListener('click', startGame);
 $('btnResume').addEventListener('click', ()=>{ setScreen('play'); tryLock(); });
 
-/* ---------- entrada ----------
-   O navegador recusa travar o mouse por cerca de 1,2 s depois que o jogador
-   sai com Esc. Pedir dentro dessa carência falha calado — era esse o "às vezes
-   não trava". Agora a gente espera a carência, tenta de novo sozinho, e clicar
-   na tela SEMPRE tenta travar outra vez (o modo arrasto nunca é definitivo). */
+/* ---------- input ----------
+   The browser refuses to lock the pointer for about 1.2 s after the player
+   exits with Esc. Asking inside that cooldown fails silently: that was the
+   "sometimes it doesn't lock". Now we wait the cooldown out, retry on our
+   own, and clicking the screen ALWAYS tries again (drag mode is never final). */
 let locked=false, dragLook=false, dragging=false;
 let lockFails=0, lockCooldown=0, lockRetry=0, lockGuard=0;
 
@@ -1523,7 +1523,7 @@ function lockHint(){
 function tryLock(){
   if(locked || G.state!=='play') return;
   const now = performance.now();
-  if(now < lockCooldown){                       // ainda na carência: agenda
+  if(now < lockCooldown){                       // still cooling down: schedule
     clearTimeout(lockRetry);
     lockRetry = setTimeout(tryLock, lockCooldown - now + 60);
     return;
@@ -1533,7 +1533,7 @@ function tryLock(){
   try { p = canvas.requestPointerLock(); }
   catch(e){ onLockFail(); return; }
   if(p && typeof p.catch === 'function') p.catch(onLockFail);
-  // rede: se não travar nem der erro, cai no arrasto depois de algumas tentativas
+  // safety net: if it neither locks nor errors, fall back to drag after a few tries
   lockGuard = setTimeout(()=>{ if(!locked && G.state==='play') onLockFail(); }, 900);
   lockHint();
 }
@@ -1548,7 +1548,7 @@ function onLockFail(){
 function enableDragLook(){
   if(dragLook) return;
   dragLook = true;
-  toast('Este navegador não deixa travar o mouse aqui. Segure o botão esquerdo e arraste para olhar; E atira, Q marca. Abrir o arquivo direto no navegador libera o modo normal.', 9000);
+  toast('This browser will not lock the mouse here. Hold the left button and drag to look; E shoots, Q flags. Opening the file directly in a browser restores normal mode.', 9000);
   lockHint();
 }
 document.addEventListener('pointerlockerror', onLockFail);
@@ -1559,14 +1559,14 @@ document.addEventListener('pointerlockchange', ()=>{
     lockFails=0; dragLook=false; dragging=false;
     $('toast').classList.remove('on');
   } else {
-    lockCooldown = performance.now() + 1300;   // carência começa agora
+    lockCooldown = performance.now() + 1300;   // cooldown starts now
     if(G.state==='play' && !dragLook) setScreen('pause');
   }
   lockHint();
 });
 canvas.addEventListener('mousedown', e=>{
   if(G.state!=='play') return;
-  if(!locked && !dragLook){ tryLock(); return; }   // este clique recupera o mouse
+  if(!locked && !dragLook){ tryLock(); return; }   // this click recovers the mouse
   if(dragLook){
     if(e.button===0) dragging=true;
     else if(e.button===2) mark();
@@ -1579,7 +1579,7 @@ canvas.addEventListener('contextmenu', e=>e.preventDefault());
 document.addEventListener('mousemove', e=>{
   if(G.state!=='play') return;
   if(locked || (dragLook && dragging)){
-    // o balanço do cajado segue a rotação real, então inverte junto
+    // staff sway follows the real rotation, so it inverts along with it
     const my = e.movementY * (G.invY ? -1 : 1);
     P.yaw   -= e.movementX * G.sens;
     P.pitch -= my * G.sens;
@@ -1609,17 +1609,17 @@ window.addEventListener('keydown', e=>{
     case 'KeyQ': if(dragLook) mark(); break;
     case 'KeyT':
       G.arrows=!G.arrows;
-      $('sPlanes').textContent = G.arrows?'ligadas':'desligadas';
+      $('sPlanes').textContent = G.arrows?'on':'off';
       $('planes').classList.toggle('off', !G.arrows);
-      toast('Setas de plano '+(G.arrows?'ligadas':'desligadas'));
+      toast('Plane arrows '+(G.arrows?'on':'off'));
       break;
     case 'KeyI':
       syncInv(!G.invY);
-      toast('Eixo vertical do mouse: '+(G.invY?'invertido':'normal'));
+      toast('Vertical mouse axis: '+(G.invY?'inverted':'normal'));
       break;
     case 'KeyM':
       G.muted=!G.muted; snd.setMute(G.muted);
-      toast(G.muted?'Som desligado':'Som ligado');
+      toast(G.muted?'Sound off':'Sound on');
       break;
     case 'KeyR': if(G.state!=='menu'){ elOver.classList.remove('on'); startGame(); } break;
     case 'Escape':
@@ -1641,9 +1641,9 @@ window.addEventListener('keyup', e=>{
 });
 window.addEventListener('blur', ()=>{ IN.f=IN.b=IN.l=IN.r=0; IN.sprint=false; dragging=false;
                                       IN.jumpHeld=false; IN.jumpBuf=0; });
-/* O pulo sai no APERTAR, não no soltar — esperar o keyup era a "lentidão".
-   coyote = ainda dá pra pular logo depois de sair da borda.
-   buffer = apertar pouco antes de pousar não perde o pulo. */
+/* The jump fires on PRESS, not on release: waiting for keyup was the "lag".
+   coyote = you can still jump just after walking off an edge.
+   buffer  = pressing just before you land does not lose the jump. */
 function canJump(){ return P.coyote > 0; }
 
 function startJump(){
@@ -1652,7 +1652,7 @@ function startJump(){
   snd.step();
 }
 
-/* Segurou 0,5 s: o cajado sustenta a subida até o ápice de 5x a altura. */
+/* Held 0.5 s: the staff sustains the climb to an apex of 5x your height. */
 function surgeJump(){
   const rise = JUMP_HI - (P.y - P.jumpY0);
   P.vy = rise > 0 ? Math.sqrt(2*GRAV*rise) : Math.max(P.vy, 0);
@@ -1662,25 +1662,25 @@ function surgeJump(){
   snd.mark();
 }
 
-/* Roda DEPOIS de physics(), que e quem atualiza P.ground. */
+/* Runs AFTER physics(), which is what updates P.ground. */
 function tickGround(dt){
   P.coyote = P.ground ? COYOTE : Math.max(0, P.coyote - dt);
 }
 
 function updateJump(dt){
   if(IN.jumpBuf>0) IN.jumpBuf -= dt;
-  /* Pula ao encostar no chão se o espaço ainda está apertado (queda longa) ou
-     se foi apertado pouco antes de pousar (buffer). Sem isso, apertar no ar é
-     um pulo engolido — a "intermitência". */
+  /* Jump on touching down if space is still held (long fall) or was pressed
+     just before landing (buffer). Without this, pressing midair is a
+     swallowed jump: the "intermittency". */
   if(!IN.jumpFired && canJump() && (IN.jumpHeld || IN.jumpBuf>0)) startJump();
   if(IN.jumpHeld && IN.jumpFired && !IN.surged){
     IN.jumpT += dt;
-    if(P.ground) IN.surged=true;                  // pousou antes: cancela
+    if(P.ground) IN.surged=true;                  // landed first: cancel
     else if(IN.jumpT >= CHARGE_T) surgeJump();
   }
 }
 
-/* setas do teclado giram a câmera (acessibilidade / plano B) */
+/* arrow keys turn the camera (accessibility / plan B) */
 function keyLook(dt){
   const s = 1.9*dt;
   if(KEY['ArrowLeft'])  P.yaw += s;
@@ -1738,7 +1738,7 @@ function frame(now){
   swayX -= swayX*Math.min(1, dt*6); swayY -= swayY*Math.min(1, dt*6);
   G.shake = Math.max(0, G.shake - dt*0.55);
 
-  // ------- partículas -------
+  // ------- particles -------
   for(let i=particles.length-1;i>=0;i--){
     const p=particles[i]; p.l-=sim;
     if(p.l<=0){ particles.splice(i,1); continue; }
@@ -1756,7 +1756,7 @@ function frame(now){
     if(s.tile===T_GLOW) s.vy*=(1-1.6*sim);
   }
 
-  // ------- câmera -------
+  // ------- camera -------
   const shk = G.shake*G.shake;
   const camX = P.x + (Math.random()-0.5)*shk*2.2;
   const camY = P.y + EYE + Math.sin(P.bob*2)*0.035 + (Math.random()-0.5)*shk*2.2;
@@ -1768,7 +1768,7 @@ function frame(now){
   const projMain = m4.persp(70*Math.PI/180, aspect, 0.08, 400);
   const projView = m4.persp(55*Math.PI/180, aspect, 0.01, 20);
 
-  // ------- mira -------
+  // ------- aim -------
   if(G.state==='play'){
     const r=aimRay();
     hover = raycast(r.ox,r.oy,r.oz, r.dx,r.dy,r.dz, REACH, true);
@@ -1778,11 +1778,11 @@ function frame(now){
     elCross.classList.toggle('mark', k==='block' && G.st[idx(hover.x,hover.y,hover.z)]===MARKED);
   } else hover={hit:false};
 
-  if(G.echoUntil + 0.1 > tGlobal) G.dirty = true;   // eco vivo: redesenha
+  if(G.echoUntil + 0.1 > tGlobal) G.dirty = true;   // echo alive: rebuild
   lockHint();
   if(G.dirty) rebuildWorld();
 
-  // ------- desenho -------
+  // ------- draw -------
   gl.viewport(0,0,W,H);
   gl.clearColor(FOG[0],FOG[1],FOG[2],1);
   gl.enable(gl.DEPTH_TEST); gl.depthMask(true);
@@ -1820,7 +1820,7 @@ function frame(now){
     drawCubes(debris);
   }
 
-  // ------- glifos: números, setas, minas -------
+  // ------- glyphs: numbers, arrows, mines -------
   gl.useProgram(pBB);
   gl.uniformMatrix4fv(uB.proj,false,projMain);
   gl.uniformMatrix4fv(uB.view,false,viewM);
@@ -1854,7 +1854,7 @@ function frame(now){
         if(c===0) continue;
         const dcam=Math.hypot(cx-camX, cy-camY, cz-camZ);
         if(dcam>44) continue;
-        /* os distantes recuam pra não competir com o bloco à sua frente */
+        /* distant ones recede so they do not fight the block in front */
         const al = clamp(1.30 - dcam/38, 0.34, 1);
         put(cx,cy,cz, 1.05,1.05, c, NUMCOL[c], al, 0);
         if(G.arrows){
@@ -1882,7 +1882,7 @@ function frame(now){
   gl.disable(gl.CULL_FACE);
   drawBBs(glyphB);
 
-  // ------- brilhos aditivos: feixe, poeira, ouro -------
+  // ------- additive glows: beam, dust, gold -------
   {
     const d=glowB.data; let n=0;
     const put=(x,y,z,s,tile,col,a)=>{
@@ -1917,15 +1917,15 @@ function frame(now){
   gl.enable(gl.CULL_FACE);
   gl.disable(gl.BLEND);
 
-  /* ------- a mina que te matou -------
-     Sem teste de profundidade: ela está dentro de um bloco sólido e o jogador
-     precisa ver exatamente qual bloco foi, antes da caverna virar poeira. */
+  /* ------- the mine that killed you -------
+     No depth test: it sits inside a solid block and the player has to see
+     exactly which one it was, before the cave turns to dust. */
   if(G.fuse>0 && G.boomCell){
     const [bx,by,bz]=G.boomCell;
     const bcx=(bx+0.5)*BLOCK, bcy=(by+0.5)*BLOCK, bcz=(bz+0.5)*BLOCK;
     const k=1-G.fuse/FUSE_T, pul=0.5+0.5*Math.sin(tGlobal*26);
     const d=boomB.data;
-    const põe=(sz,tile,col,a,mode)=>{
+    const place=(sz,tile,col,a,mode)=>{
       const uv=UVS[tile];
       d[0]=bcx; d[1]=bcy; d[2]=bcz; d[3]=sz; d[4]=sz;
       d[5]=uv[0]; d[6]=uv[1]; d[7]=uv[2]; d[8]=uv[3];
@@ -1935,11 +1935,11 @@ function frame(now){
     gl.enable(gl.BLEND); gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.CULL_FACE); gl.depthMask(false);
 
-    põe(BLOCK*(1.5+2.2*k), T_GLOW, [1.0,0.58-0.28*k,0.20], 0.45+0.45*k, 1);
+    place(BLOCK*(1.5+2.2*k), T_GLOW, [1.0,0.58-0.28*k,0.20], 0.45+0.45*k, 1);
     gl.blendFunc(gl.ONE, gl.ONE);
     drawBBs(boomB);
 
-    põe(2.6+1.7*k, T_MINE, [1.0,0.88-0.55*k,0.62-0.5*k], 0.85+0.15*pul, 0);
+    place(2.6+1.7*k, T_MINE, [1.0,0.88-0.55*k,0.62-0.5*k], 0.85+0.15*pul, 0);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     drawBBs(boomB);
 
@@ -1947,7 +1947,7 @@ function frame(now){
     gl.depthMask(true); gl.disable(gl.BLEND);
   }
 
-  // ------- cajado -------
+  // ------- staff -------
   if(G.state==='play' || G.state==='pause'){
     gl.clear(gl.DEPTH_BUFFER_BIT);
     gl.useProgram(pCube);
@@ -1963,14 +1963,14 @@ function frame(now){
 }
 
 /* ==========================================================================
-   15. PARTIDA
+   15. BOOT
    ========================================================================== */
 resize();
 loadCfg();
 G.diff=0; updateDiffNote();
-genWorld(0);          // mundo de fundo pro menu
+genWorld(0);          // background world for the menu
 setScreen('menu');
-// câmera lenta girando atrás do menu
+// slow camera drift behind the menu
 (function menuCam(){
   const spin = ()=>{
     if(G.state==='menu'){ P.yaw += 0.0016; P.pitch = Math.sin(performance.now()*0.0002)*0.10; }
