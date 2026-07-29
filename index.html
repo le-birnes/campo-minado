@@ -1,0 +1,1984 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Campo Minado — Três Planos</title>
+
+<style>
+/* ============================================================
+   CAMPO MINADO / TRÊS PLANOS
+   Paleta: areia, ocre, brasa, ouro, violeta arcano, fuligem
+   ============================================================ */
+:root{
+  --sand:#d9a44c;
+  --sand-hi:#f0c883;
+  --ochre:#a85f26;
+  --ember:#ff7a2f;
+  --gold:#ffd166;
+  --violet:#a86bff;
+  --soot:#150e0b;
+  --soot-2:#241812;
+  --bone:#f6e6c8;
+  --dust:#ab8f70;
+
+  --display: "Arial Black","Arial Bold",Impact,Haettenschweiler,"Franklin Gothic Heavy","Helvetica Neue",sans-serif;
+  --mono: ui-monospace,"Cascadia Mono","Consolas","DejaVu Sans Mono",monospace;
+}
+
+html,body{margin:0;padding:0;height:100%;background:var(--soot);overflow:hidden;}
+*{box-sizing:border-box;}
+
+#wrap{position:fixed;inset:0;overflow:hidden;background:var(--soot);}
+canvas#gl{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:none;}
+
+/* ---------- aura da entidade (presença, não personagem) ---------- */
+#aura{
+  position:absolute;inset:-15%;pointer-events:none;z-index:2;
+  background:
+    radial-gradient(48% 42% at 50% 48%, rgba(168,107,255,.13), rgba(168,107,255,0) 70%),
+    radial-gradient(120% 100% at 50% 55%, rgba(0,0,0,0) 42%, rgba(12,6,14,.62) 100%);
+  animation:breathe 9.5s ease-in-out infinite;
+  mix-blend-mode:screen;
+}
+@keyframes breathe{0%,100%{opacity:.55;transform:scale(1)}50%{opacity:1;transform:scale(1.045)}}
+@media (prefers-reduced-motion:reduce){#aura{animation:none;opacity:.7}}
+
+/* ---------- HUD ---------- */
+#hud{position:absolute;inset:0;pointer-events:none;z-index:5;
+     font-family:var(--mono);color:var(--bone);
+     text-shadow:0 2px 0 rgba(0,0,0,.85);
+     padding:clamp(12px,2.2vmin,26px);
+     display:grid;grid-template-columns:1fr auto 1fr;grid-template-rows:auto 1fr auto;
+     gap:8px;opacity:0;transition:opacity .45s ease;}
+#hud.on{opacity:1;}
+/* véu escuro nas bordas: sem ele o HUD âmbar some no arenito âmbar */
+#hud::before,#hud::after{content:"";position:absolute;left:0;right:0;height:118px;pointer-events:none;z-index:-1;}
+#hud::before{top:0;background:linear-gradient(180deg,rgba(9,5,4,.78),rgba(9,5,4,0));}
+#hud::after{bottom:0;background:linear-gradient(0deg,rgba(9,5,4,.62),rgba(9,5,4,0));}
+
+.stat{display:flex;flex-direction:column;gap:2px;}
+.stat .k{font-size:clamp(8px,1.05vmin,11px);letter-spacing:.22em;text-transform:uppercase;color:var(--dust);}
+.stat .v{font-family:var(--display);font-size:clamp(20px,3.4vmin,40px);line-height:.95;
+         letter-spacing:-.02em;font-variant-numeric:tabular-nums;}
+.v.mines{color:var(--ember);}
+.v.gold{color:var(--gold);}
+.v.time{color:var(--sand-hi);}
+.v.left{color:var(--bone);}
+
+#tl{grid-column:1;grid-row:1;display:flex;gap:clamp(16px,3vmin,38px);align-items:flex-start;}
+#tr{grid-column:3;grid-row:1;display:flex;gap:clamp(16px,3vmin,38px);align-items:flex-start;justify-content:flex-end;}
+
+#planes{grid-column:2;grid-row:1;justify-self:center;text-align:center;
+        font-size:clamp(8px,1.05vmin,11px);letter-spacing:.2em;text-transform:uppercase;color:var(--dust);}
+#planes b{color:var(--sand);font-weight:400;}
+#planes.off b{color:#5b4736;text-decoration:line-through;}
+
+/* barra de progresso — quantos blocos seguros restam */
+#bar{grid-column:1/-1;grid-row:3;height:3px;background:rgba(255,255,255,.07);position:relative;align-self:end;}
+#bar i{position:absolute;inset:0 auto 0 0;width:0%;background:linear-gradient(90deg,var(--ochre),var(--sand),var(--gold));
+       transition:width .25s ease;}
+
+#charge{grid-column:2;grid-row:3;justify-self:center;align-self:end;margin-bottom:14px;
+        width:clamp(90px,14vmin,160px);height:5px;background:rgba(0,0,0,.5);
+        border:1px solid rgba(255,209,102,.35);opacity:0;transition:opacity .12s;}
+#charge.on{opacity:1;}
+#charge i{display:block;height:100%;width:0%;background:var(--gold);}
+
+#tip{grid-column:1;grid-row:3;align-self:end;margin-bottom:16px;
+     font-size:clamp(9px,1.15vmin,12px);letter-spacing:.09em;color:var(--dust);max-width:46ch;line-height:1.6;
+     transition:opacity .8s ease;}
+#tip.fade{opacity:0;}
+
+/* mira */
+#cross{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:6;pointer-events:none;
+       width:42px;height:42px;opacity:0;transition:opacity .3s;}
+#cross.on{opacity:1;}
+/* contorno escuro sólido: a mira precisa aparecer tanto no arenito claro
+   quanto no fundo escuro da caverna */
+#cross .a,#cross .b{position:absolute;background:var(--sand-hi);
+                    outline:1px solid rgba(0,0,0,.8);
+                    box-shadow:0 0 7px rgba(255,150,60,.85);}
+#cross .a{left:50%;top:0;width:3px;height:12px;margin-left:-1.5px;}
+#cross .a.s2{top:auto;bottom:0;}
+#cross .b{top:50%;left:0;height:3px;width:12px;margin-top:-1.5px;}
+#cross .b.s2{left:auto;right:0;}
+#cross .dot{position:absolute;left:50%;top:50%;width:4px;height:4px;margin:-2px 0 0 -2px;
+            background:var(--gold);border-radius:50%;box-shadow:0 0 6px rgba(255,209,102,.9);}
+#cross.bad .a,#cross.bad .b{background:#6b5a4a;box-shadow:none;}
+#cross.bad .dot{background:#6b5a4a;}
+#cross.mark .a,#cross.mark .b,#cross.mark .dot{background:var(--violet);box-shadow:0 0 8px rgba(168,107,255,.8);}
+#cross.num .a,#cross.num .b,#cross.num .dot{background:#5fe6ff;box-shadow:0 0 9px rgba(95,230,255,.95);}
+
+/* ---------- telas ---------- */
+.screen{position:absolute;inset:0;z-index:20;display:none;place-items:center;
+        background:radial-gradient(90% 90% at 50% 45%, rgba(36,24,18,.86), rgba(10,6,5,.97));
+        backdrop-filter:blur(2px);pointer-events:auto;}
+.screen.on{display:grid;}
+.panel{width:min(760px,92vw);padding:clamp(18px,3.4vmin,40px);color:var(--bone);font-family:var(--mono);}
+
+h1{font-family:var(--display);margin:0;text-transform:uppercase;
+   font-size:clamp(38px,9.4vmin,104px);line-height:.82;letter-spacing:-.035em;
+   color:var(--sand-hi);text-wrap:balance;
+   text-shadow:4px 5px 0 var(--ochre), 8px 10px 0 rgba(0,0,0,.55);}
+h1 em{display:block;font-style:normal;color:var(--ember);font-size:.44em;letter-spacing:-.02em;}
+.eyebrow{font-size:clamp(9px,1.25vmin,13px);letter-spacing:.4em;text-transform:uppercase;color:var(--violet);margin:0 0 14px;}
+.lede{margin:20px 0 0;max-width:56ch;line-height:1.75;font-size:clamp(12px,1.6vmin,15px);color:#cdb694;}
+.lede b{color:var(--sand-hi);font-weight:400;}
+
+.rule{height:1px;background:linear-gradient(90deg,var(--ochre),rgba(168,95,38,0));margin:24px 0;}
+
+.diffs{display:flex;flex-wrap:wrap;gap:10px;margin-top:6px;}
+button{font-family:var(--display);text-transform:uppercase;letter-spacing:.02em;cursor:pointer;
+       background:transparent;color:var(--sand);border:2px solid var(--ochre);
+       padding:12px 18px;font-size:clamp(13px,1.9vmin,19px);line-height:1;
+       transition:background .14s,color .14s,transform .14s,border-color .14s;}
+button:hover,button:focus-visible{background:var(--ochre);color:#1a0f08;transform:translateY(-2px);outline:none;border-color:var(--sand);}
+button.sel{background:var(--sand);border-color:var(--sand);color:#1a0f08;}
+button.go{border-color:var(--gold);color:var(--gold);padding:15px 30px;font-size:clamp(15px,2.3vmin,24px);}
+button.go:hover,button.go:focus-visible{background:var(--gold);color:#1a0f08;}
+button:focus-visible{box-shadow:0 0 0 3px rgba(255,209,102,.35);}
+
+.diffnote{font-size:clamp(10px,1.3vmin,13px);color:var(--dust);margin-top:10px;line-height:1.6;
+          font-variant-numeric:tabular-nums;}
+
+.keys{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:6px 26px;margin-top:4px;
+      font-size:clamp(10px,1.35vmin,13px);line-height:1.9;color:#bda488;}
+.keys kbd{font-family:var(--mono);background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);
+          border-bottom-width:2px;padding:1px 6px;color:var(--bone);font-size:.92em;margin-right:6px;}
+
+.opt{display:flex;align-items:center;gap:14px;margin-top:14px;font-size:clamp(10px,1.35vmin,13px);color:#bda488;}
+.opt input[type=range]{accent-color:var(--sand);width:150px;}
+
+/* fim de jogo — brega e faiscante, de propósito */
+#over .panel{text-align:center;}
+#over h1{animation:jolt .16s steps(2) infinite;}
+@keyframes jolt{0%{transform:translate(0,0)}50%{transform:translate(-3px,2px)}100%{transform:translate(2px,-2px)}}
+#over.win h1{animation:none;color:var(--gold);text-shadow:4px 5px 0 var(--ochre),8px 10px 0 rgba(0,0,0,.55),0 0 44px rgba(255,209,102,.55);}
+@media (prefers-reduced-motion:reduce){#over h1{animation:none}}
+
+#flash{position:absolute;inset:0;z-index:30;pointer-events:none;background:#fff;opacity:0;}
+
+#toast{position:absolute;left:50%;bottom:7%;transform:translateX(-50%);z-index:8;
+       font-family:var(--mono);font-size:12px;letter-spacing:.06em;color:#1a0f08;background:var(--gold);
+       padding:8px 14px;display:none;max-width:80vw;text-align:center;line-height:1.5;}
+#toast.on{display:block;}
+
+#needlock{position:absolute;left:50%;top:62%;transform:translateX(-50%);z-index:7;
+          font-family:var(--mono);font-size:clamp(11px,1.5vmin,14px);letter-spacing:.16em;
+          text-transform:uppercase;color:var(--bone);background:rgba(10,6,4,.72);
+          border:1px solid rgba(240,200,131,.45);padding:9px 16px;display:none;
+          text-align:center;pointer-events:none;animation:pisca 1.9s ease-in-out infinite;}
+#needlock.on{display:block;}
+@keyframes pisca{0%,100%{opacity:.55}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){#needlock{animation:none}}
+
+.chk{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;}
+.chk input{accent-color:var(--sand);width:15px;height:15px;cursor:pointer;}
+.chk input:focus-visible{outline:2px solid var(--gold);outline-offset:2px;}
+
+#nogl{position:absolute;inset:0;display:grid;place-items:center;z-index:40;padding:6vw;
+      font-family:var(--mono);color:var(--bone);text-align:center;line-height:1.8;display:none;}
+</style>
+
+<div id="wrap">
+  <canvas id="gl"></canvas>
+  <div id="aura"></div>
+
+  <div id="cross"><i class="a"></i><i class="a s2"></i><i class="b"></i><i class="b s2"></i><i class="dot"></i></div>
+
+  <div id="hud">
+    <div id="tl">
+      <div class="stat"><span class="k">Minas restantes</span><span class="v mines" id="sMines">0</span></div>
+      <div class="stat"><span class="k">Blocos seguros</span><span class="v left" id="sLeft">0</span></div>
+    </div>
+    <div id="planes">Setas de plano <b id="sPlanes">ligadas</b></div>
+    <div id="tr">
+      <div class="stat"><span class="k">Ouro</span><span class="v gold" id="sGold">0</span></div>
+      <div class="stat"><span class="k">Tempo</span><span class="v time" id="sTime">0:00</span></div>
+    </div>
+    <div id="tip">Mire num bloco e atire. Acerte um número para acender o que ele conta — se as minas dele já estiverem marcadas, o tiro espalha e abre o resto.</div>
+    <div id="charge"><i id="chargeFill"></i></div>
+    <div id="bar"><i id="barFill"></i></div>
+  </div>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+  <div id="needlock">Clique na tela para travar o mouse</div>
+
+  <!-- ========== MENU ========== -->
+  <div class="screen on" id="menu">
+    <div class="panel">
+      <p class="eyebrow">Alguém te trancou aqui</p>
+      <h1>Campo Minado<em>Três Planos</em></h1>
+      <p class="lede">Você está <b>dentro</b> do tabuleiro. Areia acima, areia abaixo, areia em volta —
+        três camadas de blocos e um cajado. Cada bloco encosta em <b>26 outros</b> (3×3×3 menos ele mesmo),
+        então o número que aparece conta minas no seu plano, no teto <b>e</b> no chão.
+        Uma seta pra cima diz que há mina em algum dos 9 blocos do teto. Pra baixo, no chão.
+        Erre uma vez e a caverna inteira vira vidro.</p>
+
+      <div class="rule"></div>
+
+      <div class="diffs" role="group" aria-label="Dificuldade">
+        <button data-d="0" class="sel">Aprendiz</button>
+        <button data-d="1">Feiticeiro</button>
+        <button data-d="2">Arcano</button>
+      </div>
+      <p class="diffnote" id="dNote"></p>
+
+      <div class="rule"></div>
+
+      <div class="keys">
+        <div><kbd>W A S D</kbd>andar</div>
+        <div><kbd>Shift</kbd>correr</div>
+        <div><kbd>Espaço</kbd>pular · segure 0,5 s no ar pra subir mais</div>
+        <div><kbd>Mouse</kbd>mirar</div>
+        <div><kbd>Botão esq.</kbd>destruir bloco · acertar número acende os vizinhos<br>
+          (com as minas todas marcadas, o tiro espalha e abre o resto)</div>
+        <div><kbd>Botão dir.</kbd>marcar mina</div>
+        <div><kbd>T</kbd>setas de plano · <kbd>I</kbd>inverter mouse</div>
+        <div><kbd>M</kbd>som · <kbd>R</kbd>recomeçar · <kbd>Esc</kbd>pausa</div>
+      </div>
+
+      <div class="opt">
+        <label for="sens">Sensibilidade</label>
+        <input type="range" id="sens" min="4" max="40" value="14">
+        <span id="sensV" style="font-variant-numeric:tabular-nums">1.4</span>
+      </div>
+      <div class="opt">
+        <label class="chk" for="inv"><input type="checkbox" id="inv">Inverter o eixo vertical do mouse</label>
+      </div>
+
+      <div class="rule"></div>
+      <button class="go" id="btnStart">Entrar na caverna</button>
+    </div>
+  </div>
+
+  <!-- ========== PAUSA ========== -->
+  <div class="screen" id="pause">
+    <div class="panel">
+      <p class="eyebrow">A caverna espera</p>
+      <h1 style="font-size:clamp(30px,6.4vmin,64px)">Pausa</h1>
+      <div class="opt">
+        <label for="sens2">Sensibilidade</label>
+        <input type="range" id="sens2" min="4" max="40" value="14">
+        <span id="sensV2" style="font-variant-numeric:tabular-nums">1.4</span>
+      </div>
+      <div class="opt">
+        <label class="chk" for="inv2"><input type="checkbox" id="inv2">Inverter o eixo vertical do mouse</label>
+      </div>
+      <div class="rule"></div>
+      <div class="diffs">
+        <button class="go" id="btnResume">Continuar</button>
+        <button id="btnRestart">Recomeçar</button>
+        <button id="btnMenu">Menu</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== FIM ========== -->
+  <div class="screen" id="over">
+    <div class="panel">
+      <p class="eyebrow" id="overEye">Plano rompido</p>
+      <h1 id="overTitle">Você virou areia</h1>
+      <p class="lede" id="overText" style="margin-left:auto;margin-right:auto"></p>
+      <div class="rule"></div>
+      <div class="diffs" style="justify-content:center">
+        <button class="go" id="btnAgain">De novo</button>
+        <button id="btnMenu2">Menu</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="flash"></div>
+  <div id="nogl">Seu navegador não abriu o WebGL 2.<br>Tente Chrome, Edge ou Firefox atualizados, com aceleração de hardware ligada.</div>
+</div>
+
+<script>
+"use strict";
+(function(){
+
+/* ==========================================================================
+   0. CONSTANTES DO MUNDO — proporções reais
+   ========================================================================== */
+const BLOCK   = 4.0;    // aresta do cubo, metros
+const P_H     = 2.0;    // altura do personagem
+const P_R     = 0.52;   // raio de colisão
+const EYE     = 1.72;   // altura dos olhos
+const GRAV    = 20.0;   // m/s² (pesado, pra pulo não flutuar)
+const JUMP_LO = 6.0;    // ápice do pulo curto = 3× a altura
+const JUMP_HI = 10.0;   // ápice do pulo carregado = 5× a altura
+const V_LO    = Math.sqrt(2*GRAV*JUMP_LO);
+const COYOTE  = 0.12;   // tolerância depois de sair da borda
+const JUMP_BUF= 0.18;   // tolerância antes de encostar no chão
+const SPD_RUN = 5.8;    // corrida de humano de 2 m
+const SPD_SPR = 8.2;
+const CHARGE_T= 0.50;   // segundos de espaço segurado
+const REACH   = 13*BLOCK;
+const NUM_R   = 0.45;   // raio de acerto do número: menor que o glifo (~0.52),
+                        // senão o número rouba tiros mirados no bloco atrás
+const ECHO_DUR= 2.2;    // duração do eco nos blocos vizinhos
+const FUSE_T  = 0.85;   // a mina acertada brilha antes de levar tudo
+
+/* Densidade tem piso: com 26 vizinhos, P(bloco zero) = (1-d)^26, e a
+   percolação de sítio nessa vizinhança vira em ~9,8%. Abaixo de ~10% de
+   minas o primeiro tiro abre a caverna inteira de uma vez. */
+const DIFFS = [
+  {name:"Aprendiz",   nx:10, nz:10, ny:3, dens:0.105},
+  {name:"Feiticeiro", nx:12, nz:12, ny:3, dens:0.130},
+  {name:"Arcano",     nx:14, nz:14, ny:3, dens:0.160}
+];
+
+const SOLID=0, AIR=1, MARKED=2;
+
+/* ==========================================================================
+   1. MATEMÁTICA
+   ========================================================================== */
+const m4 = {
+  persp(fovy, asp, n, f){
+    const t = 1/Math.tan(fovy/2), o = new Float32Array(16);
+    o[0]=t/asp; o[5]=t; o[10]=(f+n)/(n-f); o[11]=-1; o[14]=(2*f*n)/(n-f);
+    return o;
+  },
+  ident(){ const o=new Float32Array(16); o[0]=o[5]=o[10]=o[15]=1; return o; }
+};
+function viewFrom(px,py,pz, yaw, pitch, out){
+  const cy=Math.cos(yaw), sy=Math.sin(yaw), cp=Math.cos(pitch), sp=Math.sin(pitch);
+  const fx=-sy*cp, fy=sp, fz=-cy*cp;
+  const rx= cy,    ry=0,  rz=-sy;
+  const ux= ry*fz-rz*fy, uy= rz*fx-rx*fz, uz= rx*fy-ry*fx;
+  out[0]=rx; out[4]=ry; out[8]=rz;  out[12]=-(rx*px+ry*py+rz*pz);
+  out[1]=ux; out[5]=uy; out[9]=uz;  out[13]=-(ux*px+uy*py+uz*pz);
+  out[2]=-fx;out[6]=-fy;out[10]=-fz;out[14]= (fx*px+fy*py+fz*pz);
+  out[3]=0;  out[7]=0;  out[11]=0;  out[15]=1;
+  return {fx,fy,fz,rx,ry,rz,ux,uy,uz};
+}
+// matriz de instância: translação + rotação ZYX + escala, coluna-maior
+function compose(d,o, px,py,pz, rx,ry,rz, sx,sy,sz){
+  const cx=Math.cos(rx),sx_=Math.sin(rx),cy=Math.cos(ry),sy_=Math.sin(ry),cz=Math.cos(rz),sz_=Math.sin(rz);
+  const r00=cz*cy,             r01=cz*sy_*sx_-sz_*cx, r02=cz*sy_*cx+sz_*sx_;
+  const r10=sz_*cy,            r11=sz_*sy_*sx_+cz*cx, r12=sz_*sy_*cx-cz*sx_;
+  const r20=-sy_,              r21=cy*sx_,            r22=cy*cx;
+  d[o  ]=r00*sx; d[o+1]=r10*sx; d[o+2]=r20*sx; d[o+3]=0;
+  d[o+4]=r01*sy; d[o+5]=r11*sy; d[o+6]=r21*sy; d[o+7]=0;
+  d[o+8]=r02*sz; d[o+9]=r12*sz; d[o+10]=r22*sz;d[o+11]=0;
+  d[o+12]=px;    d[o+13]=py;    d[o+14]=pz;    d[o+15]=1;
+}
+function composeAA(d,o, px,py,pz, sx,sy,sz){
+  d[o]=sx;d[o+1]=0;d[o+2]=0;d[o+3]=0;
+  d[o+4]=0;d[o+5]=sy;d[o+6]=0;d[o+7]=0;
+  d[o+8]=0;d[o+9]=0;d[o+10]=sz;d[o+11]=0;
+  d[o+12]=px;d[o+13]=py;d[o+14]=pz;d[o+15]=1;
+}
+const clamp=(v,a,b)=>v<a?a:(v>b?b:v);
+const lerp=(a,b,t)=>a+(b-a)*t;
+let seed=1;
+function rnd(){ seed = (seed*1664525+1013904223)>>>0; return seed/4294967296; }
+
+function hsl2rgb(h,s,l){
+  h=((h%360)+360)%360/360;
+  const q = l<0.5 ? l*(1+s) : l+s-l*s, p = 2*l-q;
+  const f=(t)=>{ t=(t+1)%1; if(t<1/6)return p+(q-p)*6*t; if(t<0.5)return q;
+                 if(t<2/3)return p+(q-p)*(2/3-t)*6; return p; };
+  return [f(h+1/3), f(h), f(h-1/3)];
+}
+
+/* ==========================================================================
+   2. WEBGL — contexto e programas
+   ========================================================================== */
+const canvas = document.getElementById('gl');
+const gl = canvas.getContext('webgl2', {antialias:true, alpha:false, powerPreference:'high-performance'});
+if(!gl){ document.getElementById('nogl').style.display='grid'; return; }
+
+function sh(type, src){
+  const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+  if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)+"\n"+src);
+  return s;
+}
+function prog(vs, fs){
+  const p = gl.createProgram();
+  gl.attachShader(p, sh(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if(!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  return p;
+}
+
+/* ---- cubos (mundo, escombros, cajado) ---- */
+const VS_CUBE = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNormal;
+layout(location=2) in vec2 aUV;
+layout(location=3) in vec4 iM0;
+layout(location=4) in vec4 iM1;
+layout(location=5) in vec4 iM2;
+layout(location=6) in vec4 iM3;
+layout(location=7) in vec3 iColor;
+layout(location=8) in vec4 iParams;
+uniform mat4 uProj, uView;
+uniform vec3 uHover;
+out vec3 vN, vW, vC;
+out vec2 vUV;
+out float vSeed, vEmis, vMark, vEcho, vHover;
+void main(){
+  mat4 M = mat4(iM0,iM1,iM2,iM3);
+  vec4 wp = M * vec4(aPos,1.0);
+  vW = wp.xyz;
+  vN = normalize(mat3(M) * aNormal);
+  vUV = aUV; vC = iColor;
+  vSeed = iParams.x; vEmis = iParams.y; vMark = iParams.z; vEcho = iParams.w;
+  vHover = 1.0 - step(0.4, distance(iM3.xyz, uHover));
+  gl_Position = uProj * uView * wp;
+}`;
+
+const FS_CUBE = `#version 300 es
+precision highp float;
+in vec3 vN, vW, vC;
+in vec2 vUV;
+in float vSeed, vEmis, vMark, vEcho, vHover;
+uniform vec3 uCam, uSun, uFog;
+uniform float uTime, uOutline;
+out vec4 frag;
+float hash(vec2 p, float s){ return fract(sin(dot(p, vec2(127.1,311.7)) + s*13.37) * 43758.5453); }
+void main(){
+  vec3 N = normalize(vN);
+
+  /* --- textura de pixel grosso: Noita virou 3D --- */
+  const float PX = 10.0;
+  vec2 cell = floor(vUV * PX);
+  float h  = hash(cell + vec2(vSeed*7.13, vSeed*3.71), vSeed);
+  float h2 = hash(cell*1.73 + 5.0, vSeed + 1.0);
+  vec3 base = vC * (0.86 + 0.26*h);
+  base = mix(base, base*vec3(1.22,1.00,0.72), step(0.88, h2));
+  base = mix(base, base*0.70, step(0.955, hash(cell*2.3+11.0, vSeed+2.0)));
+
+  /* --- luz em degraus (cel) --- */
+  float ndl  = max(dot(N, uSun), 0.0);
+  /* O sol vem de cima, então quase toda parede cai no degrau mais baixo.
+     Piso alto o bastante pra areia continuar areia na sombra. */
+  float band = ndl > 0.70 ? 1.0 : (ndl > 0.33 ? 0.78 : 0.55);
+  /* Exposição calibrada pra somar ~1.0 no pior caso (face clara, virada pro
+     sol, encostada na lanterna). Acima disso o degrau some no branco. */
+  vec3 sky = vec3(0.46,0.56,0.78), gnd = vec3(0.66,0.42,0.24);
+  vec3 amb = mix(gnd, sky, N.y*0.5+0.5) * 0.36;
+  vec3 lit = base * (amb + vec3(1.25,1.02,0.72) * band * 0.54);
+
+  /* --- lanterna do cajado, também em degraus --- */
+  float d = distance(vW, uCam);
+  float att = 1.0/(1.0 + d*d*0.0042);
+  att = floor(att*5.0)/5.0;
+  lit += base * vec3(1.0,0.70,0.34) * att * 0.20;
+
+  /* --- emissivo (cristais, minas, ouro) --- */
+  lit = mix(lit, base*1.15 + vec3(0.18,0.09,0.03), vEmis);
+
+  /* --- runa de marcação --- */
+  float pulse = 0.5 + 0.5*sin(uTime*5.2 + vSeed*6.0);
+  lit = mix(lit, vec3(0.66,0.34,0.98)*(0.55+0.55*pulse), vMark*0.72);
+
+  /* --- contorno preto assado na face --- */
+  float e = min(min(vUV.x, 1.0-vUV.x), min(vUV.y, 1.0-vUV.y));
+  float w = fwidth(e)*1.4 + 0.0012;
+  float edge = smoothstep(0.018*uOutline, 0.018*uOutline + w, e);
+  vec3 outc = mix(vec3(0.05,0.032,0.028), vec3(1.0,0.80,0.36), vHover);
+  lit = mix(outc, lit, edge);
+  lit += vHover * 0.16 * vec3(1.0,0.85,0.55);
+
+  /* eco: os blocos que o número atingido está contando. Ciano nas bordas,
+     bem diferente do roxo chapado de bloco marcado como mina. */
+  float ep = 0.55 + 0.45*sin(uTime*8.5);
+  lit += vec3(0.28,0.92,1.0) * vEcho * (0.20 + 0.55*(1.0-edge)) * (0.60 + 0.40*ep);
+
+  float f = 1.0 - exp(-pow(d*0.0135, 2.0));
+  frag = vec4(mix(lit, uFog, clamp(f,0.0,1.0)), 1.0);
+}`;
+
+/* ---- billboards (números, setas, brilhos) ---- */
+const VS_BB = `#version 300 es
+precision highp float;
+layout(location=0) in vec2 aCorner;
+layout(location=1) in vec3 iPos;
+layout(location=2) in vec2 iSize;
+layout(location=3) in vec4 iUV;
+layout(location=4) in vec4 iColor;
+layout(location=5) in vec2 iRM;
+uniform mat4 uProj, uView;
+uniform vec3 uRight, uUp;
+out vec2 vUV; out vec4 vCol; out float vMode;
+void main(){
+  float c = cos(iRM.x), s = sin(iRM.x);
+  vec2 p = vec2(aCorner.x*c - aCorner.y*s, aCorner.x*s + aCorner.y*c) * iSize;
+  vec3 wp = iPos + uRight*p.x + uUp*p.y;
+  vec2 t = aCorner + 0.5;
+  vUV = mix(iUV.xy, iUV.zw, t);
+  vCol = iColor; vMode = iRM.y;
+  gl_Position = uProj * uView * vec4(wp,1.0);
+}`;
+
+const FS_BB = `#version 300 es
+precision highp float;
+in vec2 vUV; in vec4 vCol; in float vMode;
+uniform sampler2D uTex;
+out vec4 frag;
+void main(){
+  vec4 t = texture(uTex, vUV);
+  /* glifo corta cedo pra não gravar halo no z-buffer; brilho fica macio */
+  if(t.a < (vMode > 0.5 ? 0.02 : 0.34)) discard;
+  if(vMode > 0.5){
+    frag = vec4(vCol.rgb * t.a * vCol.a, t.a * vCol.a);
+  } else {
+    vec3 col = vCol.rgb * t.r + vec3(0.045,0.028,0.024) * t.g;
+    frag = vec4(col, t.a * vCol.a);
+  }
+}`;
+
+const pCube = prog(VS_CUBE, FS_CUBE);
+const pBB   = prog(VS_BB,   FS_BB);
+
+const uC = {
+  proj:gl.getUniformLocation(pCube,'uProj'), view:gl.getUniformLocation(pCube,'uView'),
+  cam:gl.getUniformLocation(pCube,'uCam'),   sun:gl.getUniformLocation(pCube,'uSun'),
+  fog:gl.getUniformLocation(pCube,'uFog'),   time:gl.getUniformLocation(pCube,'uTime'),
+  hover:gl.getUniformLocation(pCube,'uHover'), outline:gl.getUniformLocation(pCube,'uOutline')
+};
+const uB = {
+  proj:gl.getUniformLocation(pBB,'uProj'), view:gl.getUniformLocation(pBB,'uView'),
+  right:gl.getUniformLocation(pBB,'uRight'), up:gl.getUniformLocation(pBB,'uUp'),
+  tex:gl.getUniformLocation(pBB,'uTex')
+};
+
+/* ---- geometria do cubo ---- */
+function buildCube(){
+  const F = [
+    {n:[1,0,0],  u:[0,0,-1], v:[0,1,0]},
+    {n:[-1,0,0], u:[0,0,1],  v:[0,1,0]},
+    {n:[0,1,0],  u:[0,0,1],  v:[1,0,0]},
+    {n:[0,-1,0], u:[1,0,0],  v:[0,0,1]},
+    {n:[0,0,1],  u:[1,0,0],  v:[0,1,0]},
+    {n:[0,0,-1], u:[-1,0,0], v:[0,1,0]}
+  ];
+  const verts=[], idx=[];
+  F.forEach((f,fi)=>{
+    const b = fi*4;
+    [[0,0],[1,0],[1,1],[0,1]].forEach(([s,t])=>{
+      for(let k=0;k<3;k++) verts.push(f.n[k]*0.5 + f.u[k]*(s-0.5) + f.v[k]*(t-0.5));
+      verts.push(f.n[0],f.n[1],f.n[2], s, t);
+    });
+    idx.push(b,b+1,b+2, b,b+2,b+3);
+  });
+  return {verts:new Float32Array(verts), idx:new Uint16Array(idx)};
+}
+const CUBE = buildCube();
+
+const CUBE_STRIDE = 23; // mat4(16) + color(3) + params(4: seed, emis, marca, eco)
+function makeCubeBatch(max){
+  const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+  const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb);
+  gl.bufferData(gl.ARRAY_BUFFER, CUBE.verts, gl.STATIC_DRAW);
+  const S = 8*4;
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0,3,gl.FLOAT,false,S,0);
+  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1,3,gl.FLOAT,false,S,12);
+  gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2,2,gl.FLOAT,false,S,24);
+  const ib = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, CUBE.idx, gl.STATIC_DRAW);
+  const inst = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, inst);
+  gl.bufferData(gl.ARRAY_BUFFER, max*CUBE_STRIDE*4, gl.DYNAMIC_DRAW);
+  const IS = CUBE_STRIDE*4;
+  for(let i=0;i<4;i++){
+    gl.enableVertexAttribArray(3+i);
+    gl.vertexAttribPointer(3+i,4,gl.FLOAT,false,IS,i*16);
+    gl.vertexAttribDivisor(3+i,1);
+  }
+  gl.enableVertexAttribArray(7); gl.vertexAttribPointer(7,3,gl.FLOAT,false,IS,64); gl.vertexAttribDivisor(7,1);
+  gl.enableVertexAttribArray(8); gl.vertexAttribPointer(8,4,gl.FLOAT,false,IS,76); gl.vertexAttribDivisor(8,1);
+  gl.bindVertexArray(null);
+  return {vao, inst, data:new Float32Array(max*CUBE_STRIDE), max, count:0};
+}
+function drawCubes(b){
+  if(!b.count) return;
+  gl.bindVertexArray(b.vao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, b.inst);
+  gl.bufferSubData(gl.ARRAY_BUFFER, 0, b.data, 0, b.count*CUBE_STRIDE);
+  gl.drawElementsInstanced(gl.TRIANGLES, 36, gl.UNSIGNED_SHORT, 0, b.count);
+  gl.bindVertexArray(null);
+}
+
+const BB_STRIDE = 15; // pos3 size2 uv4 col4 rm2
+function makeBBBatch(max){
+  const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+  const q = new Float32Array([-0.5,-0.5, 0.5,-0.5, 0.5,0.5, -0.5,-0.5, 0.5,0.5, -0.5,0.5]);
+  const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb);
+  gl.bufferData(gl.ARRAY_BUFFER, q, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0,2,gl.FLOAT,false,8,0);
+  const inst = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, inst);
+  gl.bufferData(gl.ARRAY_BUFFER, max*BB_STRIDE*4, gl.DYNAMIC_DRAW);
+  const S = BB_STRIDE*4;
+  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1,3,gl.FLOAT,false,S,0);  gl.vertexAttribDivisor(1,1);
+  gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2,2,gl.FLOAT,false,S,12); gl.vertexAttribDivisor(2,1);
+  gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3,4,gl.FLOAT,false,S,20); gl.vertexAttribDivisor(3,1);
+  gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4,4,gl.FLOAT,false,S,36); gl.vertexAttribDivisor(4,1);
+  gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5,2,gl.FLOAT,false,S,52); gl.vertexAttribDivisor(5,1);
+  gl.bindVertexArray(null);
+  return {vao, inst, data:new Float32Array(max*BB_STRIDE), max, count:0};
+}
+function drawBBs(b){
+  if(!b.count) return;
+  gl.bindVertexArray(b.vao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, b.inst);
+  gl.bufferSubData(gl.ARRAY_BUFFER, 0, b.data, 0, b.count*BB_STRIDE);
+  gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, b.count);
+  gl.bindVertexArray(null);
+}
+
+/* ==========================================================================
+   3. ATLAS DE GLIFOS  (números 0–26, setas, mina, runa, brilho, moeda)
+   canal R = preenchimento, canal G = contorno
+   ========================================================================== */
+const T_UP=27, T_DOWN=28, T_MINE=29, T_RUNE=30, T_GLOW=31, T_COIN=32, T_SPARK=33;
+const ATLAS_N = 8, TILE = 128, ATLAS_PX = ATLAS_N*TILE;
+
+function buildAtlas(){
+  const c = document.createElement('canvas'); c.width=c.height=ATLAS_PX;
+  const x = c.getContext('2d');
+  x.clearRect(0,0,ATLAS_PX,ATLAS_PX);
+  const at = i => [ (i%ATLAS_N)*TILE, Math.floor(i/ATLAS_N)*TILE ];
+  const FILL='#ff0000', LINE='#00ff00';
+
+  // números
+  for(let n=0;n<=26;n++){
+    const [ox,oy]=at(n);
+    x.save(); x.translate(ox,oy);
+    x.font='900 92px '+getComputedStyle(document.documentElement).getPropertyValue('--display');
+    x.textAlign='center'; x.textBaseline='middle';
+    const s = String(n), w = x.measureText(s).width, k = Math.min(1, 96/Math.max(w,1));
+    x.translate(TILE/2, TILE/2+3); x.scale(k,1);
+    x.lineJoin='round'; x.lineWidth=11/k; x.strokeStyle=LINE; x.strokeText(s,0,0);
+    x.fillStyle=FILL; x.fillText(s,0,0);
+    x.restore();
+  }
+  // setas
+  const arrow=(i,dir)=>{
+    const [ox,oy]=at(i); x.save(); x.translate(ox+TILE/2, oy+TILE/2); x.scale(1,dir);
+    x.beginPath();
+    x.moveTo(0,-46); x.lineTo(38,4); x.lineTo(15,4); x.lineTo(15,46);
+    x.lineTo(-15,46); x.lineTo(-15,4); x.lineTo(-38,4); x.closePath();
+    x.lineJoin='round'; x.lineWidth=11; x.strokeStyle=LINE; x.stroke();
+    x.fillStyle=FILL; x.fill(); x.restore();
+  };
+  arrow(T_UP,1); arrow(T_DOWN,-1);
+
+  // mina — esfera cravada
+  {
+    const [ox,oy]=at(T_MINE); x.save(); x.translate(ox+TILE/2, oy+TILE/2);
+    x.lineJoin='round'; x.lineCap='round';
+    x.strokeStyle=LINE; x.lineWidth=20;
+    for(let i=0;i<8;i++){ const a=i*Math.PI/4;
+      x.beginPath(); x.moveTo(Math.cos(a)*22, Math.sin(a)*22); x.lineTo(Math.cos(a)*52, Math.sin(a)*52); x.stroke(); }
+    x.beginPath(); x.arc(0,0,34,0,7); x.lineWidth=20; x.stroke();
+    x.fillStyle=FILL;
+    for(let i=0;i<8;i++){ const a=i*Math.PI/4;
+      x.save(); x.rotate(a); x.fillRect(-5,-52,10,104); x.restore(); }
+    x.beginPath(); x.arc(0,0,34,0,7); x.fill();
+    x.restore();
+  }
+  // runa de marcação — losango cortado
+  {
+    const [ox,oy]=at(T_RUNE); x.save(); x.translate(ox+TILE/2, oy+TILE/2);
+    x.beginPath(); x.moveTo(0,-48); x.lineTo(40,0); x.lineTo(0,48); x.lineTo(-40,0); x.closePath();
+    x.lineJoin='round'; x.lineWidth=18; x.strokeStyle=LINE; x.stroke();
+    x.fillStyle=FILL; x.fill();
+    x.restore();
+  }
+  // brilho radial (só alfa importa)
+  {
+    const [ox,oy]=at(T_GLOW);
+    const g = x.createRadialGradient(ox+TILE/2, oy+TILE/2, 0, ox+TILE/2, oy+TILE/2, TILE/2);
+    g.addColorStop(0,'rgba(255,255,255,1)');
+    g.addColorStop(0.35,'rgba(255,255,255,0.55)');
+    g.addColorStop(1,'rgba(255,255,255,0)');
+    x.fillStyle=g; x.fillRect(ox,oy,TILE,TILE);
+  }
+  // moeda
+  {
+    const [ox,oy]=at(T_COIN); x.save(); x.translate(ox+TILE/2, oy+TILE/2);
+    x.beginPath(); x.arc(0,0,40,0,7); x.lineWidth=16; x.strokeStyle=LINE; x.stroke();
+    x.fillStyle=FILL; x.fill(); x.restore();
+  }
+  // faísca
+  {
+    const [ox,oy]=at(T_SPARK); x.save(); x.translate(ox+TILE/2, oy+TILE/2); x.rotate(Math.PI/4);
+    x.fillStyle=FILL; x.fillRect(-26,-26,52,52); x.restore();
+  }
+  return c;
+}
+const atlasTex = gl.createTexture();
+{
+  const c = buildAtlas();
+  gl.bindTexture(gl.TEXTURE_2D, atlasTex);
+  // uvOf() conta v de baixo pra cima; a tela do canvas conta de cima pra baixo.
+  // Sem este flip cada tile lê a linha espelhada do atlas (e os números somem).
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,c);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+}
+function uvOf(i){
+  const cx=(i%ATLAS_N)*TILE, cy=Math.floor(i/ATLAS_N)*TILE;
+  return [cx/ATLAS_PX, 1-(cy+TILE)/ATLAS_PX, (cx+TILE)/ATLAS_PX, 1-cy/ATLAS_PX];
+}
+const UVS = []; for(let i=0;i<64;i++) UVS.push(uvOf(i));
+
+/* rampa de cor dos números: ciano (poucas minas) → magenta (muitas).
+   O intervalo útil é 1–12; acima disso satura no extremo quente. */
+const NUMCOL = [];
+for(let n=0;n<=26;n++){
+  if(n===0){ NUMCOL.push([0.62,0.62,0.62]); continue; }
+  const t=Math.min(1,(n-1)/11);
+  NUMCOL.push(hsl2rgb(192-214*t, 0.88, 0.635));
+}
+
+/* ==========================================================================
+   4. MATERIAIS DA CAVERNA
+   ========================================================================== */
+const MATS = [
+  {c:[0.86,0.64,0.32]}, // arenito
+  {c:[0.94,0.75,0.42]}, // areia clara
+  {c:[0.72,0.44,0.20]}, // argila ocre
+  {c:[0.80,0.55,0.26]}, // arenito escuro
+  {c:[0.90,0.70,0.28], gold:true} // veio de ouro
+];
+const BEDROCK   = [0.19,0.14,0.13];
+const BEDCRYST  = [0.82,0.54,0.19];
+
+/* ==========================================================================
+   5. ESTADO DO JOGO
+   ========================================================================== */
+const G = {
+  state:'menu',          // menu | play | pause | over
+  diff:0,
+  nx:0, ny:3, nz:0,
+  mine:null, cnt:null, st:null, mat:null,
+  mines:0, marked:0, safeTotal:0, revealed:0, gold:0,
+  t0:0, elapsed:0,
+  arrows:true, muted:false, sens:0.0014, invY:false,
+  dirty:true, cells:null,
+  boom:0, win:false, shake:0, slowmo:1, fuse:0, boomCell:null
+};
+const P = { x:0,y:0,z:0, vx:0,vy:0,vz:0, yaw:0,pitch:0, ground:false, bob:0, step:0,
+            coyote:0, jumpY0:0 };
+const IN = { f:0,b:0,l:0,r:0, sprint:false,
+             jumpHeld:false, jumpT:0, jumpFired:false, surged:true, jumpBuf:0 };
+
+function idx(x,y,z){ return (y*G.nz + z)*G.nx + x; }
+function inside(x,y,z){ return x>=0&&y>=0&&z>=0&&x<G.nx&&y<G.ny&&z<G.nz; }
+function isSolidCell(x,y,z){
+  if(!inside(x,y,z)) return true;             // fora = rocha-mãe
+  return G.st[idx(x,y,z)] !== AIR;
+}
+
+function genWorld(d){
+  const D = DIFFS[d];
+  G.diff=d; G.nx=D.nx; G.nz=D.nz; G.ny=D.ny;
+  const N = G.nx*G.ny*G.nz;
+  G.mine=new Uint8Array(N); G.cnt=new Uint8Array(N);
+  G.st=new Uint8Array(N);   G.mat=new Uint8Array(N);
+  G.echoT=new Float32Array(N); G.echoUntil=0;
+  for(let i=0;i<N;i++) G.mat[i] = (rnd()<0.055) ? 4 : (rnd()*4)|0;
+
+  const cx=(G.nx>>1), cz=(G.nz>>1), cy=1;
+  const safe = new Set();
+  for(let dx=-1;dx<=1;dx++) for(let dz=-1;dz<=1;dz++) safe.add(idx(cx+dx, cy, cz+dz));
+
+  /* Sorteia até que nenhum bloco da câmara inicial marque zero. Um zero ali
+     dispara a inundação já no nascimento e às vezes abre 3/4 da caverna de
+     uma vez — o tabuleiro é condicionado à abertura, como no campo minado 2D. */
+  const wanted = Math.round(N*D.dens);
+  for(let attempt=1; ; attempt++){
+    G.mine.fill(0);
+    let placed=0, guard=0;
+    while(placed<wanted && guard++<N*80){
+      const i=(rnd()*N)|0;
+      if(G.mine[i] || safe.has(i)) continue;
+      G.mine[i]=1; placed++;
+    }
+    G.mines=placed;
+
+    for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
+      let c=0;
+      for(let dy=-1;dy<=1;dy++) for(let dz=-1;dz<=1;dz++) for(let dx=-1;dx<=1;dx++){
+        if(!dx&&!dy&&!dz) continue;
+        const X=x+dx,Y=y+dy,Z=z+dz;
+        if(inside(X,Y,Z) && G.mine[idx(X,Y,Z)]) c++;
+      }
+      G.cnt[idx(x,y,z)]=c;
+    }
+
+    let zero=false;
+    for(const i of safe) if(G.cnt[i]===0){ zero=true; break; }
+    if(!zero || attempt>=80) break;
+  }
+
+  G.safeTotal = N - G.mines;
+  G.revealed=0; G.marked=0; G.gold=0; G.win=false; G.boom=0; G.slowmo=1; G.shake=0;
+  G.fuse=0; G.boomCell=null;
+  G.elapsed=0; G.t0=performance.now();
+
+  // câmara inicial: 3×3 escavado na camada do meio
+  for(const i of safe) revealAt(i, true);
+
+  P.x=(cx+0.5)*BLOCK; P.z=(cz+0.5)*BLOCK; P.y=cy*BLOCK;
+  P.vx=P.vy=P.vz=0; P.yaw=0; P.pitch=0; P.ground=true; P.coyote=COYOTE;
+  particles.length=0; sprites.length=0; debris.count=0;
+  seedDust();
+  G.dirty=true;
+}
+
+/* revela com inundação nos zeros (26 vizinhos) */
+function revealAt(start, silent){
+  if(G.st[start]===AIR) return;
+  const stack=[start]; let opened=0;
+  while(stack.length){
+    const i=stack.pop();
+    if(G.st[i]===AIR) continue;
+    G.st[i]=AIR; G.revealed++; opened++;
+    if(MATS[G.mat[i]].gold){ G.gold += 5 + ((rnd()*12)|0); }
+    const x = i % G.nx, z = ((i/G.nx)|0) % G.nz, y = (i/(G.nx*G.nz))|0;
+    if(!silent) spawnCrumble(x,y,z, G.mat[i]);
+    if(G.cnt[i]===0){
+      for(let dy=-1;dy<=1;dy++) for(let dz=-1;dz<=1;dz++) for(let dx=-1;dx<=1;dx++){
+        if(!dx&&!dy&&!dz) continue;
+        const X=x+dx,Y=y+dy,Z=z+dz;
+        if(inside(X,Y,Z)){
+          const j=idx(X,Y,Z);
+          if(G.st[j]!==AIR && !G.mine[j]) stack.push(j);
+        }
+      }
+    }
+  }
+  G.dirty=true;
+  return opened;
+}
+
+/* setas de plano: há mina em algum dos 9 blocos acima / abaixo? */
+function planeFlags(x,y,z){
+  let up=false, dn=false;
+  for(let dz=-1;dz<=1;dz++) for(let dx=-1;dx<=1;dx++){
+    if(inside(x+dx,y+1,z+dz) && G.mine[idx(x+dx,y+1,z+dz)]) up=true;
+    if(inside(x+dx,y-1,z+dz) && G.mine[idx(x+dx,y-1,z+dz)]) dn=true;
+  }
+  return [up,dn];
+}
+
+/* ==========================================================================
+   6. RAIO — DDA por vóxel
+   ========================================================================== */
+function raycast(ox,oy,oz, dx,dy,dz, maxD, wantNum){
+  let x=Math.floor(ox/BLOCK), y=Math.floor(oy/BLOCK), z=Math.floor(oz/BLOCK);
+  const sx=Math.sign(dx)||1, sy=Math.sign(dy)||1, sz=Math.sign(dz)||1;
+  const tdx=Math.abs(BLOCK/(dx||1e-9)), tdy=Math.abs(BLOCK/(dy||1e-9)), tdz=Math.abs(BLOCK/(dz||1e-9));
+  const bx=(x+(sx>0?1:0))*BLOCK, by=(y+(sy>0?1:0))*BLOCK, bz=(z+(sz>0?1:0))*BLOCK;
+  let tmx=Math.abs((bx-ox)/(dx||1e-9)), tmy=Math.abs((by-oy)/(dy||1e-9)), tmz=Math.abs((bz-oz)/(dz||1e-9));
+  let t=0;
+  for(let s=0;s<400;s++){
+    if(isSolidCell(x,y,z))
+      return {hit:true, kind: inside(x,y,z)?'block':'bedrock', x,y,z, t};
+    /* número flutuando nesta célula de ar: teste de esfera contra o centro.
+       O raio bate com o tamanho do glifo, então mirar ao lado pega o bloco. */
+    if(wantNum && inside(x,y,z)){
+      const i=idx(x,y,z);
+      if(G.cnt[i]>0 && !G.mine[i]){
+        const vx=(x+0.5)*BLOCK-ox, vy=(y+0.5)*BLOCK-oy, vz=(z+0.5)*BLOCK-oz;
+        const tc = vx*dx+vy*dy+vz*dz;
+        if(tc>0.5 && tc<maxD){
+          const px=dx*tc-vx, py=dy*tc-vy, pz=dz*tc-vz;
+          if(px*px+py*py+pz*pz <= NUM_R*NUM_R)
+            return {hit:true, kind:'num', x,y,z, t:tc};
+        }
+      }
+    }
+    if(tmx<tmy){ if(tmx<tmz){ x+=sx; t=tmx; tmx+=tdx; } else { z+=sz; t=tmz; tmz+=tdz; } }
+    else       { if(tmy<tmz){ y+=sy; t=tmy; tmy+=tdy; } else { z+=sz; t=tmz; tmz+=tdz; } }
+    if(t>maxD) break;
+  }
+  return {hit:false};
+}
+
+/* ==========================================================================
+   7. PARTÍCULAS
+   ========================================================================== */
+const particles=[];  // cubos com rotação
+const sprites=[];    // brilhos aditivos
+const dust=[];
+const MAXP=2600, MAXS=1600;
+
+function addP(x,y,z, vx,vy,vz, size, life, col, emis, grav){
+  if(particles.length>=MAXP) particles.shift();
+  particles.push({x,y,z,vx,vy,vz, rx:rnd()*6,ry:rnd()*6,rz:rnd()*6,
+    vrx:(rnd()-.5)*9, vry:(rnd()-.5)*9, vrz:(rnd()-.5)*9,
+    s:size, l:life, ml:life, c:col, e:emis||0, g:grav===undefined?1:grav});
+}
+function addS(x,y,z, vx,vy,vz, size, life, col, tile, alpha){
+  if(sprites.length>=MAXS) sprites.shift();
+  sprites.push({x,y,z,vx,vy,vz,s:size,l:life,ml:life,c:col,
+                tile:tile===undefined?T_GLOW:tile, a:alpha===undefined?1:alpha});
+}
+function seedDust(){
+  dust.length=0;
+  for(let i=0;i<170;i++) dust.push({
+    x:rnd()*G.nx*BLOCK, y:rnd()*G.ny*BLOCK, z:rnd()*G.nz*BLOCK,
+    p:rnd()*6.28, s:0.06+rnd()*0.10
+  });
+}
+function spawnCrumble(x,y,z,mat){
+  const c = MATS[mat].c, cx=(x+0.5)*BLOCK, cy=(y+0.5)*BLOCK, cz=(z+0.5)*BLOCK;
+  const n = 9;
+  for(let i=0;i<n;i++){
+    addP(cx+(rnd()-.5)*BLOCK*0.8, cy+(rnd()-.5)*BLOCK*0.8, cz+(rnd()-.5)*BLOCK*0.8,
+         (rnd()-.5)*7, rnd()*5.5, (rnd()-.5)*7,
+         0.24+rnd()*0.55, 0.85+rnd()*0.8, c, 0);
+  }
+  if(MATS[mat].gold){
+    for(let i=0;i<7;i++)
+      addS(cx+(rnd()-.5)*3, cy+(rnd()-.5)*3, cz+(rnd()-.5)*3,
+           (rnd()-.5)*3, 1.4+rnd()*2.4, (rnd()-.5)*3, 0.42, 1.1, [1.0,0.82,0.30], T_COIN);
+  }
+  snd.crumble();
+}
+
+/* ==========================================================================
+   8. ÁUDIO — tudo sintetizado
+   ========================================================================== */
+const snd = (function(){
+  let ac=null, master=null, drone=null;
+  function ensure(){
+    if(ac) return true;
+    try{
+      ac = new (window.AudioContext||window.webkitAudioContext)();
+      master = ac.createGain(); master.gain.value=0.5; master.connect(ac.destination);
+      // vento surdo da caverna
+      const n = ac.createBufferSource(), buf = ac.createBuffer(1, ac.sampleRate*3, ac.sampleRate);
+      const d = buf.getChannelData(0);
+      for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*0.5;
+      n.buffer=buf; n.loop=true;
+      const f=ac.createBiquadFilter(); f.type='lowpass'; f.frequency.value=190;
+      const g=ac.createGain(); g.gain.value=0.055;
+      n.connect(f); f.connect(g); g.connect(master); n.start();
+      drone=g;
+      return true;
+    }catch(e){ return false; }
+  }
+  function env(node, a, d, peak){
+    const g=ac.createGain(); g.gain.setValueAtTime(0.0001, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(peak, ac.currentTime+a);
+    g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime+a+d);
+    node.connect(g); g.connect(master); return g;
+  }
+  function noise(dur){
+    const b=ac.createBuffer(1, Math.max(1,(ac.sampleRate*dur)|0), ac.sampleRate);
+    const d=b.getChannelData(0); for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
+    const s=ac.createBufferSource(); s.buffer=b; return s;
+  }
+  const on = ()=> ensure() && !G.muted;
+  return {
+    resume(){ if(ensure() && ac.state==='suspended') ac.resume(); },
+    setMute(m){ if(master) master.gain.value = m?0:0.5; },
+    shot(){ if(!on())return;
+      const o=ac.createOscillator(); o.type='sawtooth';
+      o.frequency.setValueAtTime(760, ac.currentTime);
+      o.frequency.exponentialRampToValueAtTime(150, ac.currentTime+0.16);
+      const f=ac.createBiquadFilter(); f.type='bandpass'; f.frequency.value=900; f.Q.value=3;
+      o.connect(f); env(f,0.004,0.17,0.30); o.start(); o.stop(ac.currentTime+0.2);
+    },
+    crumble(){ if(!on())return;
+      const s=noise(0.24); const f=ac.createBiquadFilter(); f.type='lowpass'; f.frequency.value=1400;
+      s.connect(f); env(f,0.005,0.22,0.20); s.start();
+    },
+    clink(){ if(!on())return;
+      const o=ac.createOscillator(); o.type='square'; o.frequency.value=2100;
+      env(o,0.002,0.05,0.06); o.start(); o.stop(ac.currentTime+0.07);
+    },
+    mark(){ if(!on())return;
+      const o=ac.createOscillator(); o.type='triangle';
+      o.frequency.setValueAtTime(520, ac.currentTime);
+      o.frequency.exponentialRampToValueAtTime(1180, ac.currentTime+0.1);
+      env(o,0.004,0.13,0.14); o.start(); o.stop(ac.currentTime+0.16);
+    },
+    step(){ if(!on())return;
+      const s=noise(0.07); const f=ac.createBiquadFilter(); f.type='lowpass'; f.frequency.value=420;
+      s.connect(f); env(f,0.004,0.06,0.10); s.start();
+    },
+    fuse(){ if(!on())return;
+      const o=ac.createOscillator(); o.type='sawtooth';
+      o.frequency.setValueAtTime(180, ac.currentTime);
+      o.frequency.exponentialRampToValueAtTime(1500, ac.currentTime+0.8);
+      const f=ac.createBiquadFilter(); f.type='bandpass'; f.frequency.value=1100; f.Q.value=2.5;
+      o.connect(f); env(f,0.05,0.85,0.18); o.start(); o.stop(ac.currentTime+0.9);
+    },
+    boom(){ if(!on())return;
+      const s=noise(2.4); const f=ac.createBiquadFilter(); f.type='lowpass';
+      f.frequency.setValueAtTime(2600, ac.currentTime);
+      f.frequency.exponentialRampToValueAtTime(90, ac.currentTime+2.2);
+      s.connect(f); env(f,0.006,2.4,0.85); s.start();
+      const o=ac.createOscillator(); o.type='sine';
+      o.frequency.setValueAtTime(150, ac.currentTime);
+      o.frequency.exponentialRampToValueAtTime(24, ac.currentTime+1.9);
+      env(o,0.01,2.1,0.75); o.start(); o.stop(ac.currentTime+2.2);
+    },
+    fanfare(){ if(!on())return;
+      [523,659,784,1047].forEach((hz,i)=>{
+        const o=ac.createOscillator(); o.type='triangle'; o.frequency.value=hz;
+        const g=ac.createGain(); g.gain.setValueAtTime(0.0001, ac.currentTime+i*0.13);
+        g.gain.exponentialRampToValueAtTime(0.18, ac.currentTime+i*0.13+0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime+i*0.13+0.55);
+        o.connect(g); g.connect(master); o.start(ac.currentTime+i*0.13); o.stop(ac.currentTime+i*0.13+0.6);
+      });
+    },
+    spread(){ if(!on())return;
+      [620,830,1120].forEach((hz,i)=>{
+        const o=ac.createOscillator(); o.type='triangle'; o.frequency.value=hz;
+        const g=ac.createGain(); const t0=ac.currentTime+i*0.045;
+        g.gain.setValueAtTime(0.0001,t0);
+        g.gain.exponentialRampToValueAtTime(0.12,t0+0.012);
+        g.gain.exponentialRampToValueAtTime(0.0001,t0+0.3);
+        o.connect(g); g.connect(master); o.start(t0); o.stop(t0+0.34);
+      });
+    },
+    scan(){ if(!on())return;
+      const o=ac.createOscillator(); o.type='sine';
+      o.frequency.setValueAtTime(760, ac.currentTime);
+      o.frequency.exponentialRampToValueAtTime(1720, ac.currentTime+0.16);
+      env(o,0.004,0.24,0.09); o.start(); o.stop(ac.currentTime+0.3);
+    },
+    whisper(){ if(!on())return;
+      const o=ac.createOscillator(); o.type='sawtooth'; o.frequency.value=58;
+      const o2=ac.createOscillator(); o2.type='sawtooth'; o2.frequency.value=61.5;
+      const f=ac.createBiquadFilter(); f.type='lowpass';
+      f.frequency.setValueAtTime(180, ac.currentTime);
+      f.frequency.linearRampToValueAtTime(700, ac.currentTime+1.6);
+      f.frequency.linearRampToValueAtTime(140, ac.currentTime+3.4);
+      o.connect(f); o2.connect(f); env(f,0.9,2.6,0.10);
+      o.start(); o2.start(); o.stop(ac.currentTime+3.6); o2.stop(ac.currentTime+3.6);
+    }
+  };
+})();
+
+/* ==========================================================================
+   9. LOTES DE DESENHO
+   ========================================================================== */
+const worldB  = makeCubeBatch(16*5*16 + 64);
+const debris  = makeCubeBatch(MAXP);
+const viewB   = makeCubeBatch(48);
+const glyphB  = makeBBBatch(2600);
+const glowB   = makeBBBatch(MAXS + 500);
+const boomB   = makeBBBatch(4);   // a mina acertada, por cima de tudo
+
+function rebuildWorld(){
+  const d = worldB.data; let n=0;
+  const put=(px,py,pz,s,col,seedv,emis,mark,echo)=>{
+    const o=n*CUBE_STRIDE;
+    composeAA(d,o, px,py,pz, s,s,s);
+    d[o+16]=col[0]; d[o+17]=col[1]; d[o+18]=col[2];
+    d[o+19]=seedv;  d[o+20]=emis;   d[o+21]=mark;  d[o+22]=echo||0;
+    n++;
+  };
+  // rocha-mãe: casca de um bloco em volta de tudo
+  for(let y=-1;y<=G.ny;y++) for(let z=-1;z<=G.nz;z++) for(let x=-1;x<=G.nx;x++){
+    if(inside(x,y,z)) continue;
+    const s=(x*73856093 ^ y*19349663 ^ z*83492791)>>>0;
+    const cryst = (s%37)===0;
+    put((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, BLOCK,
+        cryst?BEDCRYST:BEDROCK, (s%1000)/1000, cryst?1:0, 0, 0);
+  }
+  // blocos do quebra-cabeça
+  for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
+    const i=idx(x,y,z);
+    if(G.st[i]===AIR) continue;
+    if(G.fuse>0 && G.boomCell && x===G.boomCell[0] && y===G.boomCell[1] && z===G.boomCell[2]){
+      const k = 1 - G.fuse/FUSE_T;                    // 0 -> 1 conforme queima
+      const tremor = Math.sin(tGlobal*46)*0.05*k;
+      put((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, BLOCK*(1+0.16*k+tremor),
+          [1.0, 0.42-0.34*k, 0.16-0.10*k], 0.5, 1, 0, 0);
+      continue;
+    }
+    const m=MATS[G.mat[i]];
+    const echo = G.echoT[i] > tGlobal ? (G.echoT[i]-tGlobal)/ECHO_DUR : 0;
+    put((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, BLOCK,
+        m.c, ((i*2654435761)>>>0 %1000)/1000, m.gold?0.16:0,
+        G.st[i]===MARKED?1:0, echo);
+  }
+  worldB.count=n;
+  G.dirty=false;
+}
+
+/* ==========================================================================
+   10. CAJADO (view model) — 13% do canto inferior esquerdo
+   ========================================================================== */
+/* Peças no espaço LOCAL do cajado: eixo +Y, origem no centro da haste,
+   unidade = meia-altura da tela. Uma única matriz global põe tudo em cena,
+   então as peças não têm como se soltar umas das outras. */
+const STAFF = [
+  // x, y, z,  rx, ry, rz,  sx, sy, sz,  cor, emissivo
+  [0,    0,    0,     0,0,0,          0.18,1.54,0.18, [0.30,0.19,0.115], 0], // haste
+  [0,   -0.20, 0,     0,0,0,          0.23,0.10,0.23, [0.62,0.42,0.18],  0], // anel baixo
+  [0,    0.28, 0,     0,0,0,          0.23,0.10,0.23, [0.62,0.42,0.18],  0], // anel alto
+  [0,    0.66, 0,     0,0,0,          0.25,0.20,0.25, [0.38,0.24,0.14],  0], // coroa
+  [0,    0.85, 0,     0.60,0.80,0.30, 0.235,0.235,0.235,[1.00,0.74,0.30], 1], // cristal
+  [0,    0.85, 0,    -0.40,0.30,0.90, 0.150,0.150,0.150,[1.00,0.94,0.72], 1], // núcleo
+  [0,   -0.42, 0,     0,0,0,          0.44,0.34,0.40, [0.27,0.19,0.18],  0], // punho
+  [0.02,-0.62, 0.02,  0,0,0,          0.36,0.26,0.35, [0.31,0.22,0.20],  0], // pulso
+  [0.06,-1.02, 0.06,  0,0,0,          0.34,0.62,0.34, [0.23,0.16,0.15],  0]  // antebraço
+];
+const STAFF_TILT = [-0.12, 0.15, -0.705];   // rx, ry, rz — inclinação da haste
+const STAFF_DIR  = [0.648, 0.762];          // direção do eixo já projetada
+const STAFF_Z    = -0.90;
+
+let recoil=0, swayX=0, swayY=0;
+const _S=new Float32Array(16), _L=new Float32Array(16);
+function mulM(a,b,out,off){ // out = a*b, coluna-maior
+  for(let c=0;c<4;c++) for(let r=0;r<4;r++)
+    out[off+c*4+r] = a[r]*b[c*4] + a[4+r]*b[c*4+1] + a[8+r]*b[c*4+2] + a[12+r]*b[c*4+3];
+}
+
+function buildViewModel(t, speed, aspect){
+  const d=viewB.data;
+  const hh = -STAFF_Z * Math.tan(55*Math.PI/360);   // meia-altura do plano do cajado
+  const hw = hh*aspect;
+
+  const br  = Math.sin(t*1.15)*0.011;               // respiração
+  const br2 = Math.sin(t*0.62+1.1)*0.007;
+  const brR = Math.sin(t*1.15)*0.015;
+  const bx = Math.sin(P.bob)*0.026*speed;
+  const by = Math.abs(Math.cos(P.bob))*0.020*speed;
+
+  // a ponta mira o canto inferior-esquerdo-central; o centro sai daí
+  const tipX = -0.34*hw, tipY = -0.34*hh;
+  const cx = tipX - STAFF_DIR[0]*hh + (bx + br2 + swayX)*hh;
+  const cy = tipY - STAFF_DIR[1]*hh + (by + br - recoil*0.11)*hh;
+  const cz = STAFF_Z - recoil*0.17;
+
+  compose(_S,0, cx, cy, cz,
+          STAFF_TILT[0] + brR + swayY*0.5 - recoil*0.55,
+          STAFF_TILT[1] + swayX*1.6,
+          STAFF_TILT[2],
+          hh, hh, hh);
+
+  for(let i=0;i<STAFF.length;i++){
+    const s=STAFF[i], o=i*CUBE_STRIDE;
+    compose(_L,0, s[0],s[1],s[2], s[3],s[4],s[5], s[6],s[7],s[8]);
+    mulM(_S,_L,d,o);
+    d[o+16]=s[9][0]; d[o+17]=s[9][1]; d[o+18]=s[9][2];
+    d[o+19]=i*0.17;  d[o+20]=s[10]?(0.72+0.28*Math.sin(t*3.1)):0;  d[o+21]=0; d[o+22]=0;
+  }
+  viewB.count=STAFF.length;
+}
+
+/* ==========================================================================
+   11. FÍSICA E COLISÃO
+   ========================================================================== */
+function collideAxis(axis, delta){
+  if(delta===0) return false;
+  if(axis===0) P.x+=delta; else if(axis===1) P.y+=delta; else P.z+=delta;
+  const minX=P.x-P_R, maxX=P.x+P_R, minY=P.y, maxY=P.y+P_H, minZ=P.z-P_R, maxZ=P.z+P_R;
+  const x0=Math.floor(minX/BLOCK), x1=Math.floor(maxX/BLOCK);
+  const y0=Math.floor(minY/BLOCK), y1=Math.floor(maxY/BLOCK);
+  const z0=Math.floor(minZ/BLOCK), z1=Math.floor(maxZ/BLOCK);
+  let hit=false, edge = delta>0 ? Infinity : -Infinity;
+  for(let y=y0;y<=y1;y++) for(let z=z0;z<=z1;z++) for(let x=x0;x<=x1;x++){
+    if(!isSolidCell(x,y,z)) continue;
+    hit=true;
+    const c = (axis===0?x:axis===1?y:z);
+    if(delta>0) edge = Math.min(edge, c*BLOCK);
+    else        edge = Math.max(edge, (c+1)*BLOCK);
+  }
+  if(hit){
+    const EPS=0.0015;
+    if(axis===0) P.x = delta>0 ? edge-P_R-EPS : edge+P_R+EPS;
+    else if(axis===1) P.y = delta>0 ? edge-P_H-EPS : edge+EPS;
+    else P.z = delta>0 ? edge-P_R-EPS : edge+P_R+EPS;
+  }
+  return hit;
+}
+
+function physics(dt){
+  const cy=Math.cos(P.yaw), sy=Math.sin(P.yaw);
+  let wx = -sy*(IN.f-IN.b) + cy*(IN.r-IN.l);
+  let wz = -cy*(IN.f-IN.b) - sy*(IN.r-IN.l);
+  const ln=Math.hypot(wx,wz); if(ln>0){ wx/=ln; wz/=ln; }
+  const target = (IN.sprint?SPD_SPR:SPD_RUN);
+  const accel = P.ground ? 52 : 13;
+  P.vx += (wx*target - P.vx) * Math.min(1, accel*dt);
+  P.vz += (wz*target - P.vz) * Math.min(1, accel*dt);
+  if(ln===0 && P.ground){ const f=Math.min(1,16*dt); P.vx-=P.vx*f; P.vz-=P.vz*f; }
+  P.vy -= GRAV*dt;
+  if(P.vy < -60) P.vy = -60;
+
+  // sub-passos pra não atravessar bloco
+  const dist = Math.hypot(P.vx,P.vy,P.vz)*dt;
+  const steps = Math.max(1, Math.ceil(dist/0.4));
+  const sdt = dt/steps;
+  let grounded=false;
+  for(let s=0;s<steps;s++){
+    collideAxis(0, P.vx*sdt);
+    collideAxis(2, P.vz*sdt);
+    const h = collideAxis(1, P.vy*sdt);
+    if(h){ if(P.vy<0) grounded=true; P.vy=0; }
+  }
+  P.ground = grounded;
+
+  const spd = Math.hypot(P.vx,P.vz);
+  if(P.ground && spd>0.4){
+    P.bob += dt * (spd*1.55);
+    P.step += dt*spd;
+    if(P.step > 2.1){ P.step=0; snd.step(); }
+  } else P.bob += dt*0.6;
+}
+
+/* ==========================================================================
+   12. AÇÕES — atirar e marcar
+   ========================================================================== */
+function aimRay(){
+  const cy=Math.cos(P.yaw), sy=Math.sin(P.yaw), cp=Math.cos(P.pitch), sp=Math.sin(P.pitch);
+  return {ox:P.x, oy:P.y+EYE, oz:P.z, dx:-sy*cp, dy:sp, dz:-cy*cp};
+}
+let hover = {hit:false};
+
+function shoot(){
+  if(G.state!=='play') return;
+  recoil = 1;
+  snd.shot();
+  const r=aimRay();
+  /* Raio refeito no instante do tiro. Reaproveitar o hover do último quadro
+     desenhado engole tiros sempre que dois cliques caem no mesmo quadro. */
+  const hit = raycast(r.ox,r.oy,r.oz, r.dx,r.dy,r.dz, REACH, true);
+  const dist = hit.hit ? hit.t : REACH;
+  const mx = P.x + r.dx*1.6, my = P.y+EYE + r.dy*1.6 - 0.22, mz = P.z + r.dz*1.6;
+  addS(mx,my,mz, 0,0,0, 0.62, 0.09, [1.0,0.86,0.45], T_GLOW, 0.55);
+  const n = 10, t0 = 2.4;
+  if(dist > t0) for(let i=0;i<n;i++){
+    const t = t0 + (dist-t0)*(i/(n-1));
+    addS(P.x+r.dx*t, P.y+EYE+r.dy*t, P.z+r.dz*t, 0,0,0,
+         0.34+0.20*(1-i/(n-1)), 0.11+0.05*rnd(), [0.86,0.62,1.0], T_GLOW, 0.40);
+  }
+  if(!hit.hit) return;
+
+  if(hit.kind==='num'){ hitNumber(hit.x,hit.y,hit.z); return; }
+  if(hit.kind==='bedrock'){ snd.clink(); // rocha-mãe: não quebra
+    for(let i=0;i<8;i++) addS((hit.x+0.5)*BLOCK,(hit.y+0.5)*BLOCK,(hit.z+0.5)*BLOCK,
+        (rnd()-.5)*5,(rnd()-.5)*5,(rnd()-.5)*5, 0.3, 0.28, [1,0.8,0.4], T_SPARK);
+    return;
+  }
+  const i = idx(hit.x,hit.y,hit.z);
+  if(G.st[i]===MARKED){ snd.clink(); return; }
+  if(G.mine[i]){ detonate(hit.x,hit.y,hit.z); return; }
+  revealAt(i,false);
+  checkWin();
+}
+
+/* Acertar um número faz uma de duas coisas:
+   - se a conta já fecha (minas marcadas em volta == número), espalha o tiro
+     e derruba todo o resto que encosta nele;
+   - senão, só acende os vizinhos por alguns segundos.
+   Marcou errado? O espalho acha a mina de verdade e a caverna vai junto. */
+function hitNumber(x,y,z){
+  const need = G.cnt[idx(x,y,z)];
+  let marcadas = 0;
+  const abrir = [];
+  for(let dy=-1;dy<=1;dy++) for(let dz=-1;dz<=1;dz++) for(let dx=-1;dx<=1;dx++){
+    if(!dx&&!dy&&!dz) continue;
+    const X=x+dx,Y=y+dy,Z=z+dz;
+    if(!inside(X,Y,Z)) continue;
+    const j=idx(X,Y,Z);
+    if(G.st[j]===AIR) continue;
+    if(G.st[j]===MARKED) marcadas++;
+    else abrir.push([j,X,Y,Z]);
+  }
+
+  if(marcadas !== need || !abrir.length){ pingNumber(x,y,z); return 0; }
+
+  // a conta fecha: espalha
+  for(const [j,X,Y,Z] of abrir){
+    if(G.mine[j]){ detonate(X,Y,Z); return -1; }   // marcação errada
+  }
+  for(const [j] of abrir) revealAt(j,false);
+  snd.spread();
+  for(let k=0;k<14;k++){
+    const a=rnd()*6.283, b=Math.acos(2*rnd()-1), sp=6+rnd()*10;
+    addS((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK,
+         Math.sin(b)*Math.cos(a)*sp, Math.cos(b)*sp, Math.sin(b)*Math.sin(a)*sp,
+         0.9, 0.5, [0.45,1.0,0.95], T_GLOW, 0.5);
+  }
+  checkWin();
+  return abrir.length;
+}
+
+/* Só acende: não marca, não revela, não gasta nada. */
+function pingNumber(x,y,z){
+  const until = tGlobal + ECHO_DUR;
+  let n=0;
+  for(let dy=-1;dy<=1;dy++) for(let dz=-1;dz<=1;dz++) for(let dx=-1;dx<=1;dx++){
+    if(!dx&&!dy&&!dz) continue;
+    const X=x+dx,Y=y+dy,Z=z+dz;
+    if(!inside(X,Y,Z)) continue;
+    const j=idx(X,Y,Z);
+    if(G.st[j]===AIR) continue;
+    G.echoT[j]=until; n++;
+  }
+  G.echoUntil = Math.max(G.echoUntil, until);
+  G.dirty=true;
+  snd.scan();
+  addS((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, 0,0,0, 1.7, 0.4,
+       [0.35,0.95,1.0], T_GLOW, 0.55);
+  return n;
+}
+
+function mark(){
+  if(G.state!=='play') return;
+  const r=aimRay();
+  const hit = raycast(r.ox,r.oy,r.oz, r.dx,r.dy,r.dz, REACH, false);
+  if(!hit.hit || hit.kind!=='block') return;
+  const i=idx(hit.x,hit.y,hit.z);
+  if(G.st[i]===AIR) return;
+  G.st[i] = (G.st[i]===MARKED) ? SOLID : MARKED;
+  G.marked += (G.st[i]===MARKED) ? 1 : -1;
+  G.dirty=true; snd.mark();
+}
+
+function checkWin(){
+  if(G.revealed >= G.safeTotal){
+    G.win=true; G.state='over'; G.boom=0.0001;
+    snd.fanfare();
+    // chuva de ouro
+    for(let k=0;k<260;k++){
+      addS(rnd()*G.nx*BLOCK, G.ny*BLOCK+rnd()*10, rnd()*G.nz*BLOCK,
+           (rnd()-.5)*1.5, -2-rnd()*4, (rnd()-.5)*1.5, 0.5, 4+rnd()*4, [1.0,0.82,0.28], T_COIN);
+    }
+    showOver(true);
+  }
+}
+
+/* Acertou a mina: ela acende primeiro. O jogador precisa ver QUAL bloco o
+   matou antes da caverna inteira virar poeira. Só depois vem o estouro. */
+function detonate(bx,by,bz){
+  G.state='over'; G.win=false; G.boomCell=[bx,by,bz]; G.fuse=FUSE_T;
+  G.slowmo=0.55; G.shake=0.22; G.dirty=true;
+  snd.fuse();
+  const ex=(bx+0.5)*BLOCK, ey=(by+0.5)*BLOCK, ez=(bz+0.5)*BLOCK;
+  for(let k=0;k<26;k++){
+    const a=rnd()*6.283;
+    addS(ex,ey,ez, Math.cos(a)*3.5, 2.5+rnd()*5, Math.sin(a)*3.5,
+         0.7, FUSE_T, [1.0,0.55,0.18], T_SPARK, 0.9);
+  }
+}
+
+function blast(){
+  const [bx,by,bz] = G.boomCell;
+  G.fuse=0; G.boom=0.0001; G.shake=1; G.slowmo=0.28;
+  snd.boom();
+  const ex=(bx+0.5)*BLOCK, ey=(by+0.5)*BLOCK, ez=(bz+0.5)*BLOCK;
+  // tudo que sobrou vira escombro
+  for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
+    const i=idx(x,y,z);
+    if(G.st[i]===AIR) continue;
+    const cx=(x+0.5)*BLOCK, cy2=(y+0.5)*BLOCK, cz=(z+0.5)*BLOCK;
+    let dx=cx-ex, dy=cy2-ey, dz=cz-ez;
+    const dd=Math.max(2.0, Math.hypot(dx,dy,dz));
+    const push = 300/dd;
+    const c = G.mine[i] ? [1.0,0.34,0.12] : MATS[G.mat[i]].c;
+    addP(cx,cy2,cz, dx/dd*push+(rnd()-.5)*6, dy/dd*push+8+rnd()*8, dz/dd*push+(rnd()-.5)*6,
+         BLOCK*(0.34+rnd()*0.30), 2.4+rnd()*2.4, c, G.mine[i]?1:0);
+    G.st[i]=AIR;
+  }
+  // onda de choque + fagulhas bregas
+  for(let k=0;k<260;k++){
+    const a=rnd()*6.283, b=Math.acos(2*rnd()-1), sp=16+rnd()*44;
+    const dx=Math.sin(b)*Math.cos(a), dy=Math.cos(b), dz=Math.sin(b)*Math.sin(a);
+    const r0=2.0+rnd()*5.0;                       // ja nasce espalhado
+    const hue = rnd();
+    addS(ex+dx*r0, ey+dy*r0, ez+dz*r0, dx*sp, dy*sp, dz*sp,
+         1.0+rnd()*1.8, 1.0+rnd()*1.8,
+         hue<0.4?[1,0.75,0.25]:hue<0.75?[1,0.35,0.15]:[0.75,0.45,1.0], T_GLOW, 0.38);
+  }
+  for(let k=0;k<190;k++){
+    const a=rnd()*6.283, sp=10+rnd()*34;
+    addS(ex,ey,ez, Math.cos(a)*sp, (rnd()-0.2)*20, Math.sin(a)*sp,
+         0.7, 1.7, [1,0.9,0.5], T_SPARK, 0.85);
+  }
+  G.dirty=true;
+  flashScreen();
+  showOver(false);
+}
+
+/* ==========================================================================
+   13. INTERFACE
+   ========================================================================== */
+const $ = id => document.getElementById(id);
+const elMenu=$('menu'), elPause=$('pause'), elOver=$('over'), elHud=$('hud'), elCross=$('cross');
+
+function flashScreen(){
+  const f=$('flash');
+  f.style.transition='none'; f.style.opacity='1'; f.style.background='#fff';
+  requestAnimationFrame(()=>{
+    f.style.transition='opacity 1.4s ease-out, background 1.4s ease-out';
+    f.style.background='#ff7a2f'; f.style.opacity='0';
+  });
+}
+function showOver(win){
+  const el=$('over');
+  el.classList.toggle('win', win);
+  $('overEye').textContent = win ? 'Os três planos se abrem' : 'Plano rompido';
+  $('overTitle').textContent = win ? 'A areia te soltou' : 'Você virou areia';
+  const mm=Math.floor(G.elapsed/60), ss=Math.floor(G.elapsed%60);
+  $('overText').textContent = win
+    ? `${G.mines} minas mapeadas, ${G.gold} de ouro no bolso, ${mm}:${String(ss).padStart(2,'0')} de labirinto. A entidade não gostou.`
+    : `Você durou ${mm}:${String(ss).padStart(2,'0')} e abriu ${G.revealed} de ${G.safeTotal} blocos. Restavam ${G.mines-G.marked} minas por marcar.`;
+  setTimeout(()=>{ el.classList.add('on'); document.exitPointerLock&&document.exitPointerLock(); }, win?900:2100);
+}
+function setScreen(s){
+  G.state=s;
+  elMenu.classList.toggle('on', s==='menu');
+  elPause.classList.toggle('on', s==='pause');
+  if(s!=='over') elOver.classList.remove('on');
+  elHud.classList.toggle('on', s==='play');
+  elCross.classList.toggle('on', s==='play');
+  canvas.style.cursor = (s==='play') ? 'none' : 'default';
+}
+function updateHUD(){
+  $('sMines').textContent = Math.max(0, G.mines - G.marked);
+  $('sLeft').textContent  = Math.max(0, G.safeTotal - G.revealed);
+  $('sGold').textContent  = G.gold;
+  const mm=Math.floor(G.elapsed/60), ss=Math.floor(G.elapsed%60);
+  $('sTime').textContent = mm+':'+String(ss).padStart(2,'0');
+  $('barFill').style.width = (100*G.revealed/G.safeTotal).toFixed(1)+'%';
+}
+function updateDiffNote(){
+  const D=DIFFS[G.diff], n=D.nx*D.ny*D.nz, m=Math.round(n*D.dens);
+  $('dNote').textContent = `${D.nx} × ${D.ny} × ${D.nz} = ${n} blocos · ${m} minas (${(D.dens*100).toFixed(1)}%) · caverna de ${D.nx*BLOCK} × ${D.ny*BLOCK} × ${D.nz*BLOCK} metros`;
+}
+
+document.querySelectorAll('.diffs [data-d]').forEach(b=>{
+  b.addEventListener('click', ()=>{
+    document.querySelectorAll('.diffs [data-d]').forEach(o=>o.classList.remove('sel'));
+    b.classList.add('sel'); G.diff = +b.dataset.d; updateDiffNote();
+  });
+});
+let toastT=0;
+function toast(msg, ms){
+  const w=$('toast'); w.textContent=msg; w.classList.add('on');
+  clearTimeout(toastT); toastT=setTimeout(()=>w.classList.remove('on'), ms||2000);
+}
+function saveCfg(){
+  try{ localStorage.setItem('campominado3d',
+       JSON.stringify({s:+$('sens').value, i:G.invY})); }catch(e){}
+}
+function syncSens(v){
+  G.sens = v/10000;
+  $('sens').value=v; $('sens2').value=v;
+  $('sensV').textContent=(v/10).toFixed(1); $('sensV2').textContent=(v/10).toFixed(1);
+  saveCfg();
+}
+function syncInv(v){
+  G.invY = !!v;
+  $('inv').checked = G.invY; $('inv2').checked = G.invY;
+  saveCfg();
+}
+function loadCfg(){
+  let c=null;
+  try{ c = JSON.parse(localStorage.getItem('campominado3d')||'null'); }catch(e){}
+  syncSens(c && c.s>=4 && c.s<=40 ? c.s : 14);
+  syncInv(c ? !!c.i : false);
+}
+$('sens').addEventListener('input', e=>syncSens(+e.target.value));
+$('sens2').addEventListener('input', e=>syncSens(+e.target.value));
+$('inv').addEventListener('change', e=>syncInv(e.target.checked));
+$('inv2').addEventListener('change', e=>syncInv(e.target.checked));
+
+function startGame(){
+  seed = (Date.now()>>>0) ^ 0x9e3779b9;
+  genWorld(G.diff);
+  setScreen('play');
+  $('tip').classList.remove('fade');
+  setTimeout(()=>$('tip').classList.add('fade'), 9000);
+  snd.resume();
+  tryLock();
+}
+$('btnStart').addEventListener('click', startGame);
+$('btnAgain').addEventListener('click', ()=>{ elOver.classList.remove('on'); startGame(); });
+$('btnMenu').addEventListener('click', ()=>setScreen('menu'));
+$('btnMenu2').addEventListener('click', ()=>{ elOver.classList.remove('on'); setScreen('menu'); });
+$('btnRestart').addEventListener('click', startGame);
+$('btnResume').addEventListener('click', ()=>{ setScreen('play'); tryLock(); });
+
+/* ---------- entrada ----------
+   O navegador recusa travar o mouse por cerca de 1,2 s depois que o jogador
+   sai com Esc. Pedir dentro dessa carência falha calado — era esse o "às vezes
+   não trava". Agora a gente espera a carência, tenta de novo sozinho, e clicar
+   na tela SEMPRE tenta travar outra vez (o modo arrasto nunca é definitivo). */
+let locked=false, dragLook=false, dragging=false;
+let lockFails=0, lockCooldown=0, lockRetry=0, lockGuard=0;
+
+function lockHint(){
+  $('needlock').classList.toggle('on', G.state==='play' && !locked && !dragLook);
+}
+function tryLock(){
+  if(locked || G.state!=='play') return;
+  const now = performance.now();
+  if(now < lockCooldown){                       // ainda na carência: agenda
+    clearTimeout(lockRetry);
+    lockRetry = setTimeout(tryLock, lockCooldown - now + 60);
+    return;
+  }
+  clearTimeout(lockGuard);
+  let p;
+  try { p = canvas.requestPointerLock(); }
+  catch(e){ onLockFail(); return; }
+  if(p && typeof p.catch === 'function') p.catch(onLockFail);
+  // rede: se não travar nem der erro, cai no arrasto depois de algumas tentativas
+  lockGuard = setTimeout(()=>{ if(!locked && G.state==='play') onLockFail(); }, 900);
+  lockHint();
+}
+function onLockFail(){
+  clearTimeout(lockGuard);
+  lockFails++;
+  lockCooldown = performance.now() + 1300;
+  if(lockFails >= 3) enableDragLook();
+  else { clearTimeout(lockRetry); lockRetry = setTimeout(tryLock, 1360); }
+  lockHint();
+}
+function enableDragLook(){
+  if(dragLook) return;
+  dragLook = true;
+  toast('Este navegador não deixa travar o mouse aqui. Segure o botão esquerdo e arraste para olhar; E atira, Q marca. Abrir o arquivo direto no navegador libera o modo normal.', 9000);
+  lockHint();
+}
+document.addEventListener('pointerlockerror', onLockFail);
+document.addEventListener('pointerlockchange', ()=>{
+  locked = (document.pointerLockElement === canvas);
+  clearTimeout(lockGuard); clearTimeout(lockRetry);
+  if(locked){
+    lockFails=0; dragLook=false; dragging=false;
+    $('toast').classList.remove('on');
+  } else {
+    lockCooldown = performance.now() + 1300;   // carência começa agora
+    if(G.state==='play' && !dragLook) setScreen('pause');
+  }
+  lockHint();
+});
+canvas.addEventListener('mousedown', e=>{
+  if(G.state!=='play') return;
+  if(!locked && !dragLook){ tryLock(); return; }   // este clique recupera o mouse
+  if(dragLook){
+    if(e.button===0) dragging=true;
+    else if(e.button===2) mark();
+    return;
+  }
+  if(e.button===0) shoot(); else if(e.button===2) mark();
+});
+window.addEventListener('mouseup', ()=>{ dragging=false; });
+canvas.addEventListener('contextmenu', e=>e.preventDefault());
+document.addEventListener('mousemove', e=>{
+  if(G.state!=='play') return;
+  if(locked || (dragLook && dragging)){
+    // o balanço do cajado segue a rotação real, então inverte junto
+    const my = e.movementY * (G.invY ? -1 : 1);
+    P.yaw   -= e.movementX * G.sens;
+    P.pitch -= my * G.sens;
+    P.pitch = clamp(P.pitch, -1.5, 1.5);
+    swayX = clamp(swayX - e.movementX*0.00035, -0.05, 0.05);
+    swayY = clamp(swayY - my*0.00030, -0.05, 0.05);
+  }
+});
+const KEY={};
+window.addEventListener('keydown', e=>{
+  if(e.repeat){ if(e.code==='Space') e.preventDefault(); return; }
+  KEY[e.code]=true;
+  switch(e.code){
+    case 'KeyW': case 'ArrowUp':    IN.f=1; break;
+    case 'KeyS': case 'ArrowDown':  IN.b=1; break;
+    case 'KeyA': IN.l=1; break;
+    case 'KeyD': IN.r=1; break;
+    case 'ShiftLeft': case 'ShiftRight': IN.sprint=true; break;
+    case 'Space':
+      e.preventDefault();
+      if(G.state==='play' && !IN.jumpHeld){
+        IN.jumpHeld=true; IN.jumpT=0; IN.surged=false; IN.jumpFired=false;
+        if(canJump()) startJump(); else IN.jumpBuf = JUMP_BUF;
+      }
+      break;
+    case 'KeyE': if(dragLook) shoot(); break;
+    case 'KeyQ': if(dragLook) mark(); break;
+    case 'KeyT':
+      G.arrows=!G.arrows;
+      $('sPlanes').textContent = G.arrows?'ligadas':'desligadas';
+      $('planes').classList.toggle('off', !G.arrows);
+      toast('Setas de plano '+(G.arrows?'ligadas':'desligadas'));
+      break;
+    case 'KeyI':
+      syncInv(!G.invY);
+      toast('Eixo vertical do mouse: '+(G.invY?'invertido':'normal'));
+      break;
+    case 'KeyM':
+      G.muted=!G.muted; snd.setMute(G.muted);
+      toast(G.muted?'Som desligado':'Som ligado');
+      break;
+    case 'KeyR': if(G.state!=='menu'){ elOver.classList.remove('on'); startGame(); } break;
+    case 'Escape':
+      if(G.state==='play'){ setScreen('pause'); document.exitPointerLock&&document.exitPointerLock(); }
+      else if(G.state==='pause'){ setScreen('play'); tryLock(); }
+      break;
+  }
+});
+window.addEventListener('keyup', e=>{
+  KEY[e.code]=false;
+  switch(e.code){
+    case 'KeyW': case 'ArrowUp':   IN.f=0; break;
+    case 'KeyS': case 'ArrowDown': IN.b=0; break;
+    case 'KeyA': IN.l=0; break;
+    case 'KeyD': IN.r=0; break;
+    case 'ShiftLeft': case 'ShiftRight': IN.sprint=false; break;
+    case 'Space': IN.jumpHeld=false; break;
+  }
+});
+window.addEventListener('blur', ()=>{ IN.f=IN.b=IN.l=IN.r=0; IN.sprint=false; dragging=false;
+                                      IN.jumpHeld=false; IN.jumpBuf=0; });
+/* O pulo sai no APERTAR, não no soltar — esperar o keyup era a "lentidão".
+   coyote = ainda dá pra pular logo depois de sair da borda.
+   buffer = apertar pouco antes de pousar não perde o pulo. */
+function canJump(){ return P.coyote > 0; }
+
+function startJump(){
+  P.vy = V_LO; P.ground=false; P.coyote=0; P.jumpY0 = P.y;
+  IN.jumpFired=true; IN.jumpBuf=0; IN.jumpT=0; IN.surged=false;
+  snd.step();
+}
+
+/* Segurou 0,5 s: o cajado sustenta a subida até o ápice de 5x a altura. */
+function surgeJump(){
+  const rise = JUMP_HI - (P.y - P.jumpY0);
+  P.vy = rise > 0 ? Math.sqrt(2*GRAV*rise) : Math.max(P.vy, 0);
+  IN.surged=true;
+  for(let i=0;i<26;i++) addS(P.x+(rnd()-.5)*1.6, P.y+0.15, P.z+(rnd()-.5)*1.6,
+    (rnd()-.5)*4, rnd()*3, (rnd()-.5)*4, 0.5, 0.5, [0.85,0.55,1.0], T_GLOW, 0.5);
+  snd.mark();
+}
+
+/* Roda DEPOIS de physics(), que e quem atualiza P.ground. */
+function tickGround(dt){
+  P.coyote = P.ground ? COYOTE : Math.max(0, P.coyote - dt);
+}
+
+function updateJump(dt){
+  if(IN.jumpBuf>0) IN.jumpBuf -= dt;
+  /* Pula ao encostar no chão se o espaço ainda está apertado (queda longa) ou
+     se foi apertado pouco antes de pousar (buffer). Sem isso, apertar no ar é
+     um pulo engolido — a "intermitência". */
+  if(!IN.jumpFired && canJump() && (IN.jumpHeld || IN.jumpBuf>0)) startJump();
+  if(IN.jumpHeld && IN.jumpFired && !IN.surged){
+    IN.jumpT += dt;
+    if(P.ground) IN.surged=true;                  // pousou antes: cancela
+    else if(IN.jumpT >= CHARGE_T) surgeJump();
+  }
+}
+
+/* setas do teclado giram a câmera (acessibilidade / plano B) */
+function keyLook(dt){
+  const s = 1.9*dt;
+  if(KEY['ArrowLeft'])  P.yaw += s;
+  if(KEY['ArrowRight']) P.yaw -= s;
+  if(KEY['PageUp'])   P.pitch = clamp(P.pitch+s, -1.5, 1.5);
+  if(KEY['PageDown']) P.pitch = clamp(P.pitch-s, -1.5, 1.5);
+}
+
+/* ==========================================================================
+   14. LOOP
+   ========================================================================== */
+let W=1, H=1, DPR=1;
+function resize(){
+  DPR = Math.min(window.devicePixelRatio||1, 2);
+  W = Math.max(1, Math.floor(canvas.clientWidth*DPR));
+  H = Math.max(1, Math.floor(canvas.clientHeight*DPR));
+  if(canvas.width!==W || canvas.height!==H){ canvas.width=W; canvas.height=H; }
+}
+window.addEventListener('resize', resize);
+
+const viewM = m4.ident(), viewIdent = m4.ident();
+const SUN = (()=>{ const v=[0.42,0.86,0.29]; const l=Math.hypot(...v); return [v[0]/l,v[1]/l,v[2]/l]; })();
+const FOG = [0.235,0.155,0.115];
+
+let last=performance.now(), nextWhisper=25+Math.random()*30, tGlobal=0;
+
+function frame(now){
+  requestAnimationFrame(frame);
+  let dt = Math.min(0.05, (now-last)/1000); last=now;
+  tGlobal += dt;
+  resize();
+
+  const sim = dt * (G.state==='over' ? G.slowmo : 1);
+  if(G.state==='over' && G.slowmo<1) G.slowmo = Math.min(1, G.slowmo + dt*0.35);
+
+  if(G.state==='play'){
+    keyLook(dt);
+    updateJump(dt);
+    physics(dt);
+    tickGround(dt);
+    G.elapsed = Math.max(0, (now - G.t0)/1000);
+    updateHUD();
+    $('charge').classList.toggle('on', IN.jumpHeld && IN.jumpFired && !IN.surged);
+    $('chargeFill').style.width = (100*Math.min(1, IN.jumpT/CHARGE_T)).toFixed(0)+'%';
+
+    nextWhisper -= dt;
+    if(nextWhisper<=0){ snd.whisper(); nextWhisper = 34+Math.random()*46; }
+  }
+
+  if(G.fuse > 0){
+    G.fuse -= dt; G.dirty = true;
+    if(G.fuse <= 0) blast();
+  }
+  recoil = Math.max(0, recoil - dt*6.2);
+  swayX -= swayX*Math.min(1, dt*6); swayY -= swayY*Math.min(1, dt*6);
+  G.shake = Math.max(0, G.shake - dt*0.55);
+
+  // ------- partículas -------
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i]; p.l-=sim;
+    if(p.l<=0){ particles.splice(i,1); continue; }
+    p.vy -= GRAV*p.g*sim;
+    p.x+=p.vx*sim; p.y+=p.vy*sim; p.z+=p.vz*sim;
+    p.rx+=p.vrx*sim; p.ry+=p.vry*sim; p.rz+=p.vrz*sim;
+    if(p.y < 0.1 && p.vy<0){ p.y=0.1; p.vy*=-0.32; p.vx*=0.7; p.vz*=0.7; }
+  }
+  for(let i=sprites.length-1;i>=0;i--){
+    const s=sprites[i]; s.l-=sim;
+    if(s.l<=0){ sprites.splice(i,1); continue; }
+    if(s.tile===T_COIN){ s.vy -= GRAV*0.35*sim; }
+    s.x+=s.vx*sim; s.y+=s.vy*sim; s.z+=s.vz*sim;
+    s.vx*=(1-1.6*sim); s.vz*=(1-1.6*sim);
+    if(s.tile===T_GLOW) s.vy*=(1-1.6*sim);
+  }
+
+  // ------- câmera -------
+  const shk = G.shake*G.shake;
+  const camX = P.x + (Math.random()-0.5)*shk*2.2;
+  const camY = P.y + EYE + Math.sin(P.bob*2)*0.035 + (Math.random()-0.5)*shk*2.2;
+  const camZ = P.z + (Math.random()-0.5)*shk*2.2;
+  const yaw = P.yaw + (Math.random()-0.5)*shk*0.05;
+  const pit = P.pitch + (Math.random()-0.5)*shk*0.05;
+  const basis = viewFrom(camX, camY, camZ, yaw, pit, viewM);
+  const aspect = W/H;
+  const projMain = m4.persp(70*Math.PI/180, aspect, 0.08, 400);
+  const projView = m4.persp(55*Math.PI/180, aspect, 0.01, 20);
+
+  // ------- mira -------
+  if(G.state==='play'){
+    const r=aimRay();
+    hover = raycast(r.ox,r.oy,r.oz, r.dx,r.dy,r.dz, REACH, true);
+    const k = hover.hit ? hover.kind : null;
+    elCross.classList.toggle('bad',  k===null || k==='bedrock');
+    elCross.classList.toggle('num',  k==='num');
+    elCross.classList.toggle('mark', k==='block' && G.st[idx(hover.x,hover.y,hover.z)]===MARKED);
+  } else hover={hit:false};
+
+  if(G.echoUntil + 0.1 > tGlobal) G.dirty = true;   // eco vivo: redesenha
+  lockHint();
+  if(G.dirty) rebuildWorld();
+
+  // ------- desenho -------
+  gl.viewport(0,0,W,H);
+  gl.clearColor(FOG[0],FOG[1],FOG[2],1);
+  gl.enable(gl.DEPTH_TEST); gl.depthMask(true);
+  gl.enable(gl.CULL_FACE); gl.cullFace(gl.BACK);
+  gl.disable(gl.BLEND);
+  gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+
+  gl.useProgram(pCube);
+  gl.uniformMatrix4fv(uC.proj,false,projMain);
+  gl.uniformMatrix4fv(uC.view,false,viewM);
+  gl.uniform3f(uC.cam, camX,camY,camZ);
+  gl.uniform3fv(uC.sun, SUN);
+  gl.uniform3fv(uC.fog, FOG);
+  gl.uniform1f(uC.time, tGlobal);
+  gl.uniform1f(uC.outline, 1.0);
+  if(hover.hit && hover.kind==='block' && G.state==='play')
+    gl.uniform3f(uC.hover,(hover.x+0.5)*BLOCK,(hover.y+0.5)*BLOCK,(hover.z+0.5)*BLOCK);
+  else gl.uniform3f(uC.hover, 1e9,1e9,1e9);
+  drawCubes(worldB);
+
+  // escombros
+  {
+    const d=debris.data; let n=0;
+    for(let i=0;i<particles.length && n<debris.max;i++){
+      const p=particles[i], o=n*CUBE_STRIDE;
+      const k = Math.min(1, p.l/Math.min(0.6,p.ml));
+      compose(d,o, p.x,p.y,p.z, p.rx,p.ry,p.rz, p.s*k,p.s*k,p.s*k);
+      d[o+16]=p.c[0]; d[o+17]=p.c[1]; d[o+18]=p.c[2];
+      d[o+19]=(i*0.137)%1; d[o+20]=p.e; d[o+21]=0; d[o+22]=0;
+      n++;
+    }
+    debris.count=n;
+    gl.uniform3f(uC.hover, 1e9,1e9,1e9);
+    gl.uniform1f(uC.outline, 1.6);
+    drawCubes(debris);
+  }
+
+  // ------- glifos: números, setas, minas -------
+  gl.useProgram(pBB);
+  gl.uniformMatrix4fv(uB.proj,false,projMain);
+  gl.uniformMatrix4fv(uB.view,false,viewM);
+  gl.uniform3f(uB.right, basis.rx,basis.ry,basis.rz);
+  gl.uniform3f(uB.up,    basis.ux,basis.uy,basis.uz);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, atlasTex);
+  gl.uniform1i(uB.tex, 0);
+
+  {
+    const d=glyphB.data; let n=0;
+    const put=(x,y,z,sw,sh,tile,col,a,rot)=>{
+      if(n>=glyphB.max) return;
+      const o=n*BB_STRIDE, uv=UVS[tile];
+      d[o]=x; d[o+1]=y; d[o+2]=z; d[o+3]=sw; d[o+4]=sh;
+      d[o+5]=uv[0]; d[o+6]=uv[1]; d[o+7]=uv[2]; d[o+8]=uv[3];
+      d[o+9]=col[0]; d[o+10]=col[1]; d[o+11]=col[2]; d[o+12]=a;
+      d[o+13]=rot||0; d[o+14]=0;
+      n++;
+    };
+    if(G.st && G.state!=='menu'){
+      const showMines = (G.state==='over' && G.fuse<=0);
+      for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
+        const i=idx(x,y,z);
+        const cx=(x+0.5)*BLOCK, cy=(y+0.5)*BLOCK, cz=(z+0.5)*BLOCK;
+        if(G.st[i]!==AIR){
+          if(showMines && G.mine[i]) put(cx,cy,cz, 2.0,2.0, T_MINE, [1.0,0.32,0.16], 1, 0);
+          continue;
+        }
+        if(G.mine[i]){ if(showMines) put(cx,cy,cz, 2.2,2.2, T_MINE, [1.0,0.30,0.14], 1, 0); continue; }
+        const c=G.cnt[i];
+        if(c===0) continue;
+        const dcam=Math.hypot(cx-camX, cy-camY, cz-camZ);
+        if(dcam>44) continue;
+        /* os distantes recuam pra não competir com o bloco à sua frente */
+        const al = clamp(1.30 - dcam/38, 0.34, 1);
+        put(cx,cy,cz, 1.05,1.05, c, NUMCOL[c], al, 0);
+        if(G.arrows){
+          const [up,dn]=planeFlags(x,y,z);
+          const A=0.52, R=0.80;
+          if(up&&dn){
+            const a=tGlobal*1.5;
+            put(cx+Math.cos(a)*R, cy+Math.sin(tGlobal*2.1)*0.10, cz+Math.sin(a)*R,
+                A,A, T_UP,   [1.0,0.80,0.30], al*0.9, 0);
+            put(cx+Math.cos(a+Math.PI)*R, cy+Math.sin(tGlobal*2.1+3.1)*0.10, cz+Math.sin(a+Math.PI)*R,
+                A,A, T_DOWN, [0.72,0.48,1.0], al*0.9, 0);
+          } else if(up){
+            put(cx+R, cy+0.20+Math.sin(tGlobal*2.2)*0.09, cz, A,A, T_UP, [1.0,0.80,0.30], al*0.9,0);
+          } else if(dn){
+            put(cx+R, cy-0.20+Math.sin(tGlobal*2.2)*0.09, cz, A,A, T_DOWN, [0.72,0.48,1.0], al*0.9,0);
+          }
+        }
+      }
+    }
+    glyphB.count=n;
+  }
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.depthMask(true);
+  gl.disable(gl.CULL_FACE);
+  drawBBs(glyphB);
+
+  // ------- brilhos aditivos: feixe, poeira, ouro -------
+  {
+    const d=glowB.data; let n=0;
+    const put=(x,y,z,s,tile,col,a)=>{
+      if(n>=glowB.max) return;
+      const o=n*BB_STRIDE, uv=UVS[tile];
+      d[o]=x; d[o+1]=y; d[o+2]=z; d[o+3]=s; d[o+4]=s;
+      d[o+5]=uv[0]; d[o+6]=uv[1]; d[o+7]=uv[2]; d[o+8]=uv[3];
+      d[o+9]=col[0]; d[o+10]=col[1]; d[o+11]=col[2]; d[o+12]=a;
+      d[o+13]=0; d[o+14]=1;
+      n++;
+    };
+    for(const s of sprites){
+      const k = Math.min(1, s.l/Math.min(0.5, s.ml));
+      put(s.x,s.y,s.z, s.s*(0.6+0.6*k), s.tile, s.c, k*0.95*s.a);
+    }
+    if(G.state!=='menu'){
+      for(const m of dust){
+        const dx=m.x-camX, dy=m.y-camY, dz=m.z-camZ;
+        const dd=Math.hypot(dx,dy,dz);
+        if(dd>34) continue;
+        const y = m.y + Math.sin(tGlobal*0.5+m.p)*0.7;
+        put(m.x + Math.sin(tGlobal*0.31+m.p)*1.1, y, m.z + Math.cos(tGlobal*0.27+m.p)*1.1,
+            m.s*2.4, T_GLOW, [1.0,0.80,0.48], 0.22*(1-dd/34));
+      }
+    }
+    glowB.count=n;
+  }
+  gl.blendFunc(gl.ONE, gl.ONE);
+  gl.depthMask(false);
+  drawBBs(glowB);
+  gl.depthMask(true);
+  gl.enable(gl.CULL_FACE);
+  gl.disable(gl.BLEND);
+
+  /* ------- a mina que te matou -------
+     Sem teste de profundidade: ela está dentro de um bloco sólido e o jogador
+     precisa ver exatamente qual bloco foi, antes da caverna virar poeira. */
+  if(G.fuse>0 && G.boomCell){
+    const [bx,by,bz]=G.boomCell;
+    const bcx=(bx+0.5)*BLOCK, bcy=(by+0.5)*BLOCK, bcz=(bz+0.5)*BLOCK;
+    const k=1-G.fuse/FUSE_T, pul=0.5+0.5*Math.sin(tGlobal*26);
+    const d=boomB.data;
+    const põe=(sz,tile,col,a,mode)=>{
+      const uv=UVS[tile];
+      d[0]=bcx; d[1]=bcy; d[2]=bcz; d[3]=sz; d[4]=sz;
+      d[5]=uv[0]; d[6]=uv[1]; d[7]=uv[2]; d[8]=uv[3];
+      d[9]=col[0]; d[10]=col[1]; d[11]=col[2]; d[12]=a;
+      d[13]=0; d[14]=mode; boomB.count=1;
+    };
+    gl.enable(gl.BLEND); gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.CULL_FACE); gl.depthMask(false);
+
+    põe(BLOCK*(1.5+2.2*k), T_GLOW, [1.0,0.58-0.28*k,0.20], 0.45+0.45*k, 1);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    drawBBs(boomB);
+
+    põe(2.6+1.7*k, T_MINE, [1.0,0.88-0.55*k,0.62-0.5*k], 0.85+0.15*pul, 0);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    drawBBs(boomB);
+
+    gl.enable(gl.DEPTH_TEST); gl.enable(gl.CULL_FACE);
+    gl.depthMask(true); gl.disable(gl.BLEND);
+  }
+
+  // ------- cajado -------
+  if(G.state==='play' || G.state==='pause'){
+    gl.clear(gl.DEPTH_BUFFER_BIT);
+    gl.useProgram(pCube);
+    gl.uniformMatrix4fv(uC.proj,false,projView);
+    gl.uniformMatrix4fv(uC.view,false,viewIdent);
+    gl.uniform3f(uC.cam, 0,0,0);
+    gl.uniform3f(uC.hover, 1e9,1e9,1e9);
+    gl.uniform1f(uC.outline, 0.55);
+    gl.uniform3fv(uC.fog, FOG);
+    buildViewModel(tGlobal, Math.min(1, Math.hypot(P.vx,P.vz)/SPD_RUN), aspect);
+    drawCubes(viewB);
+  }
+}
+
+/* ==========================================================================
+   15. PARTIDA
+   ========================================================================== */
+resize();
+loadCfg();
+G.diff=0; updateDiffNote();
+genWorld(0);          // mundo de fundo pro menu
+setScreen('menu');
+// câmera lenta girando atrás do menu
+(function menuCam(){
+  const spin = ()=>{
+    if(G.state==='menu'){ P.yaw += 0.0016; P.pitch = Math.sin(performance.now()*0.0002)*0.10; }
+    requestAnimationFrame(spin);
+  };
+  spin();
+})();
+requestAnimationFrame(frame);
+
+})();
+</script>
