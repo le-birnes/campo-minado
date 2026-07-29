@@ -314,10 +314,12 @@ kbd{font-family:var(--mono);font-size:.92em;background:var(--w95);color:#000;
         <div><kbd>Shift</kbd>sprint</div>
         <div><kbd>Space</kbd>jump · hold 0.5 s midair to rise higher</div>
         <div><kbd>Mouse</kbd>aim</div>
-        <div><kbd>Left click</kbd>break a block · shoot a number whose mines are<br>
-          all flagged and the shot spreads, clearing the rest</div>
-        <div><kbd>Right click</kbd>flag a mine · on a number, light up the<br>
-          blocks it is counting</div>
+        <div><kbd>Left click</kbd>shoot. Always. A number in the way is not a<br>
+          target — the shot goes through it into the wall behind</div>
+        <div><kbd>Hold right</kbd>think: a cold mist gathers on the block you<br>
+          are considering. Let go on a block to flag it. Let go on a number to<br>
+          light up what it counts — and if its mines are all flagged, the<br>
+          number turns your shot loose on everything else it touches</div>
         <div><kbd>H</kbd>hint · lights the reasoning and plays the move</div>
         <div><kbd>T</kbd>plane arrows · <kbd>I</kbd>invert mouse</div>
         <div><kbd>M</kbd>sound · <kbd>R</kbd>restart · <kbd>Esc</kbd>menu and settings</div>
@@ -789,6 +791,7 @@ function drawBBs(b){
    canal R = preenchimento, canal G = contorno
    ========================================================================== */
 const T_UP=27, T_DOWN=28, T_MINE=29, T_RUNE=30, T_GLOW=31, T_COIN=32, T_SPARK=33;
+const T_CRACK_A=34, T_CRACK_B=35;   // what is inside a half-broken block
 const ATLAS_N = 8, TILE = 128, ATLAS_PX = ATLAS_N*TILE;
 
 function buildAtlas(){
@@ -860,6 +863,30 @@ function buildAtlas(){
     const [ox,oy]=at(T_COIN); x.save(); x.translate(ox+TILE/2, oy+TILE/2);
     x.beginPath(); x.arc(0,0,40,0,7); x.lineWidth=16; x.strokeStyle=LINE; x.stroke();
     x.fillStyle=FILL; x.fill(); x.restore();
+  }
+  /* The two things a cracked block can show. They are the same fracture drawn
+     the same way; one carries a single short tick the other does not. Meant to
+     be almost unreadable — a real tell, but one you have to earn by learning
+     the difference, not one the game hands you. */
+  {
+    const draw=(tile, tick)=>{
+      const [ox,oy]=at(tile); x.save(); x.translate(ox+TILE/2, oy+TILE/2);
+      x.lineJoin='round'; x.lineCap='round';
+      x.strokeStyle=LINE; x.lineWidth=15;
+      const path=()=>{
+        x.beginPath();
+        x.moveTo(-6,-50); x.lineTo(4,-18); x.lineTo(-10,2); x.lineTo(6,26); x.lineTo(-2,50);
+        x.moveTo(4,-18);  x.lineTo(30,-30);
+        x.moveTo(-10,2);  x.lineTo(-38,10);
+        x.moveTo(6,26);   x.lineTo(32,34);
+        if(tick){ x.moveTo(-10,2); x.lineTo(-16,-14); }
+      };
+      path(); x.stroke();
+      x.strokeStyle=FILL; x.lineWidth=7; path(); x.stroke();
+      x.restore();
+    };
+    draw(T_CRACK_A, true);    // a mine is under this one
+    draw(T_CRACK_B, false);   // nothing is under this one
   }
   // spark
   {
@@ -958,10 +985,25 @@ const EN_MAX   = 22;    // live enemies at once
 const EN_PARTS = 16;    // most cubes any one body is built from
 const ESHOT_SPD = 34;   // m/s — fast, but the lock is the real threat
 
+/* The first shot lands one second after it appears, then one every half second
+   for the easy variant, faster from there. `lock` is the telegraph — the mist
+   of light along its aim line — and `rate` is the gap between shots.
+   Aim is predictive, so simply moving is no longer a defence: it leads you.
+   What still works is changing direction inside the telegraph, breaking line
+   of sight, or killing it. Shots do half damage, which is what makes a rate
+   this high survivable. */
+/* `first` is how long after appearing the opening shot lands; `rate` is the
+   whole cycle between shots after that. The telegraph — the beam along its aim
+   line — takes 70% of the cycle and the pause is the rest, so a tier I really
+   does fire every half second and you really do get a warning each time, just
+   a short one.
+   Aim is predictive: it leads you, so running in a straight line is no defence.
+   Changing direction inside the telegraph is, and so is breaking line of sight
+   or killing it. Half damage per shot is what keeps a rate this high fair. */
 const TIERS = [
-  {tag:'I',   lock:3.00, rate:4.2, sat:0.50, scale:0.84, detail:0},
-  {tag:'II',  lock:1.70, rate:2.8, sat:0.78, scale:1.00, detail:1},
-  {tag:'III', lock:0.42, rate:1.7, sat:1.00, scale:1.18, detail:2}
+  {tag:'I',   first:1.00, rate:0.50, sat:0.50, scale:0.84, detail:0},
+  {tag:'II',  first:0.80, rate:0.35, sat:0.78, scale:1.00, detail:1},
+  {tag:'III', first:0.60, rate:0.25, sat:1.00, scale:1.18, detail:2}
 ];
 const FAMS = [
   {fam:FAM_FLAG,  name:'Bannerman', col:[0.95,0.17,0.13], r:1.05, speed:0,   range:46},
@@ -983,7 +1025,7 @@ for(const f of FAMS) for(let t=0;t<3;t++){
     name:f.name+' '+T.tag,
     col:tint(f.col, T.sat), colDim:tint(f.col, T.sat, 0.45),
     r:f.r*T.scale, speed:f.speed*(0.8+0.3*t), range:f.range,
-    lock:T.lock, rate:T.rate, detail:T.detail, scale:T.scale
+    first:T.first, rate:T.rate, detail:T.detail, scale:T.scale
   });
 }
 const etype = (fam,tier) => ETYPES[fam*3+tier];
@@ -1075,7 +1117,7 @@ const G = {
   boom:0, win:false, shake:0, slowmo:1, fuse:0, boomCell:null
 };
 const P = { x:0,y:0,z:0, vx:0,vy:0,vz:0, yaw:0,pitch:0, ground:false, bob:0, step:0,
-            coyote:0, jumpY0:0, hp:2, hurtT:0 };
+            coyote:0, jumpY0:0, hp:4, hurtT:0 };
 const IN = { f:0,b:0,l:0,r:0, sprint:false,
              jumpHeld:false, jumpT:0, jumpFired:false, surged:true, jumpBuf:0 };
 
@@ -1096,6 +1138,7 @@ function genWorld(d){
   G.echoC=new Float32Array(N*3); G.echoUntil=0;
   G.hint=null; G.hints=0; G.beacon=null; G.ghost=[]; G.hintArrow=null;
   G.numHit=new Float32Array(N);
+  G.crack=new Uint8Array(N);
   for(let i=0;i<N;i++) G.mat[i] = (rnd()<0.055) ? 4 : (rnd()*4)|0;
 
   const cx=(G.nx>>1), cz=(G.nz>>1), cy=1;
@@ -1137,7 +1180,7 @@ function genWorld(d){
   G.elapsed=0; G.t0=performance.now();
   G.boss = !!D.boss; G.flagsPlaced=0; G.kills=0; G.deathBy='mine';
   enemies.length=0; eshots.length=0;
-  P.hp = 2; P.hurtT = 0;
+  P.hp = 4; P.hurtT = 0;   // counted in halves
 
   // starting chamber: 3x3 carved out of the middle layer
   for(const i of safe) revealAt(i, true);
@@ -1744,8 +1787,10 @@ function shoot(){
   snd.shot();
   const r=aimRay();
   /* Ray recast at the instant of the shot. Reusing the hover from the last
-     drawn frame swallows shots whenever two clicks land in the same frame. */
-  const hit = raycast(r.ox,r.oy,r.oz, r.dx,r.dy,r.dz, REACH, true);
+     drawn frame swallows shots whenever two clicks land in the same frame.
+     wantNum is off: left click is shooting, always. A number floating in the
+     way is not a target, so the shot passes it and hits the wall behind. */
+  const hit = raycast(r.ox,r.oy,r.oz, r.dx,r.dy,r.dz, REACH, false);
   const dist = hit.hit ? hit.t : REACH;
   const mx = P.x + r.dx*1.6, my = P.y+EYE + r.dy*1.6 - 0.22, mz = P.z + r.dz*1.6;
   addS(mx,my,mz, 0,0,0, 0.62, 0.09, [1.0,0.86,0.45], T_GLOW, 0.55);
@@ -1780,7 +1825,6 @@ function shoot(){
 
   if(!hit.hit) return;
 
-  if(hit.kind==='num'){ hitNumber(hit.x,hit.y,hit.z); return; }
   if(hit.kind==='bedrock'){ snd.clink(); // bedrock: does not break
     for(let i=0;i<8;i++) addS((hit.x+0.5)*BLOCK,(hit.y+0.5)*BLOCK,(hit.z+0.5)*BLOCK,
         (rnd()-.5)*5,(rnd()-.5)*5,(rnd()-.5)*5, 0.3, 0.28, [1,0.8,0.4], T_SPARK);
@@ -1791,6 +1835,7 @@ function shoot(){
   if(G.mine[i]){ detonate(hit.x,hit.y,hit.z); return; }
   revealAt(i,false);
   checkWin();
+  /* your shots are whole shots: a crack you inherited is just gone with it */
 }
 
 /* Hitting a number does one of two things:
@@ -1813,14 +1858,9 @@ function hitNumber(x,y,z){
     else abrir.push([j,X,Y,Z]);
   }
 
-  /* Left click on a number is the destructive half: it only does anything when
-     the count already adds up. Lighting the neighbours up moved to right
-     click, so a shot that proves nothing now just rings off the digit. */
-  if(marcadas !== need || !abrir.length){
-    G.numHit[idx(x,y,z)] = tGlobal;
-    snd.clink();
-    return 0;
-  }
+  /* The count does not add up yet, so all the number can do is show you what
+     it is counting. */
+  if(marcadas !== need || !abrir.length){ pingNumber(x,y,z); return 0; }
 
   // the count adds up: spread
   for(const [j,X,Y,Z] of abrir){
@@ -1860,16 +1900,63 @@ function pingNumber(x,y,z){
   return n;
 }
 
-/* Right click does two things, and which one depends on what you are pointing
-   at. On a block it plants or lifts a flag. On a number it lights up the
-   blocks that number is counting — the look-but-don't-touch action, which is
-   why it belongs on the button that never breaks anything. */
-function mark(){
+/* ---------- the right button: hold to think, release to act ----------
+   Holding it puts a cold mist over whatever you are pointing at, so the game
+   shows you it is considering that block before anything happens. Let go on a
+   number and it lights up what that number counts — and if the count already
+   adds up, the number turns your shot loose on every other block it touches.
+   Let go on a block and you have flagged it.
+   Nothing here destroys anything by accident: that is what left click is for. */
+const THINK = {on:false, t:0, cell:-1, kind:''};
+
+function startThink(){
+  if(G.state!=='play') return;
+  THINK.on=true; THINK.t=0; THINK.cell=-1; THINK.kind='';
+  snd.scan();
+}
+function thinkAim(){
+  const r=aimRay();
+  const hit = raycast(r.ox,r.oy,r.oz, r.dx,r.dy,r.dz, REACH, true);
+  if(!hit.hit || hit.kind==='bedrock'){ THINK.cell=-1; THINK.kind=''; return null; }
+  THINK.cell = idx(hit.x,hit.y,hit.z);
+  THINK.kind = hit.kind;
+  return hit;
+}
+/* the mist: cel-shaded, cool, and it rises. Spawned while the button is down. */
+function thinkMist(dt){
+  if(!THINK.on || THINK.cell<0) return;
+  const [x,y,z]=cellXYZ(THINK.cell);
+  const cx=(x+0.5)*BLOCK, cy=(y+0.5)*BLOCK, cz=(z+0.5)*BLOCK;
+  const k = Math.min(1, THINK.t/0.5);
+  if(rnd() < 0.55 + 0.45*k){
+    const a=rnd()*6.283, rr=BLOCK*(0.18+0.34*rnd());
+    addS(cx+Math.cos(a)*rr, cy-BLOCK*0.35+rnd()*BLOCK*0.7, cz+Math.sin(a)*rr,
+         Math.cos(a)*0.35, 0.9+rnd()*0.7, Math.sin(a)*0.35,
+         0.9+rnd()*1.1, 0.7+rnd()*0.5, [0.62,0.90,1.0], T_GLOW, 0.22+0.20*k);
+  }
+  if(rnd() < 0.18)
+    addP(cx+(rnd()-.5)*BLOCK*0.8, cy+(rnd()-.5)*BLOCK*0.8, cz+(rnd()-.5)*BLOCK*0.8,
+         (rnd()-.5)*1.2, 0.8+rnd(), (rnd()-.5)*1.2,
+         0.16+rnd()*0.18, 0.8, [0.70,0.94,1.0], 0.8, 0.05);
+}
+function endThink(){
+  if(!THINK.on) return;
+  THINK.on=false;
+  if(G.state!=='play'){ THINK.cell=-1; return; }
+  const hit = thinkAim();
+  THINK.cell=-1;
+  if(!hit) return;
+  if(hit.kind==='num'){ hitNumber(hit.x,hit.y,hit.z); return; }
+  mark(hit);
+}
+
+function mark(hit){
   if(G.state!=='play') return;
   G.hint = null; G.beacon = null;
-  const r=aimRay();
-  const hit = raycast(r.ox,r.oy,r.oz, r.dx,r.dy,r.dz, REACH, true, MARK_NUM_R);
-  if(hit.hit && hit.kind==='num'){ pingNumber(hit.x,hit.y,hit.z); return; }
+  if(!hit){
+    const r=aimRay();
+    hit = raycast(r.ox,r.oy,r.oz, r.dx,r.dy,r.dz, REACH, false);
+  }
   if(!hit.hit || hit.kind!=='block') return;
   const i=idx(hit.x,hit.y,hit.z);
   if(G.st[i]===AIR) return;
@@ -2229,8 +2316,8 @@ function spawnEnemy(fam, tier, cell){
     fx:fw[0], fy:fw[1], fz:fw[2],
     vx:0, vy:0, vz:0,
     state:'emerge', age:0, emerge:0,
-    cool: T.rate*(0.5+rnd()*0.6),
-    lock:0, lockMax:0, aim:null, ant:false,
+    cool: 0,                       // first shot lands one lock after it appears
+    lock:0, lockMax:0, aim:null, ant:false, first:true,
     banner:1, bannerT:0, flash:0, hop:0
   };
   enemies.push(e);
@@ -2295,7 +2382,7 @@ function enemyFire(e){
                sz: T.fam===FAM_FLAG ? 0.55 : 0.34});
   snd.efire(T.fam===FAM_FLAG ? 180 : T.fam===FAM_SLUG ? 260 : 340);
   if(T.fam===FAM_FLAG){ e.banner=0; e.bannerT=1.05; }   // it throws its banner
-  e.cool = T.rate*(0.78+rnd()*0.5);
+  e.cool = T.rate*0.30;          // the rest of the cycle is the telegraph
   e.aim=null; e.lock=0;
 }
 
@@ -2313,6 +2400,9 @@ function killEnemy(e, i){
   enemies.splice(i,1);
 }
 
+/* Enemy shots do half damage. Four of them kill, which is the same two hearts
+   as before — but at this fire rate a single hit no longer costs half your
+   life. */
 function hurtPlayer(){
   if(G.state!=='play') return;
   P.hp--;
@@ -2331,17 +2421,31 @@ function hurtPlayer(){
     flashScreen();
     showOver(false);
   } else {
-    toast('Hit. One more and you are done.', 2600);
+    toast(P.hp<=1 ? 'One more and you are done.' : 'Hit.', 2200);
   }
 }
 
 /* An enemy shot does to the cave exactly what yours does — including setting
    off a mine, which ends the run just as surely as walking into one. */
+/* An enemy shot is half a shot here too: the first one through a block only
+   cracks it. That crack is worth something to you — what shows in the gap
+   depends on whether a mine is under there — so being shot at is not purely a
+   punishment. The second shot finishes the block and does what your own shot
+   would have done, mine and all. */
 function enemyShotEnv(cx,cy,cz){
   if(!inside(cx,cy,cz)){ snd.clink(); return; }
   const i=idx(cx,cy,cz);
   if(G.st[i]===MARKED){ snd.clink(); return; }   // a flag shrugs it off
   if(G.st[i]===AIR) return;
+  if(!G.crack[i]){
+    G.crack[i]=1; G.dirty=true; snd.clink();
+    const bx=(cx+0.5)*BLOCK, by=(cy+0.5)*BLOCK, bz=(cz+0.5)*BLOCK;
+    for(let k=0;k<6;k++)
+      addP(bx+(rnd()-.5)*BLOCK*0.7, by+(rnd()-.5)*BLOCK*0.7, bz+(rnd()-.5)*BLOCK*0.7,
+           (rnd()-.5)*5, 1.5+rnd()*3, (rnd()-.5)*5, 0.18+rnd()*0.3, 0.7,
+           MATS[G.mat[i]].c, 0);
+    return;
+  }
   if(G.mine[i]){ detonate(cx,cy,cz); return; }
   revealAt(i,false);
   checkWin();
@@ -2436,16 +2540,18 @@ function updateEnemies(dt){
     if(e.flash>0) e.flash-=dt;
 
     if(e.state==='emerge'){
-      e.emerge = Math.min(1, e.emerge + dt/0.75);
-      e.x += (e.tx-e.x)*Math.min(1,dt*5); e.y += (e.ty-e.y)*Math.min(1,dt*5);
-      e.z += (e.tz-e.z)*Math.min(1,dt*5);
+      e.emerge = Math.min(1, e.emerge + dt/0.45);
+      e.x += (e.tx-e.x)*Math.min(1,dt*7); e.y += (e.ty-e.y)*Math.min(1,dt*7);
+      e.z += (e.tz-e.z)*Math.min(1,dt*7);
       if(e.emerge>=1) e.state='live';
-      continue;
+      /* It tracks you on the way out, so the opening shot lands a second after
+         it appeared rather than a second after it finished appearing. */
     }
     if(G.state!=='play') continue;
 
-    // ---- move ----
-    if(T.fam===FAM_ORB)        moveOrb(e, dt, T);
+    // ---- move (nothing moves while still coming out of the block) ----
+    if(e.state==='emerge'){ /* held in place */ }
+    else if(T.fam===FAM_ORB)   moveOrb(e, dt, T);
     else if(T.fam===FAM_SLUG)  moveSlug(e, dt, T);
     else if(T.fam===FAM_FINAL) moveFinal(e, dt, T);
     // FAM_FLAG stays on the face it came out of, as it should
@@ -2475,11 +2581,17 @@ function updateEnemies(dt){
       e.cool -= dt;
       const ready = T.fam!==FAM_FLAG || e.banner>=1;   // no banner, no shot
       if(e.cool<=0 && ready && canSee(e)){
-        /* Aim at where the player IS. Whether that is where they will BE is
-           the entire question, and the lock time is how long they have. */
-        e.aim = [P.x, P.y+EYE*0.62, P.z];
-        e.lockMax = T.lock*(0.86+0.28*rnd());
+        /* Aim where the player WILL be. It leads you by however long the
+           telegraph plus the shot's flight will take, so running in a straight
+           line is no defence at all — only changing your mind is. */
+        /* the opening shot gets the long wind-up; each one after it gets the
+           telegraph that fits inside the cycle */
+        e.lockMax = (e.first ? T.first : T.rate*0.70) * (0.92+0.16*rnd());
+        e.first = false;
         e.lock = e.lockMax;
+        const flight = Math.hypot(P.x-e.x, P.y-e.y, P.z-e.z)/ESHOT_SPD;
+        const lead = e.lockMax + flight;
+        e.aim = [P.x + P.vx*lead, P.y+EYE*0.62 + P.vy*lead*0.5, P.z + P.vz*lead];
         e.ant = !e.ant;
         snd.elock();
       }
@@ -2656,8 +2768,10 @@ function updateHUD(){
   $('sTime').textContent = mm+':'+String(ss).padStart(2,'0');
   if(G.boss){
     const life = $('sLife');
-    life.textContent = P.hp>0 ? '♥'.repeat(P.hp) : '—';
-    life.classList.toggle('low', P.hp<=1);
+    // two hearts, half a heart per shot
+    const full = P.hp>>1, half = P.hp & 1;
+    life.textContent = P.hp>0 ? ('♥'.repeat(full) + (half?'♡':'')) : '—';
+    life.classList.toggle('low', P.hp<=2);
     $('hurt').style.opacity = P.hurtT>0 ? (0.30+0.55*P.hurtT).toFixed(2) : '0';
   }
 }
@@ -2857,12 +2971,15 @@ canvas.addEventListener('mousedown', e=>{
   if(!locked && !dragLook){ tryLock(); return; }   // this click recovers the mouse
   if(dragLook){
     if(e.button===0) dragging=true;
-    else if(e.button===2) mark();
+    else if(e.button===2) startThink();
     return;
   }
-  if(e.button===0) shoot(); else if(e.button===2) mark();
+  if(e.button===0) shoot(); else if(e.button===2) startThink();
 });
-window.addEventListener('mouseup', ()=>{ dragging=false; });
+window.addEventListener('mouseup', e=>{
+  dragging=false;
+  if(e.button===2) endThink();
+});
 canvas.addEventListener('contextmenu', e=>e.preventDefault());
 document.addEventListener('mousemove', e=>{
   if(G.state!=='play') return;
@@ -2894,7 +3011,7 @@ window.addEventListener('keydown', e=>{
       }
       break;
     case 'KeyE': if(dragLook) shoot(); break;
-    case 'KeyQ': if(dragLook) mark(); break;
+    case 'KeyQ': if(dragLook && !THINK.on) startThink(); break;
     case 'KeyH': askHint(); break;
     case 'KeyT':
       G.arrows=!G.arrows;
@@ -3012,6 +3129,7 @@ function frame(now){
     physics(dt);
     tickGround(dt);
     if(P.hurtT>0) P.hurtT -= dt;
+    if(THINK.on){ THINK.t += dt; thinkAim(); thinkMist(dt); }
     G.elapsed = Math.max(0, (now - G.t0)/1000);
     updateHUD();
 
@@ -3224,6 +3342,22 @@ function frame(now){
           if(showMines && G.mine[i]){ put(cx,cy,cz, 2.0,2.0, T_MINE, [1.0,0.32,0.16], 1, 0); continue; }
           /* The flag sits just outside the face nearest the camera: a
              billboard at the block center would be buried inside solid rock. */
+          /* A cracked block wears its fracture on the face you are looking
+             at. Which of the two it is depends on what is underneath — that is
+             the whole point of it. */
+          if(G.crack && G.crack[i] && G.st[i]===SOLID && G.state==='play'){
+            const dcam=Math.hypot(cx-camX, cy-camY, cz-camZ);
+            if(dcam<=34){
+              const fx=camX-cx, fy=camY-cy, fz=camZ-cz;
+              const ax=Math.abs(fx), ay=Math.abs(fy), az=Math.abs(fz);
+              const off = BLOCK*0.5 + 0.06;
+              put((ax>=ay&&ax>=az) ? cx+Math.sign(fx)*off : cx,
+                  (ay>ax&&ay>=az)  ? cy+Math.sign(fy)*off : cy,
+                  (az>ax&&az>ay)   ? cz+Math.sign(fz)*off : cz,
+                  2.5,2.5, G.mine[i]?T_CRACK_A:T_CRACK_B,
+                  [0.16,0.12,0.11], clamp(1.30-dcam/30,0.45,1), 0);
+            }
+          }
           if(G.st[i]===MARKED && G.state==='play'){
             const dcam=Math.hypot(cx-camX, cy-camY, cz-camZ);
             if(dcam>40) continue;
