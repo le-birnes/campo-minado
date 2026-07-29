@@ -19,8 +19,27 @@
   --bone:#f6e6c8;
   --dust:#ab8f70;
 
+  /* Windows 95 system palette. The cave stays desert; every panel, button
+     and counter the player reads is the old control panel instead. */
+  --w95:#c0c0c0;      /* button face      */
+  --w95-lt:#dfdfdf;   /* button light     */
+  --w95-hi:#ffffff;   /* button highlight */
+  --w95-sh:#808080;   /* button shadow    */
+  --w95-dk:#000000;   /* button dark      */
+  --w95-nav:#000080;  /* active title bar */
+  --w95-nav2:#1084d0;
+  --w95-desk:#008080; /* the desktop teal */
+  --w95-led:#ff2020;  /* seven-segment counters */
+
+  /* raised / sunken, the two shapes every Win95 control is made of */
+  --out: inset -1px -1px 0 var(--w95-dk), inset 1px 1px 0 var(--w95-hi),
+         inset -2px -2px 0 var(--w95-sh), inset 2px 2px 0 var(--w95-lt);
+  --in:  inset 1px 1px 0 var(--w95-sh), inset -1px -1px 0 var(--w95-hi),
+         inset 2px 2px 0 var(--w95-dk), inset -2px -2px 0 var(--w95-lt);
+
   --display: "Arial Black","Arial Bold",Impact,Haettenschweiler,"Franklin Gothic Heavy","Helvetica Neue",sans-serif;
   --mono: ui-monospace,"Cascadia Mono","Consolas","DejaVu Sans Mono",monospace;
+  --ui: "Segoe UI",Tahoma,"MS Sans Serif",Verdana,sans-serif;
 }
 
 html,body{margin:0;padding:0;height:100%;background:var(--soot);overflow:hidden;}
@@ -54,36 +73,55 @@ canvas#gl{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:
 #hud::before{top:0;background:linear-gradient(180deg,rgba(9,5,4,.78),rgba(9,5,4,0));}
 #hud::after{bottom:0;background:linear-gradient(0deg,rgba(9,5,4,.62),rgba(9,5,4,0));}
 
-.stat{display:flex;flex-direction:column;gap:2px;}
-.stat .k{font-size:clamp(8px,1.05vmin,11px);letter-spacing:.22em;text-transform:uppercase;color:var(--dust);}
-.stat .v{font-family:var(--display);font-size:clamp(20px,3.4vmin,40px);line-height:.95;
-         letter-spacing:-.02em;font-variant-numeric:tabular-nums;}
-.v.mines{color:var(--ember);}
-.v.gold{color:var(--gold);}
-.v.time{color:var(--sand-hi);}
-.v.left{color:var(--bone);}
+/* the counter plates: a raised gray panel holding a sunken black readout,
+   exactly the two shapes that flank the smiley in the original */
+.stat{display:flex;flex-direction:column;gap:3px;background:var(--w95);
+      padding:5px 6px 6px;box-shadow:var(--out);text-shadow:none;}
+.stat .k{font-family:var(--ui);font-size:clamp(8px,1.05vmin,11px);letter-spacing:.08em;
+         text-transform:uppercase;color:#000;}
+.stat .v{font-family:var(--mono);font-weight:700;
+         font-size:clamp(17px,2.7vmin,31px);line-height:1.08;
+         letter-spacing:.02em;font-variant-numeric:tabular-nums;
+         background:#000;padding:1px 7px 2px;min-width:3ch;text-align:right;
+         box-shadow:inset 1px 1px 0 var(--w95-sh), inset -1px -1px 0 var(--w95-hi);}
+.v.mines{color:var(--w95-led);}
+.v.time{color:var(--w95-led);}
+.v.left{color:var(--w95-led);}
+.v.gold{color:var(--gold);}   /* the one readout that is not a mine counter */
 
 #tl{grid-column:1;grid-row:1;display:flex;gap:clamp(16px,3vmin,38px);align-items:flex-start;}
 #tr{grid-column:3;grid-row:1;display:flex;gap:clamp(16px,3vmin,38px);align-items:flex-start;justify-content:flex-end;}
 
-#planes{grid-column:2;grid-row:1;justify-self:center;text-align:center;
-        font-size:clamp(8px,1.05vmin,11px);letter-spacing:.2em;text-transform:uppercase;color:var(--dust);}
-#planes b{color:var(--sand);font-weight:400;}
-#planes.off b{color:#5b4736;text-decoration:line-through;}
+#planes{grid-column:2;grid-row:1;justify-self:center;text-align:center;text-shadow:none;
+        font-family:var(--ui);font-size:clamp(8px,1.05vmin,11px);letter-spacing:.06em;
+        text-transform:uppercase;color:#000;background:var(--w95);
+        padding:5px 10px;box-shadow:var(--out);align-self:start;}
+#planes b{color:var(--w95-nav);font-weight:700;}
+#planes.off b{color:var(--w95-sh);text-decoration:line-through;}
 
-/* progress bar — how many safe blocks are left */
-#bar{grid-column:1/-1;grid-row:3;height:3px;background:rgba(255,255,255,.07);position:relative;align-self:end;}
-#bar i{position:absolute;inset:0 auto 0 0;width:0%;background:linear-gradient(90deg,var(--ochre),var(--sand),var(--gold));
+/* hint: a real Win95 push button, so it also works when the pointer is free */
+#btnHint{grid-column:2;grid-row:2;justify-self:center;align-self:start;margin-top:10px;
+         pointer-events:auto;padding:5px 14px;font-size:clamp(11px,1.4vmin,13px);}
+#btnHint kbd{margin:0 0 0 7px;}
+#btnHint[disabled]{color:var(--w95-sh);text-shadow:1px 1px 0 var(--w95-hi);cursor:default;}
+
+/* progress bar — how many safe blocks are left, in navy Win95 chunks */
+#bar{grid-column:1/-1;grid-row:3;height:14px;background:var(--w95);position:relative;
+     align-self:end;box-shadow:var(--in);padding:2px;}
+#bar i{position:absolute;top:2px;bottom:2px;left:2px;width:0%;
+       background:repeating-linear-gradient(90deg,var(--w95-nav) 0 8px,transparent 8px 10px);
        transition:width .25s ease;}
 
-#charge{grid-column:2;grid-row:3;justify-self:center;align-self:end;margin-bottom:14px;
-        width:clamp(90px,14vmin,160px);height:5px;background:rgba(0,0,0,.5);
-        border:1px solid rgba(255,209,102,.35);opacity:0;transition:opacity .12s;}
+#charge{grid-column:2;grid-row:3;justify-self:center;align-self:end;margin-bottom:22px;
+        width:clamp(90px,14vmin,160px);height:14px;background:var(--w95);
+        box-shadow:var(--in);padding:2px;opacity:0;transition:opacity .12s;}
 #charge.on{opacity:1;}
-#charge i{display:block;height:100%;width:0%;background:var(--gold);}
+#charge i{display:block;height:100%;width:0%;
+          background:repeating-linear-gradient(90deg,var(--ember) 0 8px,transparent 8px 10px);}
 
-#tip{grid-column:1;grid-row:3;align-self:end;margin-bottom:16px;
-     font-size:clamp(9px,1.15vmin,12px);letter-spacing:.09em;color:var(--dust);max-width:46ch;line-height:1.6;
+#tip{grid-column:1;grid-row:3;align-self:end;margin-bottom:24px;text-shadow:none;
+     font-family:var(--ui);font-size:clamp(9px,1.15vmin,12px);color:#000;background:var(--w95);
+     padding:7px 10px;box-shadow:var(--out);max-width:46ch;line-height:1.6;
      transition:opacity .8s ease;}
 #tip.fade{opacity:0;}
 
@@ -109,73 +147,100 @@ canvas#gl{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:
 
 /* ---------- telas ---------- */
 .screen{position:absolute;inset:0;z-index:20;display:none;place-items:center;
-        background:radial-gradient(90% 90% at 50% 45%, rgba(36,24,18,.86), rgba(10,6,5,.97));
+        background:radial-gradient(120% 120% at 50% 45%, rgba(0,128,128,.80), rgba(0,46,46,.95));
         backdrop-filter:blur(2px);pointer-events:auto;}
 .screen.on{display:grid;}
-.panel{width:min(760px,92vw);padding:clamp(18px,3.4vmin,40px);color:var(--bone);font-family:var(--mono);}
+
+/* every screen is a window: raised frame, navy title bar, gray client area */
+.panel{width:min(760px,92vw);max-height:94vh;overflow:auto;padding:3px;
+       background:var(--w95);color:#000;font-family:var(--ui);
+       box-shadow:var(--out), 6px 6px 0 rgba(0,0,0,.4);}
+.titlebar{display:flex;align-items:center;justify-content:space-between;gap:10px;
+          background:linear-gradient(90deg,var(--w95-nav),var(--w95-nav2));
+          color:#fff;font-family:var(--ui);font-weight:700;font-size:12px;
+          padding:3px 3px 3px 6px;user-select:none;}
+.titlebar .btns{display:flex;gap:2px;}
+.titlebar .btns i{width:17px;height:15px;background:var(--w95);box-shadow:var(--out);
+                  display:grid;place-items:center;font-style:normal;
+                  font-size:9px;color:#000;line-height:1;}
+.body{padding:clamp(14px,2.8vmin,30px);}
 
 h1{font-family:var(--display);margin:0;text-transform:uppercase;
-   font-size:clamp(38px,9.4vmin,104px);line-height:.82;letter-spacing:-.035em;
-   color:var(--sand-hi);text-wrap:balance;
-   text-shadow:4px 5px 0 var(--ochre), 8px 10px 0 rgba(0,0,0,.55);}
-h1 em{display:block;font-style:normal;color:var(--ember);font-size:.44em;letter-spacing:-.02em;}
-.eyebrow{font-size:clamp(9px,1.25vmin,13px);letter-spacing:.4em;text-transform:uppercase;color:var(--violet);margin:0 0 14px;}
-.lede{margin:20px 0 0;max-width:56ch;line-height:1.75;font-size:clamp(12px,1.6vmin,15px);color:#cdb694;}
-.lede b{color:var(--sand-hi);font-weight:400;}
+   font-size:clamp(30px,6.8vmin,74px);line-height:.82;letter-spacing:-.035em;
+   color:var(--w95-nav);text-wrap:balance;
+   text-shadow:3px 3px 0 var(--w95-hi), 6px 6px 0 var(--w95-sh);}
+h1 em{display:block;font-style:normal;color:#c00000;font-size:.44em;letter-spacing:-.02em;}
+.eyebrow{font-size:clamp(9px,1.25vmin,13px);letter-spacing:.32em;text-transform:uppercase;
+         color:var(--w95-desk);font-weight:700;margin:0 0 14px;}
+.lede{margin:14px 0 0;max-width:64ch;line-height:1.55;font-size:clamp(11px,1.45vmin,13px);color:#1a1a1a;}
+.lede b{color:var(--w95-nav);font-weight:700;}
 
-.rule{height:1px;background:linear-gradient(90deg,var(--ochre),rgba(168,95,38,0));margin:24px 0;}
+/* the etched groove that separated every group box in the old shell */
+.rule{height:2px;background:none;border-top:1px solid var(--w95-sh);
+      border-bottom:1px solid var(--w95-hi);margin:14px 0;}
 
-.diffs{display:flex;flex-wrap:wrap;gap:10px;margin-top:6px;}
-button{font-family:var(--display);text-transform:uppercase;letter-spacing:.02em;cursor:pointer;
-       background:transparent;color:var(--sand);border:2px solid var(--ochre);
-       padding:12px 18px;font-size:clamp(13px,1.9vmin,19px);line-height:1;
-       transition:background .14s,color .14s,transform .14s,border-color .14s;}
-button:hover,button:focus-visible{background:var(--ochre);color:#1a0f08;transform:translateY(-2px);outline:none;border-color:var(--sand);}
-button.sel{background:var(--sand);border-color:var(--sand);color:#1a0f08;}
-button.go{border-color:var(--gold);color:var(--gold);padding:15px 30px;font-size:clamp(15px,2.3vmin,24px);}
-button.go:hover,button.go:focus-visible{background:var(--gold);color:#1a0f08;}
-button:focus-visible{box-shadow:0 0 0 3px rgba(255,209,102,.35);}
+/* the old scrollbar, so a long panel does not sprout a modern one */
+.panel::-webkit-scrollbar{width:16px;height:16px;}
+.panel::-webkit-scrollbar-track{background:repeating-conic-gradient(var(--w95) 0 25%, var(--w95-hi) 0 50%) 0 0/2px 2px;}
+.panel::-webkit-scrollbar-thumb{background:var(--w95);box-shadow:var(--out);}
+.panel{scrollbar-color:var(--w95) var(--w95-lt);}
 
-.diffnote{font-size:clamp(10px,1.3vmin,13px);color:var(--dust);margin-top:10px;line-height:1.6;
-          font-variant-numeric:tabular-nums;}
+.diffs{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;}
+button{font-family:var(--ui);font-weight:700;text-transform:none;letter-spacing:0;cursor:pointer;
+       background:var(--w95);color:#000;border:0;box-shadow:var(--out);
+       padding:8px 18px;font-size:clamp(12px,1.6vmin,15px);line-height:1.2;}
+button:active{box-shadow:var(--in);padding:9px 17px 7px 19px;}
+button.sel{box-shadow:var(--in);
+           background:repeating-conic-gradient(var(--w95) 0 25%, var(--w95-hi) 0 50%) 0 0/2px 2px;}
+button.go{padding:10px 28px;font-size:clamp(13px,1.9vmin,18px);
+          box-shadow:var(--out), 0 0 0 1px var(--w95-dk);}   /* the default button */
+button.go:active{box-shadow:var(--in), 0 0 0 1px var(--w95-dk);}
+button:focus-visible{outline:1px dotted #000;outline-offset:-5px;}
 
-.keys{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:6px 26px;margin-top:4px;
-      font-size:clamp(10px,1.35vmin,13px);line-height:1.9;color:#bda488;}
-.keys kbd{font-family:var(--mono);background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);
-          border-bottom-width:2px;padding:1px 6px;color:var(--bone);font-size:.92em;margin-right:6px;}
+.diffnote{font-size:clamp(10px,1.3vmin,12px);color:#333;margin-top:10px;line-height:1.6;
+          font-family:var(--mono);font-variant-numeric:tabular-nums;}
 
-.opt{display:flex;align-items:center;gap:14px;margin-top:14px;font-size:clamp(10px,1.35vmin,13px);color:#bda488;}
-.opt input[type=range]{accent-color:var(--sand);width:150px;}
+.keys{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:3px 26px;margin-top:2px;
+      font-size:clamp(10px,1.25vmin,12px);line-height:1.65;color:#1a1a1a;}
+kbd{font-family:var(--mono);font-size:.92em;background:var(--w95);color:#000;
+    box-shadow:var(--out);padding:1px 6px 2px;margin-right:7px;display:inline-block;}
+
+.opt{display:flex;align-items:center;gap:14px;margin-top:12px;font-size:clamp(10px,1.35vmin,12px);color:#1a1a1a;}
+.opt input[type=range]{accent-color:var(--w95-nav);width:150px;}
 
 /* game over — corny and flashy, on purpose */
-#over .panel{text-align:center;}
-#over h1{animation:jolt .16s steps(2) infinite;}
+#over .body{text-align:center;}
+#over h1{animation:jolt .16s steps(2) infinite;color:#c00000;}
 @keyframes jolt{0%{transform:translate(0,0)}50%{transform:translate(-3px,2px)}100%{transform:translate(2px,-2px)}}
-#over.win h1{animation:none;color:var(--gold);text-shadow:4px 5px 0 var(--ochre),8px 10px 0 rgba(0,0,0,.55),0 0 44px rgba(255,209,102,.55);}
+#over.win h1{animation:none;color:#008000;text-shadow:3px 3px 0 var(--w95-hi),6px 6px 0 var(--w95-sh),0 0 40px rgba(0,160,0,.5);}
+#over .titlebar{background:linear-gradient(90deg,#800000,#c05050);}
+#over.win .titlebar{background:linear-gradient(90deg,var(--w95-nav),var(--w95-nav2));}
 @media (prefers-reduced-motion:reduce){#over h1{animation:none}}
 
 #flash{position:absolute;inset:0;z-index:30;pointer-events:none;background:#fff;opacity:0;}
 
-#toast{position:absolute;left:50%;bottom:7%;transform:translateX(-50%);z-index:8;
-       font-family:var(--mono);font-size:12px;letter-spacing:.06em;color:#1a0f08;background:var(--gold);
-       padding:8px 14px;display:none;max-width:80vw;text-align:center;line-height:1.5;}
+/* toast and the pointer-lock prompt: balloon tips, same gray as everything else */
+#toast{position:absolute;left:50%;bottom:9%;transform:translateX(-50%);z-index:8;
+       font-family:var(--ui);font-size:12px;color:#000;background:#ffffe1;
+       border:1px solid #000;padding:8px 14px;display:none;max-width:80vw;
+       text-align:center;line-height:1.5;box-shadow:3px 3px 0 rgba(0,0,0,.35);}
 #toast.on{display:block;}
 
 #needlock{position:absolute;left:50%;top:62%;transform:translateX(-50%);z-index:7;
-          font-family:var(--mono);font-size:clamp(11px,1.5vmin,14px);letter-spacing:.16em;
-          text-transform:uppercase;color:var(--bone);background:rgba(10,6,4,.72);
-          border:1px solid rgba(240,200,131,.45);padding:9px 16px;display:none;
+          font-family:var(--ui);font-weight:700;font-size:clamp(11px,1.5vmin,13px);
+          color:#000;background:var(--w95);box-shadow:var(--out);padding:9px 16px;display:none;
           text-align:center;pointer-events:none;animation:pisca 1.9s ease-in-out infinite;}
 #needlock.on{display:block;}
 @keyframes pisca{0%,100%{opacity:.55}50%{opacity:1}}
 @media (prefers-reduced-motion:reduce){#needlock{animation:none}}
 
 .chk{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;}
-.chk input{accent-color:var(--sand);width:15px;height:15px;cursor:pointer;}
-.chk input:focus-visible{outline:2px solid var(--gold);outline-offset:2px;}
+.chk input{accent-color:var(--w95-nav);width:14px;height:14px;cursor:pointer;}
+.chk input:focus-visible{outline:1px dotted #000;outline-offset:2px;}
 
-#nogl{position:absolute;inset:0;display:grid;place-items:center;z-index:40;padding:6vw;
-      font-family:var(--mono);color:var(--bone);text-align:center;line-height:1.8;display:none;}
+#nogl{position:absolute;inset:0;place-items:center;z-index:40;padding:6vw;background:var(--w95-desk);
+      font-family:var(--ui);color:#000;text-align:center;line-height:1.8;display:none;}
+#nogl div{background:var(--w95);box-shadow:var(--out);padding:26px 30px;max-width:60ch;}
 </style>
 
 <div id="wrap">
@@ -194,7 +259,8 @@ button:focus-visible{box-shadow:0 0 0 3px rgba(255,209,102,.35);}
       <div class="stat"><span class="k">Gold</span><span class="v gold" id="sGold">0</span></div>
       <div class="stat"><span class="k">Time</span><span class="v time" id="sTime">0:00</span></div>
     </div>
-    <div id="tip">Aim at a block and shoot. Hit a number to light up what it counts — if its mines are already flagged, the shot spreads and clears the rest.</div>
+    <div id="tip">Aim at a block and shoot. Hit a number to light up what it counts — if its mines are already flagged, the shot spreads and clears the rest. Stuck? Press <b>H</b> for a hint.</div>
+    <button id="btnHint" type="button">Hint<kbd>H</kbd></button>
     <div id="charge"><i id="chargeFill"></i></div>
     <div id="bar"><i id="barFill"></i></div>
   </div>
@@ -205,6 +271,9 @@ button:focus-visible{box-shadow:0 0 0 3px rgba(255,209,102,.35);}
   <!-- ========== MENU ========== -->
   <div class="screen on" id="menu">
     <div class="panel">
+      <div class="titlebar"><span>Minesweeper — Three Planes</span>
+        <span class="btns"><i>_</i><i>□</i><i>×</i></span></div>
+      <div class="body">
       <p class="eyebrow">Someone locked you in here</p>
       <h1>Minesweeper<em>Three Planes</em></h1>
       <p class="lede">You are <b>inside</b> the board. Sand above, sand below, sand all around —
@@ -232,6 +301,8 @@ button:focus-visible{box-shadow:0 0 0 3px rgba(255,209,102,.35);}
         <div><kbd>Left click</kbd>break a block · hitting a number lights its neighbors<br>
           (with all its mines flagged, the shot spreads and clears the rest)</div>
         <div><kbd>Right click</kbd>flag a mine</div>
+        <div><kbd>H</kbd>hint · lights the numbers that prove the next move<br>
+          (press again and it plays that move for you)</div>
         <div><kbd>T</kbd>plane arrows · <kbd>I</kbd>invert mouse</div>
         <div><kbd>M</kbd>sound · <kbd>R</kbd>restart · <kbd>Esc</kbd>pause</div>
       </div>
@@ -247,12 +318,16 @@ button:focus-visible{box-shadow:0 0 0 3px rgba(255,209,102,.35);}
 
       <div class="rule"></div>
       <button class="go" id="btnStart">Enter the cave</button>
+      </div>
     </div>
   </div>
 
   <!-- ========== PAUSE ========== -->
   <div class="screen" id="pause">
     <div class="panel">
+      <div class="titlebar"><span>Paused</span>
+        <span class="btns"><i>_</i><i>□</i><i>×</i></span></div>
+      <div class="body">
       <p class="eyebrow">The cave waits</p>
       <h1 style="font-size:clamp(30px,6.4vmin,64px)">Paused</h1>
       <div class="opt">
@@ -269,12 +344,16 @@ button:focus-visible{box-shadow:0 0 0 3px rgba(255,209,102,.35);}
         <button id="btnRestart">Restart</button>
         <button id="btnMenu">Menu</button>
       </div>
+      </div>
     </div>
   </div>
 
   <!-- ========== GAME OVER ========== -->
   <div class="screen" id="over">
     <div class="panel">
+      <div class="titlebar"><span id="overBar">Minesweeper</span>
+        <span class="btns"><i>_</i><i>□</i><i>×</i></span></div>
+      <div class="body">
       <p class="eyebrow" id="overEye">Plane breached</p>
       <h1 id="overTitle">You are sand now</h1>
       <p class="lede" id="overText" style="margin-left:auto;margin-right:auto"></p>
@@ -283,11 +362,12 @@ button:focus-visible{box-shadow:0 0 0 3px rgba(255,209,102,.35);}
         <button class="go" id="btnAgain">Again</button>
         <button id="btnMenu2">Menu</button>
       </div>
+      </div>
     </div>
   </div>
 
   <div id="flash"></div>
-  <div id="nogl">Your browser could not start WebGL 2.<br>Try an up-to-date Chrome, Edge or Firefox with hardware acceleration enabled.</div>
+  <div id="nogl"><div>Your browser could not start WebGL 2.<br>Try an up-to-date Chrome, Edge or Firefox with hardware acceleration enabled.</div></div>
 </div>
 
 <script>
@@ -313,7 +393,8 @@ const CHARGE_T= 0.50;   // seconds of space held
 const REACH   = 13*BLOCK;
 const NUM_R   = 0.45;   // number hit radius: smaller than the glyph (~0.52),
                         // or the number steals shots aimed at the block behind
-const ECHO_DUR= 2.2;    // echo duration on neighboring blocks
+const ECHO_DUR= 4.6;    // echo duration on neighboring blocks
+const HINT_DUR= 9.0;    // hints hold longer: you are meant to read them
 const FUSE_T  = 0.85;   // the hit mine glows before taking everything
 
 /* Mine density has a floor: with 26 neighbors, P(zero block) = (1-d)^26,
@@ -371,14 +452,6 @@ const lerp=(a,b,t)=>a+(b-a)*t;
 let seed=1;
 function rnd(){ seed = (seed*1664525+1013904223)>>>0; return seed/4294967296; }
 
-function hsl2rgb(h,s,l){
-  h=((h%360)+360)%360/360;
-  const q = l<0.5 ? l*(1+s) : l+s-l*s, p = 2*l-q;
-  const f=(t)=>{ t=(t+1)%1; if(t<1/6)return p+(q-p)*6*t; if(t<0.5)return q;
-                 if(t<2/3)return p+(q-p)*(2/3-t)*6; return p; };
-  return [f(h+1/3), f(h), f(h-1/3)];
-}
-
 /* ==========================================================================
    2. WEBGL — context and programs
    ========================================================================== */
@@ -412,9 +485,10 @@ layout(location=5) in vec4 iM2;
 layout(location=6) in vec4 iM3;
 layout(location=7) in vec3 iColor;
 layout(location=8) in vec4 iParams;
+layout(location=9) in vec3 iHi;
 uniform mat4 uProj, uView;
 uniform vec3 uHover;
-out vec3 vN, vW, vC;
+out vec3 vN, vW, vC, vHi;
 out vec2 vUV;
 out float vSeed, vEmis, vMark, vEcho, vHover;
 void main(){
@@ -422,7 +496,7 @@ void main(){
   vec4 wp = M * vec4(aPos,1.0);
   vW = wp.xyz;
   vN = normalize(mat3(M) * aNormal);
-  vUV = aUV; vC = iColor;
+  vUV = aUV; vC = iColor; vHi = iHi;
   vSeed = iParams.x; vEmis = iParams.y; vMark = iParams.z; vEcho = iParams.w;
   vHover = 1.0 - step(0.4, distance(iM3.xyz, uHover));
   gl_Position = uProj * uView * wp;
@@ -430,7 +504,7 @@ void main(){
 
 const FS_CUBE = `#version 300 es
 precision highp float;
-in vec3 vN, vW, vC;
+in vec3 vN, vW, vC, vHi;
 in vec2 vUV;
 in float vSeed, vEmis, vMark, vEcho, vHover;
 uniform vec3 uCam, uSun, uFog;
@@ -469,9 +543,21 @@ void main(){
   /* --- emissive (crystals, mines, gold) --- */
   lit = mix(lit, base*1.15 + vec3(0.18,0.09,0.03), vEmis);
 
-  /* --- flag rune --- */
-  float pulse = 0.5 + 0.5*sin(uTime*5.2 + vSeed*6.0);
-  lit = mix(lit, vec3(0.66,0.34,0.98)*(0.55+0.55*pulse), vMark*0.72);
+  /* --- flagged block: the raised cell, lifted straight off the old board ---
+     Gray face, light on two edges and dark on the other two. Those bevel
+     lines are the whole reason a flagged block still reads as a flagged
+     block when the violet pulse is at its dimmest. */
+  if(vMark > 0.5){
+    float bw = 0.10;
+    float lt = max(step(1.0-bw, vUV.y), step(vUV.x, bw));         // top and left
+    float dk = min(max(step(vUV.y, bw), step(1.0-bw, vUV.x)), 1.0-lt);
+    float pulse = 0.5 + 0.5*sin(uTime*4.4 + vSeed*6.0);
+    vec3 face = vec3(0.74,0.73,0.75) * (0.70 + 0.26*ndl);
+    face = mix(face, vec3(0.60,0.36,0.86), 0.16 + 0.20*pulse);    // the violet is still here
+    face = mix(face, vec3(1.00,1.00,1.00), lt*0.80);
+    face = mix(face, vec3(0.26,0.25,0.28), dk*0.80);
+    lit = mix(lit, face, 0.90);
+  }
 
   /* --- contorno preto assado na face --- */
   float e = min(min(vUV.x, 1.0-vUV.x), min(vUV.y, 1.0-vUV.y));
@@ -481,10 +567,14 @@ void main(){
   lit = mix(outc, lit, edge);
   lit += vHover * 0.16 * vec3(1.0,0.85,0.55);
 
-  /* Echo: the blocks the number you hit is counting. Cyan along the edges,
-     clearly different from the flat purple of a block flagged as a mine. */
-  float ep = 0.55 + 0.45*sin(uTime*8.5);
-  lit += vec3(0.28,0.92,1.0) * vEcho * (0.20 + 0.55*(1.0-edge)) * (0.60 + 0.40*ep);
+  /* Echo: the blocks the number you shot is counting, in that number's own
+     hue. Knocking the sand back first is what buys the contrast — additive
+     light alone just washes pale sandstone out to white. */
+  float eg = clamp(vEcho, 0.0, 1.0);
+  float ep = 0.58 + 0.42*sin(uTime*7.0);
+  float halo = 0.26 + 0.85*(1.0-edge);
+  lit = mix(lit, lit*0.34, eg*0.62);
+  lit += vHi * eg * halo * (0.55 + 0.45*ep) * 0.95;
 
   float f = 1.0 - exp(-pow(d*0.0135, 2.0));
   frag = vec4(mix(lit, uFog, clamp(f,0.0,1.0)), 1.0);
@@ -524,7 +614,13 @@ void main(){
   if(vMode > 0.5){
     frag = vec4(vCol.rgb * t.a * vCol.a, t.a * vCol.a);
   } else {
-    vec3 col = vCol.rgb * t.r + vec3(0.045,0.028,0.024) * t.g;
+    /* Half the Windows 95 palette is dark — navy, maroon, black. A dark
+       outline would swallow those digits whole against shaded sandstone,
+       so the outline flips to bone as soon as the fill itself is dark. */
+    float lum = dot(vCol.rgb, vec3(0.30,0.59,0.11));
+    vec3 oc = mix(vec3(0.97,0.95,0.90), vec3(0.045,0.028,0.024),
+                  smoothstep(0.13,0.32,lum));
+    vec3 col = vCol.rgb * t.r + oc * t.g;
     frag = vec4(col, t.a * vCol.a);
   }
 }`;
@@ -567,7 +663,7 @@ function buildCube(){
 }
 const CUBE = buildCube();
 
-const CUBE_STRIDE = 23; // mat4(16) + color(3) + params(4: seed, emis, flag, echo)
+const CUBE_STRIDE = 26; // mat4(16) + color(3) + params(4: seed, emis, flag, echo) + highlight(3)
 function makeCubeBatch(max){
   const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
   const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb);
@@ -588,6 +684,7 @@ function makeCubeBatch(max){
   }
   gl.enableVertexAttribArray(7); gl.vertexAttribPointer(7,3,gl.FLOAT,false,IS,64); gl.vertexAttribDivisor(7,1);
   gl.enableVertexAttribArray(8); gl.vertexAttribPointer(8,4,gl.FLOAT,false,IS,76); gl.vertexAttribDivisor(8,1);
+  gl.enableVertexAttribArray(9); gl.vertexAttribPointer(9,3,gl.FLOAT,false,IS,92); gl.vertexAttribDivisor(9,1);
   gl.bindVertexArray(null);
   return {vao, inst, data:new Float32Array(max*CUBE_STRIDE), max, count:0};
 }
@@ -678,12 +775,15 @@ function buildAtlas(){
     x.beginPath(); x.arc(0,0,34,0,7); x.fill();
     x.restore();
   }
-  // flag rune — cut diamond
+  // flag — pole and base in the outline channel, pennant in the fill channel
   {
     const [ox,oy]=at(T_RUNE); x.save(); x.translate(ox+TILE/2, oy+TILE/2);
-    x.beginPath(); x.moveTo(0,-48); x.lineTo(40,0); x.lineTo(0,48); x.lineTo(-40,0); x.closePath();
-    x.lineJoin='round'; x.lineWidth=18; x.strokeStyle=LINE; x.stroke();
-    x.fillStyle=FILL; x.fill();
+    x.fillStyle=LINE;
+    x.fillRect(-5,-48,10,70);      // pole
+    x.fillRect(-20,22,40,10);      // base, upper step
+    x.fillRect(-34,32,68,13);      // base, lower step
+    x.fillStyle=FILL;
+    x.beginPath(); x.moveTo(5,-50); x.lineTo(-46,-26); x.lineTo(5,-2); x.closePath(); x.fill();
     x.restore();
   }
   // radial glow (only alpha matters)
@@ -729,14 +829,42 @@ function uvOf(i){
 }
 const UVS = []; for(let i=0;i<64;i++) UVS.push(uvOf(i));
 
-/* Number color ramp: cyan (few mines) to magenta (many).
-   The useful range is 1-12; past that it saturates at the hot end. */
+/* The Windows 95 number colors, straight off the old board.
+   The original only ever had to name eight of them; with 26 neighbors we can
+   go higher, so counts past 8 repeat the same eight hues one "octave" lighter
+   each time. 1-8 stay exactly the colors you remember, and 9+ still reads as
+   its own tier instead of colliding with the low numbers. */
+const W95NUM = [
+  [0x00,0x00,0xff],  // 1 blue
+  [0x00,0x80,0x00],  // 2 green
+  [0xff,0x00,0x00],  // 3 red
+  [0x00,0x00,0x80],  // 4 navy
+  [0x80,0x00,0x00],  // 5 maroon
+  [0x00,0x80,0x80],  // 6 teal
+  [0x00,0x00,0x00],  // 7 black
+  [0x80,0x80,0x80]   // 8 gray
+];
 const NUMCOL = [];
 for(let n=0;n<=26;n++){
-  if(n===0){ NUMCOL.push([0.62,0.62,0.62]); continue; }
-  const t=Math.min(1,(n-1)/11);
-  NUMCOL.push(hsl2rgb(192-214*t, 0.88, 0.635));
+  if(n===0){ NUMCOL.push([0.50,0.50,0.50]); continue; }
+  const b = W95NUM[(n-1)%8], k = 0.44*(((n-1)/8)|0);
+  NUMCOL.push([0,1,2].map(c => { const v=b[c]/255; return v + (1-v)*k; }));
 }
+
+/* Highlight hue for a number: its own color pushed to full brightness.
+   Navy, maroon and black would light a block up as nothing at all, so the
+   hue is kept and only the value is raised. Blue and navy therefore glow
+   alike — they are the same hue, and the digit in the middle tells them
+   apart anyway. */
+function hiFrom(c){
+  const m = Math.max(c[0], c[1], c[2]);
+  if(m < 0.02) return [0.88,0.88,0.94];   // 7 is black: glow bone-white
+  return [c[0]/m, c[1]/m, c[2]/m];
+}
+const NUMHI = NUMCOL.map(hiFrom);
+const HI_CLUE  = [0.30,0.85,1.00];  // hint: the numbers that prove it
+const HI_TGT   = [0.10,0.90,0.32];  // hint: the block they prove
+const HI_GUESS = [1.00,0.72,0.16];  // hint: no proof, only the safest bet
 
 /* ==========================================================================
    4. CAVE MATERIALS
@@ -763,6 +891,7 @@ const G = {
   t0:0, elapsed:0,
   arrows:true, muted:false, sens:0.0014, invY:false,
   dirty:true, cells:null,
+  hint:null, hints:0, beacon:null,
   boom:0, win:false, shake:0, slowmo:1, fuse:0, boomCell:null
 };
 const P = { x:0,y:0,z:0, vx:0,vy:0,vz:0, yaw:0,pitch:0, ground:false, bob:0, step:0,
@@ -783,7 +912,9 @@ function genWorld(d){
   const N = G.nx*G.ny*G.nz;
   G.mine=new Uint8Array(N); G.cnt=new Uint8Array(N);
   G.st=new Uint8Array(N);   G.mat=new Uint8Array(N);
-  G.echoT=new Float32Array(N); G.echoUntil=0;
+  G.echoT=new Float32Array(N); G.echoD=new Float32Array(N);
+  G.echoC=new Float32Array(N*3); G.echoUntil=0;
+  G.hint=null; G.hints=0; G.beacon=null;
   for(let i=0;i<N;i++) G.mat[i] = (rnd()<0.055) ? 4 : (rnd()*4)|0;
 
   const cx=(G.nx>>1), cz=(G.nz>>1), cy=1;
@@ -858,6 +989,25 @@ function revealAt(start, silent){
   }
   G.dirty=true;
   return opened;
+}
+
+/* ---------- block highlighting ----------
+   One channel for both the shot-a-number echo and the hint, so the two can
+   never light the same block in two colors at once. Each cell carries its own
+   expiry, its own total duration, and its own hue. */
+function setEcho(i, dur, col){
+  G.echoT[i] = tGlobal + dur;
+  G.echoD[i] = dur;
+  const o=i*3; G.echoC[o]=col[0]; G.echoC[o+1]=col[1]; G.echoC[o+2]=col[2];
+  if(G.echoT[i] > G.echoUntil) G.echoUntil = G.echoT[i];
+}
+const _ec=[0,0,0];
+function echoColOf(i){
+  const o=i*3; _ec[0]=G.echoC[o]; _ec[1]=G.echoC[o+1]; _ec[2]=G.echoC[o+2];
+  return _ec;
+}
+function clearEcho(){
+  G.echoT.fill(0); G.echoUntil=0; G.beacon=null; G.dirty=true;
 }
 
 /* plane arrows: is there a mine in any of the 9 blocks above / below? */
@@ -1075,11 +1225,13 @@ const boomB   = makeBBBatch(4);   // the hit mine, drawn over everything
 
 function rebuildWorld(){
   const d = worldB.data; let n=0;
-  const put=(px,py,pz,s,col,seedv,emis,mark,echo)=>{
+  const put=(px,py,pz,s,col,seedv,emis,mark,echo,hi)=>{
     const o=n*CUBE_STRIDE;
     composeAA(d,o, px,py,pz, s,s,s);
     d[o+16]=col[0]; d[o+17]=col[1]; d[o+18]=col[2];
     d[o+19]=seedv;  d[o+20]=emis;   d[o+21]=mark;  d[o+22]=echo||0;
+    if(hi){ d[o+23]=hi[0]; d[o+24]=hi[1]; d[o+25]=hi[2]; }
+    else  { d[o+23]=d[o+24]=d[o+25]=0; }
     n++;
   };
   // bedrock: a one-block shell around everything
@@ -1102,10 +1254,13 @@ function rebuildWorld(){
       continue;
     }
     const m=MATS[G.mat[i]];
-    const echo = G.echoT[i] > tGlobal ? (G.echoT[i]-tGlobal)/ECHO_DUR : 0;
+    /* Full strength for the first two thirds, then fade: the light has to
+       hold long enough to walk around the block and look at it. */
+    const left = G.echoT[i] - tGlobal;
+    const echo = left > 0 ? Math.min(1, left/(G.echoD[i]*0.34 || 1)) : 0;
     put((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, BLOCK,
         m.c, ((i*2654435761)>>>0 %1000)/1000, m.gold?0.16:0,
-        G.st[i]===MARKED?1:0, echo);
+        G.st[i]===MARKED?1:0, echo, echo>0 ? echoColOf(i) : null);
   }
   worldB.count=n;
   G.dirty=false;
@@ -1169,6 +1324,7 @@ function buildViewModel(t, speed, aspect){
     mulM(_S,_L,d,o);
     d[o+16]=s[9][0]; d[o+17]=s[9][1]; d[o+18]=s[9][2];
     d[o+19]=i*0.17;  d[o+20]=s[10]?(0.72+0.28*Math.sin(t*3.1)):0;  d[o+21]=0; d[o+22]=0;
+    d[o+23]=d[o+24]=d[o+25]=0;
   }
   viewB.count=STAFF.length;
 }
@@ -1245,6 +1401,7 @@ let hover = {hit:false};
 
 function shoot(){
   if(G.state!=='play') return;
+  G.hint = null; G.beacon = null;   // the board is about to change under the deduction
   recoil = 1;
   snd.shot();
   const r=aimRay();
@@ -1312,9 +1469,12 @@ function hitNumber(x,y,z){
   return abrir.length;
 }
 
-/* Just lights up: no flagging, no revealing, costs nothing. */
+/* Just lights up: no flagging, no revealing, costs nothing.
+   The blocks glow in the shot number's own color, so two numbers lit at the
+   same time stay told apart, and the light lasts long enough to walk around
+   the group and look at it from the other side. */
 function pingNumber(x,y,z){
-  const until = tGlobal + ECHO_DUR;
+  const c = G.cnt[idx(x,y,z)], hi = NUMHI[c] || HI_CLUE;
   let n=0;
   for(let dy=-1;dy<=1;dy++) for(let dz=-1;dz<=1;dz++) for(let dx=-1;dx<=1;dx++){
     if(!dx&&!dy&&!dz) continue;
@@ -1322,18 +1482,17 @@ function pingNumber(x,y,z){
     if(!inside(X,Y,Z)) continue;
     const j=idx(X,Y,Z);
     if(G.st[j]===AIR) continue;
-    G.echoT[j]=until; n++;
+    setEcho(j, ECHO_DUR, hi); n++;
   }
-  G.echoUntil = Math.max(G.echoUntil, until);
   G.dirty=true;
   snd.scan();
-  addS((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, 0,0,0, 1.7, 0.4,
-       [0.35,0.95,1.0], T_GLOW, 0.55);
+  addS((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, 0,0,0, 1.7, 0.4, hi, T_GLOW, 0.55);
   return n;
 }
 
 function mark(){
   if(G.state!=='play') return;
+  G.hint = null; G.beacon = null;
   const r=aimRay();
   const hit = raycast(r.ox,r.oy,r.oz, r.dx,r.dy,r.dz, REACH, false);
   if(!hit.hit || hit.kind!=='block') return;
@@ -1342,6 +1501,185 @@ function mark(){
   G.st[i] = (G.st[i]===MARKED) ? SOLID : MARKED;
   G.marked += (G.st[i]===MARKED) ? 1 : -1;
   G.dirty=true; snd.mark();
+}
+
+/* ==========================================================================
+   12b. HINT — the deduction, shown before it is played
+   ==========================================================================
+   The solver is only ever allowed to look at what the player can already see:
+   the revealed numbers and the flags they placed themselves. It never reads
+   G.mine. Two rules, ordered by how obvious they are to a human:
+
+     rule 1  one number whose count is already satisfied by flags
+             -> every other block touching it is safe
+     rule 1b one number whose count equals flags + hidden
+             -> every hidden block touching it is a mine
+     rule 2  two overlapping numbers, the subset rule
+             -> the blocks one covers and the other does not
+
+   Returns {nums:[revealed cells used], target, mine} or null. */
+function cellXYZ(i){
+  return [i%G.nx, (i/(G.nx*G.nz))|0, ((i/G.nx)|0)%G.nz];
+}
+function nbrsOf(i){
+  const [x,y,z]=cellXYZ(i), out=[];
+  for(let dy=-1;dy<=1;dy++) for(let dz=-1;dz<=1;dz++) for(let dx=-1;dx<=1;dx++){
+    if(!dx&&!dy&&!dz) continue;
+    const X=x+dx,Y=y+dy,Z=z+dz;
+    if(inside(X,Y,Z)) out.push(idx(X,Y,Z));
+  }
+  return out;
+}
+/* A clue is a revealed number with at least one unknown block left around it.
+   `need` is how many of those unknowns are mines. */
+function gatherClues(){
+  const out=[], N=G.nx*G.ny*G.nz;
+  for(let i=0;i<N;i++){
+    if(G.st[i]!==AIR || G.cnt[i]===0) continue;
+    let flagged=0; const h=[];
+    for(const j of nbrsOf(i)){
+      if(G.st[j]===MARKED) flagged++;
+      else if(G.st[j]===SOLID) h.push(j);
+    }
+    if(h.length) out.push({i, need:G.cnt[i]-flagged, h, set:new Set(h)});
+  }
+  return out;
+}
+function findHint(){
+  const clues = gatherClues();
+  if(!clues.length) return null;
+
+  /* Prefer the block the player is looking at, then the nearest one: a hint
+     you have to go hunting for is not much of a hint. */
+  const aimed = (hover.hit && hover.kind==='block') ? idx(hover.x,hover.y,hover.z) : -1;
+  const score = t => {
+    if(t===aimed) return -1;
+    const [x,y,z]=cellXYZ(t);
+    return Math.hypot((x+0.5)*BLOCK-P.x, (y+0.5)*BLOCK-P.y, (z+0.5)*BLOCK-P.z);
+  };
+  let best=null;
+  const offer = (nums, targets, mine) => {
+    for(const t of targets){
+      const s = score(t);
+      if(!best || s < best.s) best = {nums, target:t, mine, s};
+    }
+  };
+
+  for(const c of clues){
+    if(c.need===0)            offer([c.i], c.h, false);
+    else if(c.need===c.h.length) offer([c.i], c.h, true);
+  }
+  if(best) return best;
+
+  // rule 2: A's unknowns are a subset of B's
+  for(const a of clues) for(const b of clues){
+    if(a===b || a.h.length >= b.h.length) continue;
+    const [ax,ay,az]=cellXYZ(a.i), [bx,by,bz]=cellXYZ(b.i);
+    if(Math.abs(ax-bx)>2 || Math.abs(ay-by)>2 || Math.abs(az-bz)>2) continue;
+    let sub=true;
+    for(const j of a.h) if(!b.set.has(j)){ sub=false; break; }
+    if(!sub) continue;
+    const diff = b.h.filter(j => !a.set.has(j));
+    if(!diff.length) continue;
+    const dneed = b.need - a.need;
+    if(dneed===0)                offer([a.i,b.i], diff, false);
+    else if(dneed===diff.length) offer([a.i,b.i], diff, true);
+  }
+  return best;
+}
+
+/* Nothing is provable. That is not a bug — it is true of every opening, and
+   of the odd stand-off later on. So instead of shrugging, rank the hidden
+   blocks by the worst risk any single number puts on them and name the
+   calmest one. This is a guess and is dressed as one: amber, never green,
+   and the player has to pull the trigger themselves. */
+function findGuess(){
+  const clues = gatherClues(), N = G.nx*G.ny*G.nz;
+  const risk = new Float32Array(N).fill(-1);
+  for(const c of clues){
+    const r = c.need / c.h.length;
+    for(const j of c.h) if(r > risk[j]) risk[j] = r;
+  }
+  let hidden=0;
+  for(let i=0;i<N;i++) if(G.st[i]===SOLID) hidden++;
+  if(!hidden) return null;
+  /* A block no number touches is worth the plain remaining density, and
+     nothing cleverer. Trying to discount it by what the clues already
+     account for double-counts wildly here: with 26 neighbors the clue sets
+     overlap so heavily that subtracting each need in turn drives the
+     estimate to zero and makes every interior block look free. */
+  const inner = Math.max(0, G.mines - G.marked) / hidden;
+
+  let best=null;
+  for(let i=0;i<N;i++){
+    if(G.st[i]!==SOLID) continue;
+    const r = risk[i] >= 0 ? risk[i] : inner;
+    const [x,y,z]=cellXYZ(i);
+    const d = Math.hypot((x+0.5)*BLOCK-P.x, (y+0.5)*BLOCK-P.y, (z+0.5)*BLOCK-P.z);
+    if(!best || r < best.r - 1e-6 || (Math.abs(r-best.r) < 1e-6 && d < best.d))
+      best = {target:i, r, d};
+  }
+  if(!best) return null;
+  best.nums = clues.filter(c => c.set.has(best.target)).map(c => c.i);
+  return best;
+}
+
+/* First press paints the deduction, second press plays it. */
+function askHint(){
+  if(G.state!=='play') return;
+
+  if(G.hint && tGlobal < G.hint.until){
+    const h=G.hint; G.hint=null;
+    if(G.st[h.target]!==SOLID){ toast('That block already moved on.'); return; }
+    clearEcho();
+    const [x,y,z]=cellXYZ(h.target);
+    if(h.mine){
+      G.st[h.target]=MARKED; G.marked++; G.dirty=true; snd.mark();
+      addS((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, 0,0,0, 1.6, 0.5, [0.66,0.34,0.98], T_GLOW, 0.6);
+      toast('Flagged for you.');
+    } else {
+      recoil=1; snd.shot(); revealAt(h.target,false); checkWin();
+      toast('Cleared for you.');
+    }
+    return;
+  }
+
+  const h = findHint();
+  if(!h){
+    /* No proof to offer, so no button to press twice: a guess is the
+       player's call to make, not the staff's. */
+    G.hint=null;
+    const g = findGuess();
+    if(!g){ toast('Nothing left to open.'); snd.clink(); return; }
+    clearEcho();
+    for(const i of g.nums) setEcho(i, HINT_DUR, HI_CLUE);
+    setEcho(g.target, HINT_DUR, HI_GUESS);
+    G.hints++; G.dirty=true; snd.clink();
+    G.beacon = {i:g.target, col:HI_GUESS, until:tGlobal+HINT_DUR};
+    const [x,y,z]=cellXYZ(g.target);
+    addS((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, 0,0,0, 2.0, 0.6, HI_GUESS, T_GLOW, 0.55);
+    /* The number is an upper bound, not a probability: it is the worst any
+       single number nearby makes the block look. Measured over 40 boards the
+       amber block turns out to be a mine about half as often as it says, and
+       less than half as often as a blind pick. Overstating is the safe way
+       to be wrong about this. */
+    toast(`Nothing is provable from here. The amber block is the safest guess I can find — no worse than about ${Math.round(g.r*100)}% odds of a mine. Your shot to take.`, 5600);
+    return;
+  }
+
+  clearEcho();
+  h.until = tGlobal + HINT_DUR;
+  for(const i of h.nums) setEcho(i, HINT_DUR, HI_CLUE);   // the proof, in cyan
+  setEcho(h.target, HINT_DUR, HI_TGT);                    // the conclusion, in green
+  G.hint = h; G.hints++;
+  G.beacon = {i:h.target, col:HI_TGT, until:h.until};
+  G.dirty=true; snd.scan();
+
+  const [x,y,z]=cellXYZ(h.target);
+  addS((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, 0,0,0, 2.0, 0.6, HI_TGT, T_GLOW, 0.6);
+  toast(h.mine
+    ? `The ${h.nums.length>1?'two numbers':'number'} in blue can only add up if the green block is a mine. H again to flag it.`
+    : `The ${h.nums.length>1?'two numbers':'number'} in blue already have all their mines. The green block is safe — H again to break it.`, 5200);
 }
 
 function checkWin(){
@@ -1426,12 +1764,14 @@ function flashScreen(){
 function showOver(win){
   const el=$('over');
   el.classList.toggle('win', win);
+  $('overBar').textContent = win ? 'You win' : 'Plane breached';
   $('overEye').textContent = win ? 'The three planes open' : 'Plane breached';
   $('overTitle').textContent = win ? 'The sand let you go' : 'You are sand now';
   const mm=Math.floor(G.elapsed/60), ss=Math.floor(G.elapsed%60);
-  $('overText').textContent = win
+  const hint = G.hints ? ` ${G.hints} hint${G.hints>1?'s':''} taken.` : ' No hints taken.';
+  $('overText').textContent = (win
     ? `${G.mines} mines mapped, ${G.gold} gold in your pocket, ${mm}:${String(ss).padStart(2,'0')} in the labyrinth. Whatever locked you in is not pleased.`
-    : `You lasted ${mm}:${String(ss).padStart(2,'0')} and opened ${G.revealed} of ${G.safeTotal} blocks. ${G.mines-G.marked} mines were still unflagged.`;
+    : `You lasted ${mm}:${String(ss).padStart(2,'0')} and opened ${G.revealed} of ${G.safeTotal} blocks. ${G.mines-G.marked} mines were still unflagged.`) + hint;
   setTimeout(()=>{ el.classList.add('on'); document.exitPointerLock&&document.exitPointerLock(); }, win?900:2100);
 }
 function setScreen(s){
@@ -1450,6 +1790,9 @@ function updateHUD(){
   const mm=Math.floor(G.elapsed/60), ss=Math.floor(G.elapsed%60);
   $('sTime').textContent = mm+':'+String(ss).padStart(2,'0');
   $('barFill').style.width = (100*G.revealed/G.safeTotal).toFixed(1)+'%';
+  const pending = !!(G.hint && tGlobal < G.hint.until);
+  $('btnHint').firstChild.nodeValue = pending ? 'Play it' : 'Hint';
+  $('btnHint').classList.toggle('sel', pending);
 }
 function updateDiffNote(){
   const D=DIFFS[G.diff], n=D.nx*D.ny*D.nz, m=Math.round(n*D.dens);
@@ -1508,6 +1851,10 @@ $('btnMenu').addEventListener('click', ()=>setScreen('menu'));
 $('btnMenu2').addEventListener('click', ()=>{ elOver.classList.remove('on'); setScreen('menu'); });
 $('btnRestart').addEventListener('click', startGame);
 $('btnResume').addEventListener('click', ()=>{ setScreen('play'); tryLock(); });
+/* The button is the affordance; the H key is what actually gets used, since
+   a pointer-locked browser sends the click to the canvas and not to the HUD. */
+$('btnHint').addEventListener('mousedown', e=>{ e.preventDefault(); e.stopPropagation(); });
+$('btnHint').addEventListener('click', e=>{ e.preventDefault(); e.stopPropagation(); askHint(); });
 
 /* ---------- input ----------
    The browser refuses to lock the pointer for about 1.2 s after the player
@@ -1607,6 +1954,7 @@ window.addEventListener('keydown', e=>{
       break;
     case 'KeyE': if(dragLook) shoot(); break;
     case 'KeyQ': if(dragLook) mark(); break;
+    case 'KeyH': askHint(); break;
     case 'KeyT':
       G.arrows=!G.arrows;
       $('sPlanes').textContent = G.arrows?'on':'off';
@@ -1706,6 +2054,9 @@ const SUN = (()=>{ const v=[0.42,0.86,0.29]; const l=Math.hypot(...v); return [v
 const FOG = [0.235,0.155,0.115];
 
 let last=performance.now(), nextWhisper=25+Math.random()*30, tGlobal=0;
+/* x,y,z,r,g,b per lit number — collected in the glyph pass, spent in the
+   additive pass, so a highlighted digit gets a halo behind it too. */
+const litNums=[];
 
 function frame(now){
   requestAnimationFrame(frame);
@@ -1812,6 +2163,7 @@ function frame(now){
       compose(d,o, p.x,p.y,p.z, p.rx,p.ry,p.rz, p.s*k,p.s*k,p.s*k);
       d[o+16]=p.c[0]; d[o+17]=p.c[1]; d[o+18]=p.c[2];
       d[o+19]=(i*0.137)%1; d[o+20]=p.e; d[o+21]=0; d[o+22]=0;
+      d[o+23]=d[o+24]=d[o+25]=0;
       n++;
     }
     debris.count=n;
@@ -1829,6 +2181,7 @@ function frame(now){
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, atlasTex);
   gl.uniform1i(uB.tex, 0);
 
+  litNums.length=0;
   {
     const d=glyphB.data; let n=0;
     const put=(x,y,z,sw,sh,tile,col,a,rot)=>{
@@ -1846,7 +2199,20 @@ function frame(now){
         const i=idx(x,y,z);
         const cx=(x+0.5)*BLOCK, cy=(y+0.5)*BLOCK, cz=(z+0.5)*BLOCK;
         if(G.st[i]!==AIR){
-          if(showMines && G.mine[i]) put(cx,cy,cz, 2.0,2.0, T_MINE, [1.0,0.32,0.16], 1, 0);
+          if(showMines && G.mine[i]){ put(cx,cy,cz, 2.0,2.0, T_MINE, [1.0,0.32,0.16], 1, 0); continue; }
+          /* The flag sits just outside the face nearest the camera: a
+             billboard at the block center would be buried inside solid rock. */
+          if(G.st[i]===MARKED && G.state==='play'){
+            const dcam=Math.hypot(cx-camX, cy-camY, cz-camZ);
+            if(dcam>40) continue;
+            const fx=camX-cx, fy=camY-cy, fz=camZ-cz;
+            const ax=Math.abs(fx), ay=Math.abs(fy), az=Math.abs(fz);
+            const off = BLOCK*0.5 + 0.55;
+            const px = (ax>=ay&&ax>=az) ? cx+Math.sign(fx)*off : cx;
+            const py = (ay>ax&&ay>=az)  ? cy+Math.sign(fy)*off : cy;
+            const pz = (az>ax&&az>ay)   ? cz+Math.sign(fz)*off : cz;
+            put(px,py,pz, 1.25,1.25, T_RUNE, [0.92,0.10,0.09], clamp(1.30-dcam/34,0.40,1), 0);
+          }
           continue;
         }
         if(G.mine[i]){ if(showMines) put(cx,cy,cz, 2.2,2.2, T_MINE, [1.0,0.30,0.14], 1, 0); continue; }
@@ -1856,7 +2222,16 @@ function frame(now){
         if(dcam>44) continue;
         /* distant ones recede so they do not fight the block in front */
         const al = clamp(1.30 - dcam/38, 0.34, 1);
-        put(cx,cy,cz, 1.05,1.05, c, NUMCOL[c], al, 0);
+        /* A number the hint is leaning on takes the hint color and grows:
+           the blocks around it are solid and can glow, a revealed cell is
+           empty air and only has its digit to say anything with. */
+        if(G.echoT[i] > tGlobal){
+          const hc = echoColOf(i);
+          put(cx,cy,cz, 1.55,1.55, c, hc, al, 0);
+          litNums.push(cx,cy,cz, hc[0],hc[1],hc[2]);
+        } else {
+          put(cx,cy,cz, 1.05,1.05, c, NUMCOL[c], al, 0);
+        }
         if(G.arrows){
           const [up,dn]=planeFlags(x,y,z);
           const A=0.52, R=0.80;
@@ -1897,6 +2272,28 @@ function frame(now){
     for(const s of sprites){
       const k = Math.min(1, s.l/Math.min(0.5, s.ml));
       put(s.x,s.y,s.z, s.s*(0.6+0.6*k), s.tile, s.c, k*0.95*s.a);
+    }
+    {
+      const pul = 0.62 + 0.38*Math.sin(tGlobal*7.0);
+      for(let i=0;i<litNums.length;i+=6)
+        put(litNums[i],litNums[i+1],litNums[i+2], 3.2, T_GLOW,
+            [litNums[i+3],litNums[i+4],litNums[i+5]], 0.42*pul);
+    }
+    /* Beacon on the hinted block. Without it a target you happen to be seeing
+       edge-on — a floor or ceiling block — is a sliver you have to hunt for,
+       and a hint you have to hunt for is not a hint. Sits just off the face
+       nearest the camera, since the block itself is solid. */
+    if(G.beacon && tGlobal < G.beacon.until && G.state==='play'){
+      const [bx,by,bz]=cellXYZ(G.beacon.i);
+      const ccx=(bx+0.5)*BLOCK, ccy=(by+0.5)*BLOCK, ccz=(bz+0.5)*BLOCK;
+      const fx=camX-ccx, fy=camY-ccy, fz=camZ-ccz;
+      const ax=Math.abs(fx), ay=Math.abs(fy), az=Math.abs(fz);
+      const off = BLOCK*0.5 + 0.5;
+      const pul = 0.55 + 0.45*Math.sin(tGlobal*5.0);
+      put((ax>=ay&&ax>=az) ? ccx+Math.sign(fx)*off : ccx,
+          (ay>ax&&ay>=az)  ? ccy+Math.sign(fy)*off : ccy,
+          (az>ax&&az>ay)   ? ccz+Math.sign(fz)*off : ccz,
+          3.6+1.4*pul, T_GLOW, G.beacon.col, 0.40*pul);
     }
     if(G.state!=='menu'){
       for(const m of dust){
