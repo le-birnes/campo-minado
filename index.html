@@ -1,5 +1,7 @@
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>Minesweeper — Three Planes</title>
 
 <style>
@@ -242,6 +244,67 @@ kbd{font-family:var(--mono);font-size:.92em;background:var(--w95);color:#000;
       font-family:var(--ui);color:#000;text-align:center;line-height:1.8;display:none;}
 #nogl div{background:var(--w95);box-shadow:var(--out);padding:26px 30px;max-width:60ch;}
 
+/* ==========================================================================
+   TOUCH CONTROLS
+   There is no pointer to lock on a phone, so looking is a drag on the right of
+   the screen and moving is a thumbstick on the left — the two things a pair of
+   thumbs can do at once without getting in each other's way.
+   ========================================================================== */
+#touch{position:absolute;inset:0;z-index:7;display:none;touch-action:none;}
+body.touch #touch{display:block;}
+body.touch #needlock{display:none !important;}
+body.touch canvas#gl{cursor:default;}
+#touch .zone{position:absolute;top:0;bottom:0;touch-action:none;}
+#tzMove{left:0;width:44%;}
+#tzLook{right:0;width:56%;}
+
+/* the stick appears wherever the thumb lands, so it is never in the way */
+#tStick{position:absolute;width:132px;height:132px;margin:-66px 0 0 -66px;
+        border-radius:50%;background:rgba(192,192,192,.16);
+        box-shadow:inset 0 0 0 2px rgba(255,255,255,.35);
+        display:none;pointer-events:none;}
+#tStick.on{display:block;}
+#tNub{position:absolute;left:50%;top:50%;width:58px;height:58px;margin:-29px 0 0 -29px;
+      border-radius:50%;background:var(--w95);box-shadow:var(--out);}
+
+/* buttons: the same Win95 faces, sized for a thumb instead of a mouse */
+#tBtns{position:absolute;right:calc(12px + env(safe-area-inset-right));
+       bottom:calc(14px + env(safe-area-inset-bottom));
+       display:grid;grid-template-columns:auto auto;gap:10px;z-index:8;
+       align-items:end;justify-items:end;}
+.tb{pointer-events:auto;touch-action:none;user-select:none;-webkit-user-select:none;
+    font-family:var(--ui);font-weight:700;background:var(--w95);color:#000;
+    box-shadow:var(--out);display:grid;place-items:center;text-align:center;line-height:1.15;}
+.tb.big{width:92px;height:92px;font-size:14px;border-radius:50%;}
+.tb.sm{width:72px;height:58px;font-size:12px;}
+.tb.held{box-shadow:var(--in);}
+.tb small{display:block;font-weight:400;font-size:10px;color:#333;}
+
+#tLeftBtns{position:absolute;left:calc(10px + env(safe-area-inset-left));
+           bottom:calc(14px + env(safe-area-inset-bottom));
+           display:flex;gap:10px;z-index:8;}
+
+/* a phone held upright has no room for this */
+#rotate{position:absolute;inset:0;z-index:36;display:none;place-items:center;
+        background:var(--w95-desk);font-family:var(--ui);color:#000;text-align:center;padding:5vw;}
+/* max-width in ch overflowed a 390 px screen once the padding was counted */
+#rotate div{background:var(--w95);box-shadow:var(--out);padding:18px 20px;
+            max-width:100%;line-height:1.6;font-size:14px;}
+body.touch.portrait #rotate{display:grid;}
+
+/* on a small screen the menu has to fit a thumb, not a cursor */
+@media (max-width:820px){
+  .body{padding:14px 14px 18px;}
+  h1{font-size:clamp(26px,7.4vmin,44px);}
+  .keys{grid-template-columns:1fr;line-height:1.5;}
+  button{padding:11px 16px;font-size:14px;}
+  button.go{padding:14px 24px;font-size:16px;}
+  .opt{flex-wrap:wrap;gap:8px;}
+  .opt input[type=range]{width:min(58vw,220px);}
+  .stat .v{font-size:clamp(15px,4.6vmin,22px);}
+  .stat .k{font-size:9px;}
+}
+
 </style>
 
 <div id="wrap">
@@ -263,6 +326,25 @@ kbd{font-family:var(--mono);font-size:.92em;background:var(--w95);color:#000;
       <div class="stat"><span class="k">Time</span><span class="v time" id="sTime">0:00</span></div>
     </div>
   </div>
+
+  <!-- ========== TOUCH ========== -->
+  <div id="touch">
+    <div class="zone" id="tzMove"></div>
+    <div class="zone" id="tzLook"></div>
+    <div id="tStick"><i id="tNub"></i></div>
+    <div id="tLeftBtns">
+      <button class="tb sm" id="tbHint" type="button">Hint</button>
+      <button class="tb sm" id="tbArrows" type="button">Arrows</button>
+    </div>
+    <div id="tBtns">
+      <button class="tb sm" id="tbJump" type="button">Jump<small>hold</small></button>
+      <button class="tb big" id="tbShoot" type="button">Shoot</button>
+      <button class="tb sm" id="tbMenu" type="button">Menu</button>
+      <button class="tb big" id="tbThink" type="button">Think<small>hold, release</small></button>
+    </div>
+  </div>
+  <div id="rotate"><div><b>Turn the phone sideways.</b><br>
+    Three planes of cave need the long edge of the screen.</div></div>
 
   <div id="hurt"></div>
   <div id="toast" role="status" aria-live="polite"></div>
@@ -323,6 +405,8 @@ kbd{font-family:var(--mono);font-size:.92em;background:var(--w95);color:#000;
         <div><kbd>H</kbd>hint · lights the reasoning and plays the move</div>
         <div><kbd>T</kbd>plane arrows · <kbd>I</kbd>invert mouse</div>
         <div><kbd>M</kbd>sound · <kbd>R</kbd>restart · <kbd>Esc</kbd>menu and settings</div>
+        <div><kbd>Phone</kbd>left thumb moves, right thumb looks, and the same<br>
+          two actions sit under your right hand: Shoot, and Think held</div>
       </div>
 
       <div class="rule"></div>
@@ -1119,7 +1203,8 @@ const G = {
 const P = { x:0,y:0,z:0, vx:0,vy:0,vz:0, yaw:0,pitch:0, ground:false, bob:0, step:0,
             coyote:0, jumpY0:0, hp:4, hurtT:0 };
 const IN = { f:0,b:0,l:0,r:0, sprint:false,
-             jumpHeld:false, jumpT:0, jumpFired:false, surged:true, jumpBuf:0 };
+             jumpHeld:false, jumpT:0, jumpFired:false, surged:true, jumpBuf:0,
+             mf:0, ms:0 };     // analog forward / sideways, from the thumbstick
 
 function idx(x,y,z){ return (y*G.nz + z)*G.nx + x; }
 function inside(x,y,z){ return x>=0&&y>=0&&z>=0&&x<G.nx&&y<G.ny&&z<G.nz; }
@@ -1739,8 +1824,12 @@ function collideAxis(axis, delta){
 
 function physics(dt){
   const cy=Math.cos(P.yaw), sy=Math.sin(P.yaw);
-  let wx = -sy*(IN.f-IN.b) + cy*(IN.r-IN.l);
-  let wz = -cy*(IN.f-IN.b) - sy*(IN.r-IN.l);
+  /* Keyboard gives whole numbers, a thumbstick gives fractions; they simply
+     add, so a keyboard player is unaffected and a thumb gets real analog. */
+  const fwd  = (IN.f-IN.b) + IN.mf;
+  const side = (IN.r-IN.l) + IN.ms;
+  let wx = -sy*fwd + cy*side;
+  let wz = -cy*fwd - sy*side;
   const ln=Math.hypot(wx,wz); if(ln>0){ wx/=ln; wz/=ln; }
   const target = (IN.sprint?SPD_SPR:SPD_RUN);
   const accel = P.ground ? 52 : 13;
@@ -2897,6 +2986,13 @@ function themeFor(d){
   return d===BOSS ? 3 : d;
 }
 function startGame(){
+  if(TOUCH){
+    const el = document.documentElement;
+    try{
+      if(el.requestFullscreen) el.requestFullscreen().catch(()=>{});
+      else if(el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    }catch(e){}
+  }
   seed = (Date.now()>>>0) ^ 0x9e3779b9;
   genWorld(G.diff);
   setScreen('play');
@@ -2920,9 +3016,10 @@ let locked=false, dragLook=false, dragging=false;
 let lockFails=0, lockCooldown=0, lockRetry=0, lockGuard=0;
 
 function lockHint(){
-  $('needlock').classList.toggle('on', G.state==='play' && !locked && !dragLook);
+  $('needlock').classList.toggle('on', !TOUCH && G.state==='play' && !locked && !dragLook);
 }
 function tryLock(){
+  if(TOUCH) return;                 // a phone has no pointer to capture
   if(locked || G.state!=='play') return;
   const now = performance.now();
   if(now < lockCooldown){                       // still cooling down: schedule
@@ -3098,7 +3195,7 @@ function keyLook(dt){
    ========================================================================== */
 let W=1, H=1, DPR=1;
 function resize(){
-  DPR = Math.min(window.devicePixelRatio||1, 2);
+  DPR = Math.min(window.devicePixelRatio||1, TOUCH ? 1.5 : 2);
   W = Math.max(1, Math.floor(canvas.clientWidth*DPR));
   H = Math.max(1, Math.floor(canvas.clientHeight*DPR));
   if(canvas.width!==W || canvas.height!==H){ canvas.width=W; canvas.height=H; }
@@ -3556,6 +3653,151 @@ function frame(now){
     buildViewModel(tGlobal, Math.min(1, Math.hypot(P.vx,P.vz)/SPD_RUN), aspect);
     drawCubes(viewB);
   }
+}
+
+
+/* ==========================================================================
+   16. TOUCH — the phone build
+   ==========================================================================
+   A phone has no pointer to lock, so the whole lock state machine is skipped
+   and looking becomes a drag. Left thumb moves, right thumb looks, buttons sit
+   under whichever thumb is free. Every control routes through the same
+   functions the mouse and keyboard use, so there is one game underneath. */
+const TOUCH = /[?&]touch=1/.test(location.search) ||
+              ((('ontouchstart' in window) || (navigator.maxTouchPoints|0) > 0)
+               && matchMedia('(pointer: coarse)').matches);
+
+function orient(){
+  document.body.classList.toggle('portrait', innerHeight > innerWidth * 1.05);
+}
+if(TOUCH){
+  document.body.classList.add('touch');
+  orient();
+  addEventListener('resize', orient);
+  addEventListener('orientationchange', ()=>setTimeout(orient, 120));
+  document.addEventListener('gesturestart', e=>e.preventDefault(), {passive:false});
+  document.addEventListener('dblclick', e=>e.preventDefault(), {passive:false});
+}
+
+/* ---------- thumbstick ---------- */
+const tStick = $('tStick'), tNub = $('tNub');
+let stickId = null, stickX = 0, stickY = 0;
+const STICK_R = 52;
+
+function stickStart(t){
+  stickId = t.identifier;
+  stickX = t.clientX; stickY = t.clientY;
+  tStick.style.left = stickX + 'px';
+  tStick.style.top  = stickY + 'px';
+  tStick.classList.add('on');
+  stickMove(t);
+}
+function stickMove(t){
+  let dx = t.clientX - stickX, dy = t.clientY - stickY;
+  const d = Math.hypot(dx, dy);
+  if(d > STICK_R){ dx = dx/d*STICK_R; dy = dy/d*STICK_R; }
+  tNub.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+  IN.ms =  dx / STICK_R;
+  IN.mf = -dy / STICK_R;
+  IN.sprint = Math.hypot(IN.mf, IN.ms) > 0.92;
+}
+function stickEnd(){
+  stickId = null; IN.mf = 0; IN.ms = 0; IN.sprint = false;
+  tStick.classList.remove('on');
+  tNub.style.transform = '';
+}
+
+/* ---------- look ---------- */
+let lookId = null, lookX = 0, lookY = 0;
+const LOOK_K = 0.0042;
+
+function lookStart(t){ lookId = t.identifier; lookX = t.clientX; lookY = t.clientY; }
+function lookMove(t){
+  const dx = t.clientX - lookX, dy = t.clientY - lookY;
+  lookX = t.clientX; lookY = t.clientY;
+  const k = LOOK_K * (G.sens / 0.0014);
+  P.yaw   -= dx * k;
+  P.pitch += (G.invY ? dy : -dy) * k;
+  P.pitch = Math.max(-1.55, Math.min(1.55, P.pitch));
+}
+
+/* ---------- routing ---------- */
+function inZone(el, t){
+  const r = el.getBoundingClientRect();
+  return t.clientX >= r.left && t.clientX <= r.right && t.clientY >= r.top && t.clientY <= r.bottom;
+}
+if(TOUCH){
+  const zMove = $('tzMove'), zLook = $('tzLook');
+  const onStart = e => {
+    if(G.state !== 'play') return;
+    for(const t of e.changedTouches){
+      if(stickId === null && inZone(zMove, t)) stickStart(t);
+      else if(lookId === null && inZone(zLook, t)) lookStart(t);
+    }
+    e.preventDefault();
+  };
+  const onMove = e => {
+    for(const t of e.changedTouches){
+      if(t.identifier === stickId) stickMove(t);
+      else if(t.identifier === lookId) lookMove(t);
+    }
+    e.preventDefault();
+  };
+  const onEnd = e => {
+    for(const t of e.changedTouches){
+      if(t.identifier === stickId) stickEnd();
+      else if(t.identifier === lookId) lookId = null;
+    }
+    e.preventDefault();
+  };
+  for(const z of [zMove, zLook]){
+    z.addEventListener('touchstart', onStart, {passive:false});
+    z.addEventListener('touchmove',  onMove,  {passive:false});
+    z.addEventListener('touchend',   onEnd,   {passive:false});
+    z.addEventListener('touchcancel',onEnd,   {passive:false});
+  }
+}
+
+/* ---------- buttons ----------
+   Bound on touchstart/touchend rather than click, so Think can be held and Jump
+   can be held for the higher jump exactly as the keyboard does it. */
+function tapBtn(id, fn){
+  const el = $(id);
+  el.addEventListener('touchstart', e => {
+    e.preventDefault(); e.stopPropagation();
+    el.classList.add('held'); fn();
+  }, {passive:false});
+  const up = e => { e.preventDefault(); el.classList.remove('held'); };
+  el.addEventListener('touchend', up, {passive:false});
+  el.addEventListener('touchcancel', up, {passive:false});
+}
+function holdBtn(id, down, up){
+  const el = $(id);
+  el.addEventListener('touchstart', e => {
+    e.preventDefault(); e.stopPropagation();
+    el.classList.add('held'); down();
+  }, {passive:false});
+  const end = e => {
+    e.preventDefault(); e.stopPropagation();
+    el.classList.remove('held'); up();
+  };
+  el.addEventListener('touchend', end, {passive:false});
+  el.addEventListener('touchcancel', end, {passive:false});
+}
+if(TOUCH){
+  tapBtn('tbShoot', function(){ shoot(); });
+  holdBtn('tbThink', function(){ startThink(); }, function(){ endThink(); });
+  holdBtn('tbJump',
+    function(){ if(G.state==='play' && !IN.jumpHeld){
+                  IN.jumpHeld=true; IN.jumpT=0; IN.surged=false; IN.jumpFired=false;
+                  if(canJump()) startJump(); else IN.jumpBuf = JUMP_BUF; } },
+    function(){ IN.jumpHeld=false; });
+  tapBtn('tbHint', function(){ askHint(); });
+  tapBtn('tbArrows', function(){
+    G.arrows = !G.arrows;
+    toast('Plane arrows ' + (G.arrows ? 'on' : 'off'));
+  });
+  tapBtn('tbMenu', function(){ setScreen('pause'); });
 }
 
 /* ==========================================================================
