@@ -337,7 +337,7 @@ body.touch.portrait #rotate{display:grid;}
       <button class="tb sm" id="tbArrows" type="button">Arrows</button>
     </div>
     <div id="tBtns">
-      <button class="tb sm" id="tbJump" type="button">Jump<small>hold</small></button>
+      <button class="tb sm" id="tbJump" type="button">Jump<small>x20</small></button>
       <button class="tb big" id="tbShoot" type="button">Shoot</button>
       <button class="tb sm" id="tbMenu" type="button">Menu</button>
       <button class="tb big" id="tbThink" type="button">Think<small>hold, release</small></button>
@@ -375,6 +375,10 @@ body.touch.portrait #rotate{display:grid;}
       </div>
       <p class="diffnote" id="dNote"></p>
 
+      <!-- boss rules are a switch, not a mode: they ride on any difficulty -->
+      <div class="opt"><label class="chk" for="cbo"><input type="checkbox" id="cbo">Boss
+        rules — things come out of the blocks you flag</label></div>
+
       <!-- only shown when Custom is the chosen difficulty -->
       <div id="customBox">
         <div class="opt"><label for="cnx">Width</label>
@@ -385,7 +389,6 @@ body.touch.portrait #rotate{display:grid;}
           <input type="range" id="cny" min="2" max="5" value="3"><span id="cnyV">3</span></div>
         <div class="opt"><label for="cde">Mines</label>
           <input type="range" id="cde" min="6" max="32" value="13"><span id="cdeV">13%</span></div>
-        <div class="opt"><label class="chk" for="cbo"><input type="checkbox" id="cbo">Boss Master rules (things come out of the blocks you flag)</label></div>
         <p class="diffnote" id="cWarn"></p>
       </div>
 
@@ -394,7 +397,7 @@ body.touch.portrait #rotate{display:grid;}
       <div class="keys">
         <div><kbd>W A S D</kbd>move</div>
         <div><kbd>Shift</kbd>sprint</div>
-        <div><kbd>Space</kbd>jump · hold 0.5 s midair to rise higher</div>
+        <div><kbd>Space</kbd>jump — and jump again in mid-air, up to 20 times<br>before your feet have to touch something</div>
         <div><kbd>Mouse</kbd>aim</div>
         <div><kbd>Left click</kbd>shoot. Always. A number in the way is not a<br>
           target — the shot goes through it into the wall behind</div>
@@ -405,7 +408,8 @@ body.touch.portrait #rotate{display:grid;}
         <div><kbd>H</kbd>hint · lights the reasoning and plays the move</div>
         <div><kbd>T</kbd>plane arrows · <kbd>I</kbd>invert mouse</div>
         <div><kbd>M</kbd>sound · <kbd>R</kbd>restart · <kbd>Esc</kbd>menu and settings</div>
-        <div><kbd>Phone</kbd>left thumb moves, right thumb looks, and the same<br>
+        <div><kbd>Phone</kbd>left thumb moves, right thumb looks, Jump taps again<br>
+          in mid-air, and the same<br>
           two actions sit under your right hand: Shoot, and Think held</div>
       </div>
 
@@ -505,14 +509,16 @@ const P_H     = 2.0;    // altura do personagem
 const P_R     = 0.52;   // collision radius
 const EYE     = 1.72;   // eye height
 const GRAV    = 20.0;   // m/s^2 (heavy, so jumps do not float)
-const JUMP_LO = 6.0;    // short jump apex = 3x your height
-const JUMP_HI = 10.0;   // sustained jump apex = 5x your height
+const JUMP_LO = 6.0;    // jump apex = 3x your height
 const V_LO    = Math.sqrt(2*GRAV*JUMP_LO);
+/* Every jump is the same jump, and you get twenty of them before your feet
+   have to touch something again. Air is a staircase. Modes will start
+   rationing these later; for now every board hands you all twenty. */
+const MAX_JUMPS = 20;
 const COYOTE  = 0.12;   // grace after stepping off an edge
 const JUMP_BUF= 0.18;   // grace before touching down
 const SPD_RUN = 5.8;    // corrida de humano de 2 m
 const SPD_SPR = 8.2;
-const CHARGE_T= 0.50;   // seconds of space held
 const REACH   = 13*BLOCK;
 const NUM_R   = 0.45;   // number hit radius: smaller than the glyph (~0.52),
                         // (see MARK_NUM_R for the tighter right-click radius)
@@ -530,18 +536,33 @@ const FUSE_T  = 0.85;   // the hit mine glows before taking everything
 /* Mine density has a floor: with 26 neighbors, P(zero block) = (1-d)^26,
    and site percolation at that coordination turns over near 9.8%. Below
    ~10% mines the first shot opens the entire cave in one go. */
+/* `boss` is mutable on every entry — it is a rule you switch on, not a mode
+   you have to go to. The dungeon is the one place it cannot be switched off. */
 const DIFFS = [
-  {name:"Apprentice", nx:10, nz:10, ny:3, dens:0.105},
-  {name:"Sorcerer",   nx:12, nz:12, ny:3, dens:0.130},
-  {name:"Arcane",     nx:14, nz:14, ny:3, dens:0.160},
+  {name:"Apprentice", nx:10, nz:10, ny:3, dens:0.06, boss:false},
+  {name:"Sorcerer",   nx:12, nz:12, ny:3, dens:0.11, boss:false},
+  // Arcane is not just denser: it is the one arena with a shape.
+  {name:"Arcane",     nx:15, nz:15, ny:4, dens:0.20, rough:true, boss:false},
   // mutable: the menu sliders write straight into this one
   {name:"Custom",     nx:12, nz:12, ny:3, dens:0.130, custom:true, boss:false},
   {name:"Boss Master",nx:13, nz:13, ny:3, dens:0.140, boss:true}
 ];
 const CUSTOM = 3, BOSS = 4;
+/* Every quoted figure in the level design — how much of Arcane is structure,
+   how many mines a dungeon zone holds — is a target with a fifth of slack, not
+   a wall. Generators that have to land exactly on a number either retry
+   forever or produce something that looks machined. */
+const SLACK = 1.20;
 const LIM = {nx:[6,20], nz:[6,20], ny:[2,5], dens:[6,32]};   // dens in whole %
 
-const SOLID=0, AIR=1, MARKED=2;
+/* SOLID  a puzzle block: may hide a mine, can be opened, can be flagged
+   AIR    open space, whether the player dug it or the cave was born with it
+   MARKED a puzzle block carrying a flag
+   ROCK   structure: walls, pillars, tunnel linings. Never holds a mine, never
+          opens, never flags, and is counted by nothing. It is the bedrock
+          shell made available *inside* the grid, so a level can have a shape
+          instead of just a size. */
+const SOLID=0, AIR=1, MARKED=2, ROCK=3;
 
 /* ==========================================================================
    1. MATH
@@ -1201,9 +1222,9 @@ const G = {
   boom:0, win:false, shake:0, slowmo:1, fuse:0, boomCell:null
 };
 const P = { x:0,y:0,z:0, vx:0,vy:0,vz:0, yaw:0,pitch:0, ground:false, bob:0, step:0,
-            coyote:0, jumpY0:0, hp:4, hurtT:0 };
+            coyote:0, jumps:0, hp:4, hurtT:0 };
 const IN = { f:0,b:0,l:0,r:0, sprint:false,
-             jumpHeld:false, jumpT:0, jumpFired:false, surged:true, jumpBuf:0,
+             jumpHeld:false, jumpFired:false, jumpBuf:0,
              mf:0, ms:0 };     // analog forward / sideways, from the thumbstick
 
 function idx(x,y,z){ return (y*G.nz + z)*G.nx + x; }
@@ -1211,6 +1232,110 @@ function inside(x,y,z){ return x>=0&&y>=0&&z>=0&&x<G.nx&&y<G.ny&&z<G.nz; }
 function isSolidCell(x,y,z){
   if(!inside(x,y,z)) return true;             // outside = bedrock
   return G.st[idx(x,y,z)] !== AIR;
+}
+
+/* ---------- world shape -------------------------------------------------
+   A shaper runs before a single mine exists. It writes ROCK where the level
+   has structure, AIR where the cave is already open, and hands back a layout:
+   which puzzle blocks may hide a mine, in how many separate groups, where the
+   player starts and which way they are facing. Everything downstream reads
+   the grid and never has to know which shaper produced it. */
+function blankLayout(){
+  return {groups:[], safe:new Set(), spawn:[0,0,0], yaw:0};
+}
+/* Every non-ROCK cell that a player digging outward from the chamber could
+   ever reach. Structure can wall a region off completely, and a mine sealed
+   behind a wall makes a board that cannot be finished. */
+function reachablePuzzle(sx,sy,sz){
+  const N=G.nx*G.ny*G.nz, seen=new Uint8Array(N), stack=[idx(sx,sy,sz)];
+  seen[stack[0]]=1;
+  let n=1;
+  while(stack.length){
+    const i=stack.pop();
+    const x=i%G.nx, z=((i/G.nx)|0)%G.nz, y=(i/(G.nx*G.nz))|0;
+    for(let dy=-1;dy<=1;dy++) for(let dz=-1;dz<=1;dz++) for(let dx=-1;dx<=1;dx++){
+      if(!dx&&!dy&&!dz) continue;
+      const X=x+dx,Y=y+dy,Z=z+dz;
+      if(!inside(X,Y,Z)) continue;
+      const j=idx(X,Y,Z);
+      if(seen[j] || G.st[j]===ROCK) continue;
+      seen[j]=1; n++; stack.push(j);
+    }
+  }
+  return n;
+}
+
+/* The plain arena: six flat walls, every cell a puzzle block. */
+function shapeArena(D){
+  const L=blankLayout(), N=G.nx*G.ny*G.nz;
+  const cx=(G.nx>>1), cz=(G.nz>>1), cy=1;
+  for(let dx=-1;dx<=1;dx++) for(let dz=-1;dz<=1;dz++) L.safe.add(idx(cx+dx,cy,cz+dz));
+  const cells=[]; for(let i=0;i<N;i++) cells.push(i);
+  L.groups=[{cells, mines:Math.round(N*D.dens)}];
+  L.spawn=[(cx+0.5)*BLOCK, cy*BLOCK, (cz+0.5)*BLOCK];
+  return L;
+}
+
+/* Arcane: the same rules in a room that fights back. Pillars, walls and
+   blocks of solid structure take 15%-30% of the volume, so sightlines break,
+   numbers hide behind corners, and the shortest way between two deductions is
+   not a straight line. Density is measured against the blocks that are
+   actually there, not against the bounding box. */
+function shapeRough(D){
+  const N=G.nx*G.ny*G.nz;
+  const target = (0.15 + rnd()*0.15) * N;
+  const cx=(G.nx>>1), cz=(G.nz>>1), cy=1;
+  for(let attempt=0; attempt<80; attempt++){
+    G.st.fill(SOLID);
+    let rock=0, guard=0;
+    while(rock < target && guard++ < 6000){
+      const k=rnd();
+      let w,h,dp;
+      if(k<0.08){ w=4; h=4; dp=4; }             // a keep: floor to ceiling
+      else if(k<0.34){ w=2; h=2; dp=2; }
+      else if(k<0.62){ w=1; h=1; dp=1; }        // a single stone in the way
+      else {                                     // a wall: one thick, a few long
+        const along = rnd()<0.5;
+        const len = 3+((rnd()*4)|0);
+        w = along?len:1; dp = along?1:len; h = 2+((rnd()*2)|0);
+      }
+      const x0=(rnd()*Math.max(1,G.nx-w+1))|0;
+      const z0=(rnd()*Math.max(1,G.nz-dp+1))|0;
+      const y0=(rnd()*Math.max(1,G.ny-h+1))|0;
+      const x1=Math.min(G.nx,x0+w), y1=Math.min(G.ny,y0+h), z1=Math.min(G.nz,z0+dp);
+      /* Count first, place second — but every quoted limit in this game has a
+         fifth of slack, so a keep that only just overruns still goes in.
+         Rejecting it outright ground the big shapes off the late layout and
+         left the arena looking like gravel. */
+      let adds=0;
+      for(let y=y0;y<y1;y++) for(let z=z0;z<z1;z++) for(let x=x0;x<x1;x++)
+        if(G.st[idx(x,y,z)]!==ROCK) adds++;
+      if(rock+adds > target*SLACK) continue;
+      for(let y=y0;y<y1;y++) for(let z=z0;z<z1;z++) for(let x=x0;x<x1;x++){
+        const i=idx(x,y,z);
+        if(G.st[i]!==ROCK){ G.st[i]=ROCK; rock++; }
+      }
+    }
+    // you cannot start inside a pillar
+    let clear=true;
+    for(let dx=-1;dx<=1 && clear;dx++) for(let dz=-1;dz<=1;dz++)
+      if(G.st[idx(cx+dx,cy,cz+dz)]===ROCK){ clear=false; break; }
+    if(!clear) continue;
+    if(reachablePuzzle(cx,cy,cz) !== N-rock) continue;   // a sealed-off pocket
+
+    const L=blankLayout();
+    for(let dx=-1;dx<=1;dx++) for(let dz=-1;dz<=1;dz++) L.safe.add(idx(cx+dx,cy,cz+dz));
+    const cells=[];
+    for(let i=0;i<N;i++) if(G.st[i]!==ROCK) cells.push(i);
+    L.groups=[{cells, mines:Math.round(cells.length*D.dens)}];
+    L.spawn=[(cx+0.5)*BLOCK, cy*BLOCK, (cz+0.5)*BLOCK];
+    G.rockCount=rock;
+    return L;
+  }
+  /* 80 tries and never a layout that held together. Rather than ship a board
+     with an unreachable mine, fall back to the flat arena. */
+  G.st.fill(SOLID); G.rockCount=0;
+  return shapeArena(D);
 }
 
 function genWorld(d){
@@ -1224,23 +1349,26 @@ function genWorld(d){
   G.hint=null; G.hints=0; G.beacon=null; G.ghost=[]; G.hintArrow=null;
   G.numHit=new Float32Array(N);
   G.crack=new Uint8Array(N);
+  G.rockCount=0;
   for(let i=0;i<N;i++) G.mat[i] = (rnd()<0.055) ? 4 : (rnd()*4)|0;
 
-  const cx=(G.nx>>1), cz=(G.nz>>1), cy=1;
-  const safe = new Set();
-  for(let dx=-1;dx<=1;dx++) for(let dz=-1;dz<=1;dz++) safe.add(idx(cx+dx, cy, cz+dz));
+  const L = D.rough ? shapeRough(D) : shapeArena(D);
+  const safe = L.safe;
 
   /* Reroll until no block of the starting chamber reads zero. A zero there
      fires the flood fill at birth and sometimes opens 3/4 of the cave at
      once: the board is conditioned on the opening, as in 2D minesweeper. */
-  const wanted = Math.round(N*D.dens);
   for(let attempt=1; ; attempt++){
     G.mine.fill(0);
-    let placed=0, guard=0;
-    while(placed<wanted && guard++<N*80){
-      const i=(rnd()*N)|0;
-      if(G.mine[i] || safe.has(i)) continue;
-      G.mine[i]=1; placed++;
+    let placed=0;
+    for(const g of L.groups){
+      const pool=g.cells;
+      let want=Math.min(g.mines, pool.length), guard=0, got=0;
+      while(got<want && guard++ < pool.length*80){
+        const i=pool[(rnd()*pool.length)|0];
+        if(G.mine[i] || safe.has(i) || G.st[i]===ROCK) continue;
+        G.mine[i]=1; got++; placed++;
+      }
     }
     G.mines=placed;
 
@@ -1259,7 +1387,11 @@ function genWorld(d){
     if(!zero || attempt>=80) break;
   }
 
-  G.safeTotal = N - G.mines;
+  /* Only blocks that can actually be opened count towards finishing. Cells the
+     shaper turned to structure, and cells it left open, are neither. */
+  let safeN=0;
+  for(let i=0;i<N;i++) if(G.st[i]===SOLID && !G.mine[i]) safeN++;
+  G.safeTotal = safeN;
   G.revealed=0; G.marked=0; G.gold=0; G.win=false; G.boom=0; G.slowmo=1; G.shake=0;
   G.fuse=0; G.boomCell=null;
   G.elapsed=0; G.t0=performance.now();
@@ -1270,8 +1402,9 @@ function genWorld(d){
   // starting chamber: 3x3 carved out of the middle layer
   for(const i of safe) revealAt(i, true);
 
-  P.x=(cx+0.5)*BLOCK; P.z=(cz+0.5)*BLOCK; P.y=cy*BLOCK;
-  P.vx=P.vy=P.vz=0; P.yaw=0; P.pitch=0; P.ground=true; P.coyote=COYOTE;
+  P.x=L.spawn[0]; P.y=L.spawn[1]; P.z=L.spawn[2];
+  P.vx=P.vy=P.vz=0; P.yaw=L.yaw; P.pitch=0; P.ground=true; P.coyote=COYOTE;
+  P.jumps=0;
   particles.length=0; sprites.length=0; debris.count=0;
   seedDust();
   G.dirty=true;
@@ -1279,11 +1412,11 @@ function genWorld(d){
 
 /* reveals with flood fill through zeros (26 neighbors) */
 function revealAt(start, silent){
-  if(G.st[start]===AIR) return;
+  if(G.st[start]===AIR || G.st[start]===ROCK) return;
   const stack=[start]; let opened=0;
   while(stack.length){
     const i=stack.pop();
-    if(G.st[i]===AIR) continue;
+    if(G.st[i]===AIR || G.st[i]===ROCK) continue;
     /* A flood fill can run straight through a block the player flagged — it
        is always a wrong flag, since real mines never enter the stack. Clearing
        it without handing the flag back left "Mines left" short for the rest of
@@ -1299,7 +1432,7 @@ function revealAt(start, silent){
         const X=x+dx,Y=y+dy,Z=z+dz;
         if(inside(X,Y,Z)){
           const j=idx(X,Y,Z);
-          if(G.st[j]!==AIR && !G.mine[j]) stack.push(j);
+          if(G.st[j]!==AIR && G.st[j]!==ROCK && !G.mine[j]) stack.push(j);
         }
       }
     }
@@ -1361,7 +1494,9 @@ function raycast(ox,oy,oz, dx,dy,dz, maxD, wantNum, numR){
   let t=0;
   for(let s=0;s<400;s++){
     if(isSolidCell(x,y,z))
-      return {hit:true, kind: inside(x,y,z)?'block':'bedrock', x,y,z, t};
+      return {hit:true,
+              kind: (inside(x,y,z) && G.st[idx(x,y,z)]!==ROCK) ? 'block' : 'bedrock',
+              x,y,z, t};
     /* A number floating in this air cell: sphere test against its center.
        The radius matches the glyph, so aiming beside it still hits the block. */
     if(wantNum && inside(x,y,z)){
@@ -1712,6 +1847,16 @@ function rebuildWorld(){
   for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
     const i=idx(x,y,z);
     if(G.st[i]===AIR) continue;
+    /* Structure reads as the same stone as the shell, so a wall inside the
+       cave and the wall at its edge are visibly the same promise: this does
+       not open, do not waste a shot on it. */
+    if(G.st[i]===ROCK){
+      const s=(x*73856093 ^ y*19349663 ^ z*83492791)>>>0;
+      const cryst=(s%37)===0;
+      put((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, BLOCK,
+          cryst?BEDCRYST:BEDROCK, (s%1000)/1000, cryst?1:0, 0, 0);
+      continue;
+    }
     if(G.fuse>0 && G.boomCell && x===G.boomCell[0] && y===G.boomCell[1] && z===G.boomCell[2]){
       const k = 1 - G.fuse/FUSE_T;                    // 0 -> 1 conforme queima
       const tremor = Math.sin(tGlobal*46)*0.05*k;
@@ -2048,7 +2193,7 @@ function mark(hit){
   }
   if(!hit.hit || hit.kind!=='block') return;
   const i=idx(hit.x,hit.y,hit.z);
-  if(G.st[i]===AIR) return;
+  if(G.st[i]===AIR || G.st[i]===ROCK) return;
   const wasFlag = G.st[i]===MARKED;
   G.st[i] = wasFlag ? SOLID : MARKED;
   G.marked += wasFlag ? -1 : 1;
@@ -2525,6 +2670,7 @@ function enemyShotEnv(cx,cy,cz){
   if(!inside(cx,cy,cz)){ snd.clink(); return; }
   const i=idx(cx,cy,cz);
   if(G.st[i]===MARKED){ snd.clink(); return; }   // a flag shrugs it off
+  if(G.st[i]===ROCK){ snd.clink(); return; }     // structure holds for them too
   if(G.st[i]===AIR) return;
   if(!G.crack[i]){
     G.crack[i]=1; G.dirty=true; snd.clink();
@@ -2865,9 +3011,16 @@ function updateHUD(){
   }
 }
 function updateDiffNote(){
-  const D=DIFFS[G.diff], n=D.nx*D.ny*D.nz, m=Math.round(n*D.dens);
+  const D=DIFFS[G.diff], n=D.nx*D.ny*D.nz;
   const boss = (D.boss ? ' · they come out of the blocks you flag' : '');
-  $('dNote').textContent = `${D.nx} × ${D.ny} × ${D.nz} = ${n} blocks · ${m} mines (${(D.dens*100).toFixed(1)}%) · cave ${D.nx*BLOCK} × ${D.ny*BLOCK} × ${D.nz*BLOCK} m${boss}`;
+  /* Arcane's structure eats 15%-30% of the box, and its mines are measured
+     against the blocks that survive it — so quoting a count off the bounding
+     box would be a lie by about a quarter. */
+  const shaped = D.rough
+    ? `${D.nx} × ${D.ny} × ${D.nz} with 15–30% solid structure · ${(D.dens*100).toFixed(0)}% of the remaining blocks are mines`
+    : `${D.nx} × ${D.ny} × ${D.nz} = ${n} blocks · ${Math.round(n*D.dens)} mines (${(D.dens*100).toFixed(1)}%)`;
+  $('dNote').textContent =
+    `${shaped} · cave ${D.nx*BLOCK} × ${D.ny*BLOCK} × ${D.nz*BLOCK} m${boss}`;
 }
 /* Custom writes straight into its DIFFS entry, so genWorld needs no special
    case at all — it is just another difficulty whose numbers you picked. */
@@ -2878,7 +3031,11 @@ function syncCustom(){
   $('cny').value=D.ny; $('cnyV').textContent=D.ny;
   const pct=Math.round(D.dens*100);
   $('cde').value=pct; $('cdeV').textContent=pct+'%';
-  $('cbo').checked=!!D.boss;
+  /* The boss switch belongs to whichever difficulty is selected, not to
+     Custom. Boss Master is the one board that cannot turn it off. */
+  const forced = G.diff===BOSS;
+  $('cbo').checked  = forced || !!DIFFS[G.diff].boss;
+  $('cbo').disabled = forced;
   $('customBox').classList.toggle('on', G.diff===CUSTOM);
   /* Below about 10% the first flood fill opens the whole cave at once — the
      percolation threshold at 26 neighbors. Their board, their call, but they
@@ -2899,7 +3056,11 @@ function bindCustom(id, key, fmt){
   });
 }
 bindCustom('cnx','nx'); bindCustom('cnz','nz'); bindCustom('cny','ny'); bindCustom('cde','dens');
-$('cbo').addEventListener('change', e=>{ DIFFS[CUSTOM].boss=e.target.checked; syncCustom(); });
+$('cbo').addEventListener('change', e=>{
+  if(G.diff===BOSS){ e.target.checked=true; return; }   // the dungeon keeps them
+  DIFFS[G.diff].boss = e.target.checked;
+  updateDiffNote(); syncCustom();
+});
 $('mus').addEventListener('input',  e=>syncMusic(+e.target.value, null));
 $('mus2').addEventListener('input', e=>syncMusic(+e.target.value, null));
 $('btnMusic').addEventListener('click',  ()=>syncMusic(null, !G.musMuted));
@@ -2924,6 +3085,7 @@ function saveCfg(){
     s:+$('sens').value, i:G.invY, mv:G.musVol, mm:G.musMuted,
     cu:{nx:DIFFS[CUSTOM].nx, nz:DIFFS[CUSTOM].nz, ny:DIFFS[CUSTOM].ny,
         dens:DIFFS[CUSTOM].dens, boss:DIFFS[CUSTOM].boss},
+    bo:DIFFS.map(D=>!!D.boss),      // the switch, remembered per difficulty
     best:G.best
   })); }catch(e){}
 }
@@ -2969,6 +3131,8 @@ function loadCfg(){
     D.dens=Math.max(LIM.dens[0],Math.min(LIM.dens[1],Math.round((u.dens||0.13)*100)))/100;
     D.boss=!!u.boss;
   }
+  if(c && Array.isArray(c.bo))
+    DIFFS.forEach((D,i)=>{ if(i!==BOSS) D.boss = !!c.bo[i]; });
   if(c && c.best) G.best = c.best;
   syncMusic(c && typeof c.mv==='number' ? c.mv : 25, c ? !!c.mm : false);
   syncCustom();
@@ -3103,7 +3267,7 @@ window.addEventListener('keydown', e=>{
     case 'Space':
       e.preventDefault();
       if(G.state==='play' && !IN.jumpHeld){
-        IN.jumpHeld=true; IN.jumpT=0; IN.surged=false; IN.jumpFired=false;
+        IN.jumpHeld=true; IN.jumpFired=false;
         if(canJump()) startJump(); else IN.jumpBuf = JUMP_BUF;
       }
       break;
@@ -3145,27 +3309,28 @@ window.addEventListener('blur', ()=>{ IN.f=IN.b=IN.l=IN.r=0; IN.sprint=false; dr
 /* The jump fires on PRESS, not on release: waiting for keyup was the "lag".
    coyote = you can still jump just after walking off an edge.
    buffer  = pressing just before you land does not lose the jump. */
-function canJump(){ return P.coyote > 0; }
+/* On the ground (or inside the coyote grace) the jump is free; after that it
+   spends one of the twenty. */
+function canJump(){ return P.coyote > 0 || P.jumps < MAX_JUMPS; }
 
 function startJump(){
-  P.vy = V_LO; P.ground=false; P.coyote=0; P.jumpY0 = P.y;
-  IN.jumpFired=true; IN.jumpBuf=0; IN.jumpT=0; IN.surged=false;
-  snd.step();
-}
-
-/* Held 0.5 s: the staff sustains the climb to an apex of 5x your height. */
-function surgeJump(){
-  const rise = JUMP_HI - (P.y - P.jumpY0);
-  P.vy = rise > 0 ? Math.sqrt(2*GRAV*rise) : Math.max(P.vy, 0);
-  IN.surged=true;
-  for(let i=0;i<26;i++) addS(P.x+(rnd()-.5)*1.6, P.y+0.15, P.z+(rnd()-.5)*1.6,
-    (rnd()-.5)*4, rnd()*3, (rnd()-.5)*4, 0.5, 0.5, [0.85,0.55,1.0], T_GLOW, 0.5);
-  snd.mark();
+  const air = !(P.coyote > 0);
+  P.jumps++;
+  P.vy = V_LO; P.ground=false; P.coyote=0;
+  IN.jumpFired=true; IN.jumpBuf=0;
+  if(air){
+    /* A jump off nothing needs to look like it came from somewhere, or it
+       reads as the physics glitching rather than as a thing you did. */
+    for(let i=0;i<16;i++) addS(P.x+(rnd()-.5)*1.5, P.y+0.12, P.z+(rnd()-.5)*1.5,
+      (rnd()-.5)*4, -1-rnd()*2, (rnd()-.5)*4, 0.42, 0.38, [0.85,0.55,1.0], T_GLOW, 0.5);
+    snd.mark();
+  } else snd.step();
 }
 
 /* Runs AFTER physics(), which is what updates P.ground. */
 function tickGround(dt){
   P.coyote = P.ground ? COYOTE : Math.max(0, P.coyote - dt);
+  if(P.ground) P.jumps = 0;      // touching down hands all twenty back
 }
 
 function updateJump(dt){
@@ -3174,11 +3339,6 @@ function updateJump(dt){
      just before landing (buffer). Without this, pressing midair is a
      swallowed jump: the "intermittency". */
   if(!IN.jumpFired && canJump() && (IN.jumpHeld || IN.jumpBuf>0)) startJump();
-  if(IN.jumpHeld && IN.jumpFired && !IN.surged){
-    IN.jumpT += dt;
-    if(P.ground) IN.surged=true;                  // landed first: cancel
-    else if(IN.jumpT >= CHARGE_T) surgeJump();
-  }
 }
 
 /* arrow keys turn the camera (accessibility / plan B) */
@@ -3789,7 +3949,7 @@ if(TOUCH){
   holdBtn('tbThink', function(){ startThink(); }, function(){ endThink(); });
   holdBtn('tbJump',
     function(){ if(G.state==='play' && !IN.jumpHeld){
-                  IN.jumpHeld=true; IN.jumpT=0; IN.surged=false; IN.jumpFired=false;
+                  IN.jumpHeld=true; IN.jumpFired=false;
                   if(canJump()) startJump(); else IN.jumpBuf = JUMP_BUF; } },
     function(){ IN.jumpHeld=false; });
   tapBtn('tbHint', function(){ askHint(); });
