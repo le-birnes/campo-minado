@@ -1105,10 +1105,14 @@ const ESHOT_SPD = 34;   // m/s — fast, but the lock is the real threat
    Aim is predictive: it leads you, so running in a straight line is no defence.
    Changing direction inside the telegraph is, and so is breaking line of sight
    or killing it. Half damage per shot is what keeps a rate this high fair. */
+/* Saturation alone was too quiet a signal — under cel shading a 0.50 and a
+   1.00 of the same hue read as the same enemy at any distance. Lightness
+   carries it now: a tier I is washed out and pale, a tier III is deep and
+   fully saturated, and the two are not mistakable. */
 const TIERS = [
-  {tag:'I',   first:1.00, rate:0.50, sat:0.50, scale:0.84, detail:0},
-  {tag:'II',  first:0.80, rate:0.35, sat:0.78, scale:1.00, detail:1},
-  {tag:'III', first:0.60, rate:0.25, sat:1.00, scale:1.18, detail:2}
+  {tag:'I',   first:1.00, rate:0.50, sat:0.42, lift:1.42, scale:0.84, detail:0},
+  {tag:'II',  first:0.80, rate:0.35, sat:0.76, lift:1.06, scale:1.00, detail:1},
+  {tag:'III', first:0.60, rate:0.25, sat:1.00, lift:0.80, scale:1.18, detail:2}
 ];
 const FAMS = [
   {fam:FAM_FLAG,  name:'Bannerman', col:[0.95,0.17,0.13], r:1.05, speed:0,   range:46},
@@ -1128,7 +1132,7 @@ for(const f of FAMS) for(let t=0;t<3;t++){
   ETYPES.push({
     id:ETYPES.length, fam:f.fam, tier:t,
     name:f.name+' '+T.tag,
-    col:tint(f.col, T.sat), colDim:tint(f.col, T.sat, 0.45),
+    col:tint(f.col, T.sat, T.lift), colDim:tint(f.col, T.sat, T.lift*0.45),
     r:f.r*T.scale, speed:f.speed*(0.8+0.3*t), range:f.range,
     first:T.first, rate:T.rate, detail:T.detail, scale:T.scale
   });
@@ -2686,9 +2690,11 @@ function correctFlags(){
   return ok;
 }
 function correctFlagFrac(){ return G.mines ? correctFlags()/G.mines : 0; }
-/* the block you just flagged has a 6-or-higher number showing next to it */
-function touchesBigNumber(cell){
-  for(const j of nbrsOf(cell)) if(G.st[j]===AIR && G.cnt[j]>=6) return true;
+/* the block you just flagged has a number of at least `n` showing next to it */
+const ARCHON_MIN = 3;
+function touchesBigNumber(cell, n){
+  const need = n || ARCHON_MIN;
+  for(const j of nbrsOf(cell)) if(G.st[j]===AIR && G.cnt[j]>=need) return true;
   return false;
 }
 
@@ -2757,7 +2763,8 @@ function maybeSpawn(cell, x,y,z){
   if(enemies.length >= EN_MAX) return;
 
   /* The Archon still needs its opening: the sixth flag or later, and only off
-     a flag that touches a 6 or higher. */
+     a flag that touches a 3 or higher. A 6 is rare enough in a 26-neighbour
+     cave that gating on one kept the flier almost entirely out of the game. */
   if(G.flagsPlaced>=6 && touchesBigNumber(cell)){
     for(let t=2;t>=0;t--){
       if(rnd() < ODDS_ARCHON[t]){
@@ -3043,8 +3050,14 @@ function checkWin(){
      is finished when every mine in it is under a flag — you are not here to
      empty the place, you are here to make it safe. Digging it out completely
      still counts, because by then the only blocks left standing are mines. */
+  /* correctFlags() walks the whole grid, and mark() calls this on every
+     single flag — 7776 cells a click in the dungeon. G.marked is maintained
+     as we go, and having as many flags out as there are mines is a necessary
+     condition for having flagged them all, so it gates the scan down to the
+     handful of moments it could possibly succeed. */
   const done = G.dungeon
-    ? (G.mines>0 && correctFlags()===G.mines) || G.revealed >= G.safeTotal
+    ? (G.mines>0 && G.marked===G.mines && correctFlags()===G.mines)
+      || G.revealed >= G.safeTotal
     : G.revealed >= G.safeTotal;
   if(done){
     G.win=true; G.state='over'; G.boom=0.0001;
