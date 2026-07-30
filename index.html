@@ -321,6 +321,7 @@ body.touch.portrait #rotate{display:grid;}
       <div class="stat"><span class="k">Mines left</span><span class="v mines" id="sMines">0</span></div>
       <div class="stat"><span class="k">Safe blocks</span><span class="v left" id="sLeft">0</span></div>
       <div class="stat foe-only"><span class="k">Life</span><span class="v life" id="sLife">♥♥</span></div>
+      <div class="stat" style="display:none"><span class="k">Held</span><span class="v" id="sPow"></span></div>
     </div>
     <div id="tr">
       <div class="stat"><span class="k">Time</span><span class="v time" id="sTime">0:00</span></div>
@@ -406,6 +407,9 @@ body.touch.portrait #rotate{display:grid;}
           light up what it counts — and if its mines are all flagged, the<br>
           number turns your shot loose on everything else it touches</div>
         <div><kbd>H</kbd>hint · lights the reasoning and plays the move</div>
+        <div><kbd>Chests</kbd>buried in the safe blocks of a minefield. Shoot one<br>
+          and it gives up a single thing — almost always <b>the eye</b>, which<br>
+          makes one unfinished number simply tell you where its mines are</div>
         <div><kbd>T</kbd>plane arrows · <kbd>I</kbd>invert mouse</div>
         <div><kbd>M</kbd>sound · <kbd>R</kbd>restart · <kbd>Esc</kbd>menu and settings</div>
         <div><kbd>Phone</kbd>left thumb moves, right thumb looks, Jump taps again<br>
@@ -1222,6 +1226,7 @@ const G = {
   dirty:true, cells:null,
   hint:null, hints:0, beacon:null, ghost:[], hintArrow:null,
   boss:false, dungeon:false, flagsPlaced:0, kills:0, deathBy:'mine',
+  safeShot:false, eye:false,
   musVol:25, musMuted:false, best:{},
   boom:0, win:false, shake:0, slowmo:1, fuse:0, boomCell:null
 };
@@ -1574,6 +1579,17 @@ function genWorld(d){
   let safeN=0;
   for(let i=0;i<N;i++) if(G.st[i]===SOLID && !G.mine[i]) safeN++;
   G.safeTotal = safeN;
+  /* Chests go in after the mines, because a chest only ever sits in a block
+     that is safe to open. Per minefield: 1% two, 70% one, and the rest none. */
+  G.chest=new Uint8Array(N);
+  chests.length=0; G.safeShot=false; G.eye=false;
+  if(G.dungeon) for(const g of L.groups){
+    const r=rnd(), want = r<0.01 ? 2 : (r<0.71 ? 1 : 0);
+    if(!want) continue;
+    const pool=g.cells.filter(i=>!G.mine[i] && G.st[i]===SOLID);
+    for(let k=0;k<want && pool.length;k++)
+      G.chest[pool.splice((rnd()*pool.length)|0,1)[0]]=1;
+  }
   G.revealed=0; G.marked=0; G.gold=0; G.win=false; G.boom=0; G.slowmo=1; G.shake=0;
   G.fuse=0; G.boomCell=null;
   G.elapsed=0; G.t0=performance.now();
@@ -1605,6 +1621,7 @@ function revealAt(start, silent){
        the game. */
     if(G.st[i]===MARKED) G.marked--;
     G.st[i]=AIR; G.revealed++; opened++;
+    if(G.chest && G.chest[i]){ G.chest[i]=0; spawnChest(i); }
     if(MATS[G.mat[i]].gold){ G.gold += 5 + ((rnd()*12)|0); }
     const x = i % G.nx, z = ((i/G.nx)|0) % G.nz, y = (i/(G.nx*G.nz))|0;
     if(!silent) spawnCrumble(x,y,z, G.mat[i]);
@@ -2000,6 +2017,8 @@ const worldB  = makeCubeBatch(20*26*20 + 64);
 /* Empty cells the hint wants you to look at. Air has nothing to draw, so the
    hint draws the space itself: a translucent block where a block would be. */
 const ghostB  = makeCubeBatch(64);
+/* four cubes a chest, and a minefield drops at most two */
+const chestB  = makeCubeBatch(4*12);
 const debris  = makeCubeBatch(MAXP);
 const viewB   = makeCubeBatch(48);
 const enemyB  = makeCubeBatch(EN_MAX*EN_PARTS);
@@ -2220,6 +2239,11 @@ function shoot(){
   /* Enemies come first, but only if one is genuinely nearer than whatever
      block the ray would otherwise have hit — otherwise you would shoot
      through walls at things you cannot see. */
+  /* A chest sits in open air, so it can only ever be in front of whatever
+     block the ray would have hit — but check the distance anyway, or you can
+     open one through a wall. */
+  const box = rayChest(r.ox,r.oy,r.oz, r.dx,r.dy,r.dz, Math.min(REACH, dist));
+  if(box){ openChest(box.c); return; }
   const foe = rayEnemy(r.ox,r.oy,r.oz, r.dx,r.dy,r.dz, Math.min(REACH, dist));
   if(foe){
     const e=foe.e, T=ETYPES[e.t];
@@ -2249,7 +2273,21 @@ function shoot(){
   }
   const i = idx(hit.x,hit.y,hit.z);
   if(G.st[i]===MARKED){ snd.clink(); return; }
-  if(G.mine[i]){ detonate(hit.x,hit.y,hit.z); return; }
+  if(G.mine[i]){
+    /* The safe shot: the mine is uncovered and flagged rather than set off.
+       It is spent whether or not you meant to use it here. */
+    if(G.safeShot){
+      G.safeShot=false; syncPowHud();
+      G.st[i]=MARKED; G.marked++; G.dirty=true;
+      snd.mark(); toast('The safe shot caught it. That one is flagged, not lit.', 3800);
+      for(let k=0;k<22;k++) addS((hit.x+0.5)*BLOCK,(hit.y+0.5)*BLOCK,(hit.z+0.5)*BLOCK,
+        (rnd()-.5)*7,(rnd()-.5)*7+2,(rnd()-.5)*7, 0.5, 0.7, [0.45,1.0,0.95], T_GLOW, 0.6);
+      maybeSpawn(i, hit.x, hit.y, hit.z);
+      checkWin();
+      return;
+    }
+    detonate(hit.x,hit.y,hit.z); return;
+  }
   revealAt(i,false);
   checkWin();
   /* your shots are whole shots: a crack you inherited is just gone with it */
@@ -2277,7 +2315,21 @@ function hitNumber(x,y,z){
 
   /* The count does not add up yet, so all the number can do is show you what
      it is counting. */
-  if(marcadas !== need || !abrir.length){ pingNumber(x,y,z); return 0; }
+  if(marcadas !== need || !abrir.length){
+    /* The eye: for one second the number stops being a riddle and just tells
+       you. Only worth spending on a number you have not finished. */
+    if(G.eye && abrir.length){
+      G.eye=false; syncPowHud();
+      G.numHit[idx(x,y,z)] = tGlobal;
+      for(const [j] of abrir)
+        setEcho(j, 1.0, G.mine[j] ? [1.0,0.16,0.12] : [0.25,1.0,0.40]);
+      G.dirty=true; snd.fanfare();
+      addS((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, 0,0,0, 2.4, 0.6, [1,0.9,0.5], T_GLOW, 0.8);
+      toast('The eye. Red is a mine, green is not — one second.', 2400);
+      return 0;
+    }
+    pingNumber(x,y,z); return 0;
+  }
 
   // the count adds up: spread
   for(const [j,X,Y,Z] of abrir){
@@ -3045,6 +3097,82 @@ function rayEnemy(ox,oy,oz, dx,dy,dz, maxD){
   return best;
 }
 
+/* ==========================================================================
+   12d. CHESTS — what the dungeon pays you for digging
+   ==========================================================================
+   Some safe blocks in a minefield have something buried in them. Open the
+   block and the chest is left floating in the space it came out of; shoot the
+   chest and it gives up exactly one thing. Two of the three are rare enough
+   that most of what you find is the eye — which is the one that helps you
+   think, and the one the dungeon is really about. */
+const chests=[];
+const POW = [
+  {key:'life', p:0.01, name:'Extra life',
+   line:'A whole heart back.'},
+  {key:'safe', p:0.01, name:'Safe shot',
+   line:'Your next shot into a mine uncovers it instead of setting it off.'},
+  {key:'eye',  p:0.98, name:'The eye',
+   line:'Look at an unfinished number and it shows you which of its blocks are mines.'}
+];
+function rollPower(){
+  let r=rnd();
+  for(const p of POW){ if(r < p.p) return p; r -= p.p; }
+  return POW[POW.length-1];
+}
+function spawnChest(i){
+  const [x,y,z]=cellXYZ(i);
+  chests.push({i, x:(x+0.5)*BLOCK, y:(y+0.5)*BLOCK, z:(z+0.5)*BLOCK,
+                born:tGlobal, open:false, openT:0});
+  snd.scan();
+  for(let k=0;k<14;k++){
+    const a=rnd()*6.283;
+    addS((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK,
+         Math.cos(a)*2.5, 1+rnd()*2, Math.sin(a)*2.5, 0.5, 0.7, [1.0,0.84,0.34], T_COIN);
+  }
+  toast('Something was buried in that one.', 2600);
+}
+function rayChest(ox,oy,oz, dx,dy,dz, maxD){
+  let best=null;
+  for(let k=0;k<chests.length;k++){
+    const c=chests[k];
+    if(c.open) continue;
+    const vx=c.x-ox, vy=c.y-oy, vz=c.z-oz;
+    const tc=vx*dx+vy*dy+vz*dz;
+    if(tc<0.2 || tc>maxD) continue;
+    const qx=dx*tc-vx, qy=dy*tc-vy, qz=dz*tc-vz;
+    if(qx*qx+qy*qy+qz*qz > 1.45*1.45) continue;
+    if(!best || tc<best.t) best={t:tc, c};
+  }
+  return best;
+}
+function openChest(c){
+  c.open = true; c.openT = tGlobal;
+  const p = rollPower();
+  if(p.key==='life')      P.hp = Math.min(8, P.hp+2);
+  else if(p.key==='safe') G.safeShot = true;
+  else                    G.eye = true;
+  toast(p.name + ' — ' + p.line, 4600);
+  snd.fanfare();
+  for(let k=0;k<46;k++){
+    const a=rnd()*6.283, b=Math.acos(2*rnd()-1), sp=4+rnd()*9;
+    addS(c.x, c.y, c.z, Math.sin(b)*Math.cos(a)*sp, Math.cos(b)*sp+2, Math.sin(b)*Math.sin(a)*sp,
+         0.55, 1.1, [1.0,0.86,0.36], T_COIN);
+  }
+  syncPowHud();
+}
+/* The two power-ups you hold rather than spend on the spot have to be visible,
+   or holding them is the same as not having them. Nothing shows when your
+   hands are empty, so the HUD stays as bare as it was asked to be. */
+function syncPowHud(){
+  const el=$('sPow');
+  if(!el) return;
+  const bits=[];
+  if(G.safeShot) bits.push('SAFE SHOT');
+  if(G.eye)      bits.push('THE EYE');
+  el.textContent = bits.join(' · ');
+  el.parentNode.style.display = bits.length ? '' : 'none';
+}
+
 function checkWin(){
   /* The arena is finished when there is nothing safe left to open. The dungeon
      is finished when every mine in it is under a flag — you are not here to
@@ -3731,6 +3859,49 @@ function frame(now){
     gl.uniform1f(uC.outline, 1.25);
     drawCubes(enemyB);
     gl.uniform1f(uC.outline, 1.0);
+  }
+
+  /* ------- chests -------
+     Four cubes: a dark body, a gold lid, and two bands. It floats and turns
+     slowly in the space the block came out of, because a chest resting on a
+     floor that a cascade may already have removed looks broken. */
+  if(chests.length){
+    const d=chestB.data; let n=0;
+    const put=(px,py,pz, rx,ry,rz, sx,sy,sz, col, emis)=>{
+      if(n>=chestB.max) return;
+      const o=n*CUBE_STRIDE;
+      compose(d,o, px,py,pz, rx,ry,rz, sx,sy,sz);
+      d[o+16]=col[0]; d[o+17]=col[1]; d[o+18]=col[2];
+      d[o+19]=0.5; d[o+20]=emis; d[o+21]=0; d[o+22]=0;
+      d[o+23]=d[o+24]=d[o+25]=0;
+      n++;
+    };
+    for(let k=chests.length-1;k>=0;k--){
+      const c=chests[k];
+      if(c.open && tGlobal-c.openT > 0.55){ chests.splice(k,1); continue; }
+      const age=tGlobal-c.born;
+      const spin=age*0.8;
+      const bob=Math.sin(age*2.1)*0.22;
+      // opening: it blows apart over half a second
+      const burst = c.open ? (tGlobal-c.openT)/0.55 : 0;
+      const lift  = burst*2.6;
+      const s = (1-burst*0.55);
+      if(s<=0.02) continue;
+      const y = c.y + bob;
+      put(c.x, y, c.z,             0,spin,0, 1.55*s,0.95*s,1.15*s, [0.30,0.19,0.12], 0.0);
+      put(c.x, y+0.78+lift, c.z,   0,spin,0, 1.62*s,0.46*s,1.22*s, [0.95,0.74,0.26], 0.55);
+      put(c.x, y, c.z,             0,spin,0, 1.62*s,0.30*s,1.22*s, [0.62,0.44,0.16], 0.25);
+      put(c.x, y-0.30, c.z,        0,spin,0, 1.30*s,0.24*s,1.30*s, [0.20,0.13,0.09], 0.0);
+      // a lamp on it, so you can find one from across a chamber
+      addS(c.x, y+0.2, c.z, 0,0,0, 2.2+0.5*Math.sin(age*3.4), 0.05, [1.0,0.82,0.30], T_GLOW, 0.42);
+    }
+    chestB.count=n;
+    if(n){
+      gl.uniform1f(uC.outline, 1.25);
+      drawCubes(chestB);
+      gl.uniform1f(uC.outline, 1.0);
+    }
+    G.dirty=true;
   }
 
   /* ------- ghost blocks: the hint drawn into empty space -------
