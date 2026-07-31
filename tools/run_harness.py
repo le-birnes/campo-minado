@@ -87,11 +87,25 @@ def reap(verbose=False):
     return killed
 
 
-def build(harness_path, out_path):
+# Not drawing is free and occasionally helps, but it is NOT why a run is slow.
+# Measured: the same harness, byte for byte, took 120.3 s and then 0.8 s. The
+# cost is a COLD START — Chrome recompiling this 200 KB inline script and
+# SwiftShader rebuilding its programs — and it lands on the first run after
+# index.html changes. Every later run against the same build is instant.
+#
+# So when a run seems to hang, run it a SECOND time before believing anything.
+# Nearly every "endless loop" chased in this project was this, or a harness
+# identifier colliding with one the game already declares — which is a parse
+# error, so nothing runs at all and Chrome sits out its budget in silence.
+NO_RENDER = "window.requestAnimationFrame = function(){ return 0; };\n"
+
+
+def build(harness_path, out_path, render=False):
     src = open(GAME, encoding="utf-8").read()
     js = open(harness_path, encoding="utf-8").read()
     assert src.count(CLOSE) == 1, "IIFE close anchor matched %d times" % src.count(CLOSE)
-    src = src.replace(CLOSE, "\nrequestAnimationFrame(frame);\n\n" + js + "\n})();")
+    src = src.replace(CLOSE, "\nrequestAnimationFrame(frame);\n\n"
+                      + ("" if render else NO_RENDER) + js + "\n})();")
     open(out_path, "w", encoding="utf-8").write(src)
     return out_path
 
@@ -136,12 +150,13 @@ def run(html_path, budget=8000, shot=None, size=None, cap=CAP_DEFAULT, profile=N
     shutil.rmtree(prof, ignore_errors=True)
 
     if timed_out:
-        return ("TIMED OUT after %.0fs. Before assuming an endless loop, rule "
-                "out the two cheaper explanations, both of which look identical "
-                "from here: an identifier in the harness colliding with one the "
-                "game already declares, which is a parse error so NOTHING runs; "
-                "and the game's own render loop grinding through the "
-                "virtual-time budget under software GL." % secs, secs, True)
+        return ("TIMED OUT after %.0fs. RUN IT AGAIN before concluding anything: "
+                "the first run after index.html changes pays a cold start that "
+                "measured 120 s where the second took 0.8 s. If it times out "
+                "twice, the next suspect is a harness identifier colliding with "
+                "one the game already declares — a parse error, so nothing runs "
+                "and Chrome waits out its budget in silence. Only after both of "
+                "those go looking for a real loop." % secs, secs, True)
     if shot:
         return ("screenshot written", secs, False)
     m = re.search(r'data-r="([^"]*)"', out or "")
