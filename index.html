@@ -1630,6 +1630,7 @@ function genWorld(d){
   P.x=L.spawn[0]; P.y=L.spawn[1]; P.z=L.spawn[2];
   P.vx=P.vy=P.vz=0; P.yaw=L.yaw; P.pitch=0; P.ground=true; P.coyote=COYOTE;
   P.jumps=0;
+  syncPowHud();
   particles.length=0; sprites.length=0; debris.count=0;
   seedDust();
   G.dirty=true;
@@ -3324,7 +3325,10 @@ function showOver(win){
   }
 
   const hint = G.hints ? ` ${G.hints} hint${G.hints>1?'s':''} taken.` : ' No hints taken.';
-  const bag = G.boss ? ` ${G.kills} of them went down with you.` : '';
+  /* This is the whole run's tally, not something that happened at the moment
+     you died — "went down with you" read as though they were killed by the
+     same blast, which made a perfectly accurate number look invented. */
+  const bag = G.boss && G.kills ? ` You put ${G.kills} of them down first.` : '';
   $('overText').textContent = (win
     ? `${G.mines} mines mapped and ${G.gold} gold in your pocket. Whatever locked you in is not pleased.`
     : shot
@@ -3588,8 +3592,10 @@ document.addEventListener('pointerlockchange', ()=>{
   clearTimeout(lockGuard); clearTimeout(lockRetry);
   if(locked){
     lockFails=0; dragLook=false; dragging=false;
+    lookSkip = 2;      // the first reports after locking are the cursor jumping to centre
     $('toast').classList.remove('on');
   } else {
+    dropAllInput();
     lockCooldown = performance.now() + 1300;   // cooldown starts now
     if(G.state==='play' && !dragLook) setScreen('pause');
   }
@@ -3610,17 +3616,35 @@ window.addEventListener('mouseup', e=>{
   if(e.button===2) endThink();
 });
 canvas.addEventListener('contextmenu', e=>e.preventDefault());
+/* Pointer lock hands you movementX/movementY, and it lies twice. The first
+   report after the lock engages can carry the whole distance from wherever the
+   cursor was to the centre of the screen, and after a stalled frame the browser
+   coalesces a burst of reports into one enormous delta. Fed straight into yaw,
+   either one is the camera "turning further than you did": a single event, a
+   third of a revolution, no warning.
+
+   So drop the first couple of events after locking, and cap any one event at a
+   distance no hand produces in a single report. 260 px is about 21 degrees at
+   default sensitivity — a hard flick still arrives intact, and a spike gets cut
+   to something recoverable. Losing a few degrees off a genuinely enormous sweep
+   is a much better failure than spinning on the spot. */
+const MOUSE_MAX = 260;
+let lookSkip = 0;
 document.addEventListener('mousemove', e=>{
   if(G.state!=='play') return;
-  if(locked || (dragLook && dragging)){
-    // staff sway follows the real rotation, so it inverts along with it
-    const my = e.movementY * (G.invY ? -1 : 1);
-    P.yaw   -= e.movementX * G.sens;
-    P.pitch -= my * G.sens;
-    P.pitch = clamp(P.pitch, -1.5, 1.5);
-    swayX = clamp(swayX - e.movementX*0.00035, -0.05, 0.05);
-    swayY = clamp(swayY - my*0.00030, -0.05, 0.05);
-  }
+  if(!(locked || (dragLook && dragging))) return;
+  if(lookSkip > 0){ lookSkip--; return; }
+  let mx = e.movementX, my = e.movementY;
+  if(!isFinite(mx) || !isFinite(my)) return;
+  mx = clamp(mx, -MOUSE_MAX, MOUSE_MAX);
+  my = clamp(my, -MOUSE_MAX, MOUSE_MAX);
+  // staff sway follows the real rotation, so it inverts along with it
+  const myi = my * (G.invY ? -1 : 1);
+  P.yaw   -= mx * G.sens;
+  P.pitch -= myi * G.sens;
+  P.pitch = clamp(P.pitch, -1.5, 1.5);
+  swayX = clamp(swayX - mx*0.00035, -0.05, 0.05);
+  swayY = clamp(swayY - myi*0.00030, -0.05, 0.05);
 });
 const KEY={};
 window.addEventListener('keydown', e=>{
@@ -3672,8 +3696,20 @@ window.addEventListener('keyup', e=>{
     case 'Space': IN.jumpHeld=false; break;
   }
 });
-window.addEventListener('blur', ()=>{ IN.f=IN.b=IN.l=IN.r=0; IN.sprint=false; dragging=false;
-                                      IN.jumpHeld=false; IN.jumpBuf=0; });
+/* Losing focus mid-keypress never delivers the keyup, so whatever was held
+   stays held. The movement flags were already cleared here; KEY was not, and
+   keyLook() reads KEY every frame — so an arrow key down when you alt-tabbed
+   kept turning the camera at 1.9 rad/s forever after, a full revolution every
+   three seconds, with your hands nowhere near the mouse. That is the camera
+   "turning on its own". Clear the whole keyboard, not half of it. */
+function dropAllInput(){
+  for(const k in KEY) KEY[k]=false;
+  IN.f=IN.b=IN.l=IN.r=0; IN.sprint=false; dragging=false;
+  IN.jumpHeld=false; IN.jumpFired=false; IN.jumpBuf=0;
+  IN.mf=IN.ms=0;
+}
+window.addEventListener('blur', dropAllInput);
+document.addEventListener('visibilitychange', ()=>{ if(document.hidden) dropAllInput(); });
 /* The jump fires on PRESS, not on release: waiting for keyup was the "lag".
    coyote = you can still jump just after walking off an edge.
    buffer  = pressing just before you land does not lose the jump. */
@@ -4286,7 +4322,10 @@ const LOOK_K = 0.0042;
 
 function lookStart(t){ lookId = t.identifier; lookX = t.clientX; lookY = t.clientY; }
 function lookMove(t){
-  const dx = t.clientX - lookX, dy = t.clientY - lookY;
+  let dx = t.clientX - lookX, dy = t.clientY - lookY;
+  /* Same trap as the mouse: a finger lifted and set down elsewhere, or a
+     dropped frame, reports one delta between two unrelated positions. */
+  dx = clamp(dx, -180, 180); dy = clamp(dy, -180, 180);
   lookX = t.clientX; lookY = t.clientY;
   const k = LOOK_K * (G.sens / 0.0014);
   P.yaw   -= dx * k;

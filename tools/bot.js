@@ -572,7 +572,10 @@ const t0=Date.now();
 let games=0, wins=0, totalMoves=0, deaths=0;
 const per={};
 const plan=[];
-if (/[?&]quick/.test(location.search)) { plan.push([4,true,'Dungeon']); }
+/* Apprentice first, always. It is 10 x 10 x 3 = 300 cells against the
+   dungeon's 7776, so it answers "is the game broken" in seconds instead of
+   tens of minutes. Only go to the big boards once the small one is clean. */
+if (/[?&]quick/.test(location.search)) { plan.push([0,false,'Apprentice']); }
 else {
 for (let d=0; d<3; d++) plan.push([d,false,DIFFS[d].name]);
 DIFFS[3].nx=20; DIFFS[3].nz=20; DIFFS[3].ny=5; DIFFS[3].dens=0.14;
