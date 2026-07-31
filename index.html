@@ -411,6 +411,10 @@ body.touch.portrait #rotate{display:grid;}
           makes one unfinished number simply tell you where its mines are</div>
         <div><kbd>T</kbd>plane arrows · <kbd>I</kbd>invert mouse</div>
         <div><kbd>M</kbd>sound · <kbd>R</kbd>restart · <kbd>Esc</kbd>menu and settings</div>
+        <div><kbd>Pad</kbd>left stick moves, right stick looks · <kbd>A</kbd> jump ·<br>
+          <kbd>R1</kbd>/<kbd>R2</kbd> shoot · <kbd>L1</kbd>/<kbd>L2</kbd>/<kbd>B</kbd> the right<br>
+          button, held · <kbd>X</kbd>/<kbd>L3</kbd> run · <kbd>R3</kbd> lock on to the<br>
+          nearest enemy · <kbd>Y</kbd>/<kbd>Start</kbd> menu · <kbd>Select</kbd> invert look</div>
         <div><kbd>Phone</kbd>left thumb moves, right thumb looks, Jump taps again<br>
           in mid-air, and the same<br>
           two actions sit under your right hand: Shoot, and Think held</div>
@@ -1302,7 +1306,7 @@ const G = {
   dirty:true, cells:null,
   hint:null, hints:0, beacon:null, ghost:[], hintArrow:null,
   mode:MODE_SWEEP, boss:false, dungeon:false, flagsPlaced:0, kills:0, deathBy:'mine',
-  safeShot:false, eye:false, digFuse:0,
+  safeShot:false, eye:false, digFuse:0, lockOn:null,
   musVol:25, musMuted:false, best:{},
   boom:0, win:false, shake:0, slowmo:1, fuse:0, boomCell:null
 };
@@ -1680,7 +1684,7 @@ function genWorld(d){
   G.fuse=0; G.boomCell=null;
   G.elapsed=0; G.t0=performance.now();
   /* Only the dungeon has anything living in it. */
-  G.boss = dung; G.flagsPlaced=0; G.kills=0; G.deathBy='mine';
+  G.boss = dung; G.flagsPlaced=0; G.kills=0; G.deathBy='mine'; G.lockOn=null;
   armDigFuse();
   enemies.length=0; eshots.length=0;
   P.hp = 4; P.hurtT = 0;   // counted in halves
@@ -3712,7 +3716,7 @@ document.addEventListener('pointerlockchange', ()=>{
   } else {
     dropAllInput();
     lockCooldown = performance.now() + 1300;   // cooldown starts now
-    if(G.state==='play' && !dragLook) setScreen('pause');
+    if(G.state==='play' && !dragLook && !GP.active) setScreen('pause');
   }
   lockHint();
 });
@@ -3860,6 +3864,160 @@ function updateJump(dt){
   if(!IN.jumpFired && canJump() && (IN.jumpHeld || IN.jumpBuf>0)) startJump();
 }
 
+/* ==========================================================================
+   13b. GAMEPAD — built against an Xbox controller
+   ==========================================================================
+   The Gamepad API reports an Xbox pad as the "standard" mapping, which fixes
+   every index below. Pads that report something else are still read with the
+   same indices: almost everything sold is XInput underneath, and a wrong guess
+   costs a misread button rather than a crash. Every read is bounds-checked, so
+   a pad with fewer controls simply never fires those actions.
+
+   Triggers are the one real compatibility problem. On Chrome they arrive as
+   analog buttons 6 and 7; some browser and driver combinations put them on
+   axes instead, and a few report an axis that RESTS at -1 rather than 0. So a
+   trigger counts as pulled if either the button is past half or a plausible
+   trigger axis has moved well away from where it started. */
+const GP = {
+  active:false, prev:[], think:false, invLatch:false, menuLatch:false, lockLatch:false
+};
+const GP_DEAD = 0.18;                 // sticks are never quite centred
+const GP_LOOK = 2.6;                  // radians per second at full deflection
+function gpAxis(a, i){ const v = a.length>i ? a[i] : 0; return isFinite(v) ? v : 0; }
+/* radial deadzone, then rescale so the usable range still reaches 1 */
+function gpStick(a, ix, iy){
+  let x=gpAxis(a,ix), y=gpAxis(a,iy);
+  const m=Math.hypot(x,y);
+  if(m < GP_DEAD) return [0,0];
+  const k=(m-GP_DEAD)/(1-GP_DEAD)/m;
+  return [x*k, y*k];
+}
+function gpBtn(g, i){
+  const b=g.buttons;
+  if(!b || b.length<=i) return 0;
+  const v=b[i];
+  return (typeof v === 'object') ? (v.pressed ? 1 : (v.value>0.5?1:0)) : (v>0.5?1:0);
+}
+function gpTrigger(g, i, axisGuess){
+  if(gpBtn(g,i)) return 1;
+  const a=g.axes;
+  if(a && a.length>axisGuess){
+    const v=a[axisGuess];
+    if(isFinite(v) && v > 0.2) return 1;      // rests at 0, pulled toward 1
+    if(isFinite(v) && v < -0.6) return 0;     // rests at -1 and has not moved
+  }
+  return 0;
+}
+
+function pollPad(dt){
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  let g=null;
+  for(const p of pads) if(p && p.connected){ g=p; break; }
+  if(!g){ GP.active=false; if(GP.think){ GP.think=false; endThink(); } return; }
+  if(!GP.active){ GP.active=true; toast('Controller connected.', 2200); }
+
+  const a=g.axes||[];
+  const held = i => gpBtn(g,i);
+  const hit  = i => { const now=held(i), was=GP.prev[i]||0; GP.prev[i]=now; return now && !was; };
+  const rel  = i => { const now=held(i), was=GP.prev[i]||0; GP.prev[i]=now; return !now && was; };
+
+  /* --- menu and settings, which work whatever screen you are on --- */
+  const menuNow = held(3) || held(9);                       // Y or Start
+  if(menuNow && !GP.menuLatch){
+    GP.menuLatch = true;
+    if(G.state==='play'){ setScreen('pause'); document.exitPointerLock&&document.exitPointerLock(); }
+    else if(G.state==='pause'){ setScreen('play'); }
+    else if(G.state==='menu') startGame();
+  } else if(!menuNow) GP.menuLatch = false;
+
+  const invNow = held(8);                                   // Select / Back
+  if(invNow && !GP.invLatch){ GP.invLatch=true; syncInv(!G.invY); }
+  else if(!invNow) GP.invLatch=false;
+
+  // A starts or resumes when you are not in the cave
+  if(G.state!=='play'){
+    if(hit(0)){ if(G.state==='menu') startGame(); else if(G.state==='pause') setScreen('play'); }
+    else GP.prev[0]=held(0);
+    if(G.state==='over' && hit(1)) startGame();
+    if(GP.think){ GP.think=false; }
+    return;
+  }
+
+  /* --- move: left stick --- */
+  const [lx,ly] = gpStick(a,0,1);
+  IN.ms = lx; IN.mf = -ly;
+  IN.sprint = !!(held(2) || held(10));                      // X or L3
+
+  /* --- look: right stick, honouring the same invert setting as the mouse --- */
+  const [rx,ry] = gpStick(a,2,3);
+  if(rx||ry){
+    const k = GP_LOOK * dt * (G.sens/0.0014) * 0.35;
+    P.yaw   -= rx * k;
+    P.pitch += (G.invY ? ry : -ry) * k;
+    P.pitch = clamp(P.pitch, -1.5, 1.5);
+    if(rx||ry) G.lockOn = null;                             // taking manual aim drops the lock
+  }
+
+  /* --- jump: A --- */
+  if(hit(0)){ IN.jumpHeld=true; IN.jumpFired=false; }
+  else if(!held(0)) IN.jumpHeld=false;
+
+  /* --- shoot: R1 or R2 --- */
+  const shootNow = held(5) || gpTrigger(g,7,5);
+  if(shootNow && !GP.shootLatch){ GP.shootLatch=true; shoot(); }
+  else if(!shootNow) GP.shootLatch=false;
+
+  /* --- the right button: L1, L2 or B. Held to consider, released to act. --- */
+  const thinkNow = held(4) || gpTrigger(g,6,4) || held(1);
+  if(thinkNow && !GP.think){ GP.think=true; startThink(); }
+  else if(!thinkNow && GP.think){ GP.think=false; endThink(); }
+
+  /* --- R3: lock on --- */
+  const lockNow = held(11);
+  if(lockNow && !GP.lockLatch){ GP.lockLatch=true; toggleLock(); }
+  else if(!lockNow) GP.lockLatch=false;
+}
+
+/* Lock-on: pick the nearest thing that is alive and in front of you, and keep
+   the aim on it until it dies, leaves, or you take the stick back. On a pad
+   this is the difference between fighting and flailing — a thumbstick cannot
+   track a moving target the way a mouse does. */
+function toggleLock(){
+  if(G.lockOn){ G.lockOn=null; toast('Lock released.', 1200); return; }
+  const r=aimRay();
+  let best=null;
+  for(const e of enemies){
+    const vx=e.x-P.x, vy=e.y-(P.y+EYE), vz=e.z-P.z;
+    const d=Math.hypot(vx,vy,vz)||1;
+    if(d > REACH) continue;
+    const dot = (vx*r.dx + vy*r.dy + vz*r.dz)/d;
+    if(dot < 0.1) continue;                       // behind you
+    const score = d*(2-dot);                      // near and ahead wins
+    if(!best || score<best.score) best={e, score};
+  }
+  if(best){ G.lockOn=best.e; snd.scan(); toast('Locked on.', 1200); }
+  else toast('Nothing to lock on to.', 1200);
+}
+function updateLock(dt){
+  if(!G.lockOn) return;
+  if(G.state!=='play' || enemies.indexOf(G.lockOn)<0){ G.lockOn=null; return; }
+  const e=G.lockOn;
+  const dx=e.x-P.x, dy=e.y-(P.y+EYE), dz=e.z-P.z;
+  if(Math.hypot(dx,dy,dz) > REACH*1.3){ G.lockOn=null; return; }
+  const wantYaw = Math.atan2(-dx,-dz);
+  const wantPitch = Math.atan2(dy, Math.hypot(dx,dz));
+  if(!isFinite(P.yaw) || !isFinite(P.pitch)){ P.yaw=wantYaw; P.pitch=wantPitch; return; }
+  /* Shortest way round, so a target crossing behind you does not spin the view.
+     Modulo, not a while loop: this runs every frame in the real game, and a
+     `while(d > PI) d -= 2PI` never terminates if d is ever infinite. */
+  const TAU = Math.PI*2;
+  let d = ((wantYaw - P.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
+  const k = Math.min(1, dt*9);
+  P.yaw   += d*k;
+  P.pitch += (wantPitch - P.pitch)*k;
+  P.pitch = clamp(P.pitch, -1.5, 1.5);
+}
+
 /* arrow keys turn the camera (accessibility / plan B) */
 function keyLook(dt){
   const s = 1.9*dt;
@@ -3899,8 +4057,10 @@ function frame(now){
   const sim = dt * (G.state==='over' ? G.slowmo : 1);
   if(G.state==='over' && G.slowmo<1) G.slowmo = Math.min(1, G.slowmo + dt*0.35);
 
+  pollPad(dt);
   if(G.state==='play'){
     keyLook(dt);
+    updateLock(dt);
     updateJump(dt);
     physics(dt);
     tickGround(dt);
