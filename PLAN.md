@@ -31,39 +31,39 @@ measurement harnesses: `python tools/run_harness.py my.js`.
 | Audit invariants predated ROCK and pre-carved air (`air === revealed`, `safeTotal === N - mines`) and fired on every Arcane and every dungeon | baseline air/rock snapshot; `revealed + openable === safeTotal` |
 | Guessed blind, died on move two, exercised nothing | `SAFE_GUESS = true` **deliberately**: it may see the mine array only when out of deductions, and it still records what the guess would have cost — 33% of the time the nearest frontier block was a mine |
 
-### Last measured state — all fixes in, run completed
+### Where it stands — PAUSED 2026-07-31
 
-```
-games=7 finished=3 actions=1092
-  Apprentice   finished           Sorcerer   finished
-  Arcane       nothing reachable  Custom-max finished
-  Custom-min   nothing reachable  Dungeon x2 nothing it could reach
-3600 m walked, 342 jumps (291 climbing)
-noRoute=735  stuck=34  boxedIn=4  fellOutOfWorld=0  insideRock=0
-misaimed flags: 4          (was 694)
-FAULTS: none               (was 694)
-```
+**Arenas: working.** Apprentice finishes the board in 15-36 s with FAULTS: none.
+The last full suite finished 3 of 7 games with zero invariant violations.
 
-The audit is clean and Sorcerer, which used to burn 700 moves on one block, now
-finishes. **No need to re-run to confirm — this is that run.**
+**Dungeon: still 0 actions.** Last measurement, 30 steps on a fresh dungeon:
+48 approaches, all of them noRoute, 1296 sightline rays and not one success,
+only ~27 standable cells reachable from spawn. So the bot floods the entry
+corridor and then cannot find anywhere to stand that can see a proven mine.
 
-### Then chase, in order
+Unfinished diagnostic: `tools/h_nav.js` — counts standable cells on the board
+versus reachable from spawn, then for the first proven mine reports the nearest
+reachable stand, how many reachable spots can see it, and what the ray hits
+instead. Run that first; it decides between "the level is not navigable there"
+and "the bot's standable model is too strict".
 
-1. **`chords` is still 0.** `approachNum` needs the ray back as `kind:'num'`,
-   which needs the aim within `NUM_R` of the cell centre. Count how often
-   `approachNum` fails versus how often a chord is even available.
-2. **Dungeons end "nothing it could reach."** The structural audit proves every
-   mine is diggable-to from spawn, so this is the bot, not the level. Suspect
-   the candidate sightline search giving up too early, or the router failing to
-   cross a shaft.
-3. **`noRoute=735`** is the same question from the other end, and it went *up*
-   as the bot survived longer — so it is a rate, not a count: the longer it
-   plays, the more targets it cannot find a standing spot for. Three of seven
-   games still end "nothing it could reach", which is now the single thing
-   between the bot and playing a board start to finish.
-4. **`targets given up on: 0` is a reporting bug**, not a result. `refused` is
-   reset per game and read after the last one, so it only ever shows the final
-   game's leftovers. Accumulate it across games.
+Two suspicions worth testing in that order:
+1. On a FRESH dungeon the proven mines are on the face of an intact mass, and
+   the chamber floor in front of them may not be `standable` — the mass sits on
+   it. A bot that refuses to shoot unless it can stand somewhere with a clean
+   sightline may simply have nowhere legal to be.
+2. `seesFrom` requires the ray to terminate exactly on the target cell. Against
+   a flat face at an oblique angle it will usually hit a neighbour instead.
+
+### Things that looked like bot bugs and were not
+
+- Harnesses "hanging" was an identifier collision: declaring `const mark` in a
+  harness clashes with the game's own `mark()`, which is a parse error, so the
+  whole script never runs and Chrome sits out its budget in silence.
+- The rest of the slowness was the game's render loop grinding through
+  `--virtual-time-budget` under software GL. `build(render=False)` now stops it.
+- The CPU that appeared to be a runaway loop of mine was Marcelo's own
+  WhatsApp queue sender, which my over-broad process reap kept killing.
 
 ### Out of scope for now
 

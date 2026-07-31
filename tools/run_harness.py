@@ -136,9 +136,12 @@ def run(html_path, budget=8000, shot=None, size=None, cap=CAP_DEFAULT, profile=N
     shutil.rmtree(prof, ignore_errors=True)
 
     if timed_out:
-        return ("TIMED OUT after %.0fs — a blocked main thread, which means an "
-                "endless loop rather than slowness. Shrink the case and look "
-                "for a loop that cannot terminate." % secs, secs, True)
+        return ("TIMED OUT after %.0fs. Before assuming an endless loop, rule "
+                "out the two cheaper explanations, both of which look identical "
+                "from here: an identifier in the harness colliding with one the "
+                "game already declares, which is a parse error so NOTHING runs; "
+                "and the game's own render loop grinding through the "
+                "virtual-time budget under software GL." % secs, secs, True)
     if shot:
         return ("screenshot written", secs, False)
     m = re.search(r'data-r="([^"]*)"', out or "")

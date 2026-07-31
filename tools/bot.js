@@ -156,6 +156,38 @@ const NB4 = [[1,0],[-1,0],[0,1],[0,-1]];
 /* Long enough to cross the dungeon, short enough that a hopeless target is
    not walked to across the entire map. */
 const PATH_MAX = 70;
+
+/* Everywhere the bot can stand, worked out ONCE per step and reused.
+   Scanning a volume around each target and firing a sightline ray at every
+   standable cell in it was quadratic in disguise: ten steps took a second and
+   a hundred and twenty could not finish in three minutes. One flood outward
+   from where the bot is standing gives every reachable spot in distance order
+   AND the path to each of them, so a target only costs the rays needed to find
+   the first spot that can see it. */
+let reachList=[], reachFrom=-1;
+function floodReach(fromCell){
+  const N=G.nx*G.ny*G.nz;
+  if (_cap < N) { _prev=new Int32Array(N); _seen=new Uint8Array(N); _cap=N; }
+  _prev.fill(-1); _seen.fill(0);
+  const q=[fromCell]; _seen[fromCell]=1;
+  for (let qi=0; qi<q.length; qi++) {
+    const i=q[qi];
+    const [x,y,z]=cellXYZ(i);
+    for (const [dx,dz] of NB4) {
+      const j=stepTarget(x+dx, z+dz, y);
+      if (j<0 || _seen[j]) continue;
+      _seen[j]=1; _prev[j]=i; q.push(j);
+    }
+  }
+  reachList=q; reachFrom=fromCell;
+  return q;
+}
+function pathFrom(toCell){
+  if(!_seen[toCell]) return null;
+  const path=[]; let c=toCell;
+  while(c!==reachFrom){ path.push(c); c=_prev[c]; if(path.length>PATH_MAX) return null; }
+  return path.reverse();
+}
 let _prev=null, _seen=null, _cap=0;
 function route(fromCell, toCell) {
   const N = G.nx*G.ny*G.nz;
@@ -248,6 +280,27 @@ function lineTo(cell) {
 function approach(cell) {
   stats.approaches++;
   if (lineTo(cell)) return true;
+  const from=standCell();
+  if (from<0) return false;
+  if (from!==reachFrom || !reachList.length) floodReach(from);
+  let rays=0;
+  for (const goal of reachList) {
+    if (goal===from) continue;
+    const [gx,gy,gz]=cellXYZ(goal);
+    if (!seesFrom(gx,gy,gz, cell)) continue;
+    if (++rays > 3) break;                 // three attempts, then it is not worth it
+    const path=pathFrom(goal);
+    if (!path) continue;
+    if (follow(path, 2.2) && lineTo(cell)) return true;
+    floodReach(standCell());               // we moved; the tree is stale
+    return false;
+  }
+  stats.noRoute++;
+  return false;
+}
+function approachOld(cell) {
+  stats.approaches++;
+  if (lineTo(cell)) return true;
   const [tx,ty,tz]=cellXYZ(cell);
   const from=standCell();
   if (from<0) return false;
@@ -257,16 +310,16 @@ function approach(cell) {
      1073 times. Radius 5, because a shot carries 13 blocks — standing back is
      usually easier than squeezing in close. */
   const cands=[];
-  for (let r=1;r<=3;r++) for (let dy=-r;dy<=r;dy++) for (let dz=-r;dz<=r;dz++) for (let dx=-r;dx<=r;dx++) {
+  for (let r=1;r<=8;r++) for (let dy=-r;dy<=r;dy++) for (let dz=-r;dz<=r;dz++) for (let dx=-r;dx<=r;dx++) {
     if (Math.max(Math.abs(dx),Math.abs(dy),Math.abs(dz))!==r) continue;   // shell only
     const X=tx+dx, Y=ty+dy, Z=tz+dz;
     if (!standable(X,Y,Z)) continue;
     if (!seesFrom(X,Y,Z, cell)) continue;
     cands.push([idx(X,Y,Z), r]);
-    if (cands.length>=4) break;
+    if (cands.length>=10) break;
   }
   let routed=false;
-  for (const [goal] of cands.slice(0,3)) {
+  for (const [goal] of cands.slice(0,6)) {
     const path = route(from, goal);
     if (!path || path.length > PATH_MAX) continue;
     routed=true;
@@ -289,18 +342,38 @@ function seesFrom(x,y,z, cell){
 }
 function approachNum(cell) {
   if (lineToNum(cell)) return true;
+  const from=standCell();
+  if (from<0) return false;
+  if (from!==reachFrom || !reachList.length) floodReach(from);
+  let rays=0;
+  for (const goal of reachList) {
+    if (goal===from) continue;
+    const [gx,gy,gz]=cellXYZ(goal);
+    if (!seesFrom(gx,gy,gz, cell)) continue;
+    if (++rays > 3) break;
+    const path=pathFrom(goal);
+    if (!path) continue;
+    if (follow(path, 2.2) && lineToNum(cell)) return true;
+    floodReach(standCell());
+    return false;
+  }
+  stats.noRoute++;
+  return false;
+}
+function approachNumOld(cell) {
+  if (lineToNum(cell)) return true;
   const [tx,ty,tz]=cellXYZ(cell);
   const from=standCell();
   if (from<0) return false;
   const cands=[];
-  for (let r=1;r<=3;r++) for (let dy=-r;dy<=r;dy++) for (let dz=-r;dz<=r;dz++) for (let dx=-r;dx<=r;dx++) {
+  for (let r=1;r<=8;r++) for (let dy=-r;dy<=r;dy++) for (let dz=-r;dz<=r;dz++) for (let dx=-r;dx<=r;dx++) {
     if (Math.max(Math.abs(dx),Math.abs(dy),Math.abs(dz))!==r) continue;
     const X=tx+dx, Y=ty+dy, Z=tz+dz;
     if (!standable(X,Y,Z)) continue;
     cands.push([idx(X,Y,Z), r]);
-    if (cands.length>=4) break;
+    if (cands.length>=10) break;
   }
-  for (const [goal] of cands.slice(0,3)) {
+  for (const [goal] of cands.slice(0,6)) {
     const path=route(from, goal);
     if (!path || path.length > PATH_MAX) continue;
     if (follow(path, 2.2) && lineToNum(cell)) return true;
@@ -475,7 +548,8 @@ function playGame(diff, mode, label) {
   audit(label+' fresh');
 
   let moves=0, peak=0, endWhy='ran out of steps', dry=0;
-  const cap = Math.min(700, G.safeTotal*2 + 200);
+  const qs = /[?&]steps=(\d+)/.exec(location.search);
+  const cap = qs ? +qs[1] : Math.min(700, G.safeTotal*2 + 200);
   for (let step=0; step<cap; step++) {
     if (won()) { endWhy='finished'; break; }
     if (G.state!=='play') { endWhy='died to a '+G.deathBy; break; }
@@ -492,6 +566,8 @@ function playGame(diff, mode, label) {
     if (G.state!=='play') break;
 
     stats.steps++;
+    reachFrom=-1;                 // the board moved; re-flood
+    try{ document.body.dataset.r = 'step '+stats.steps+' of '+label; }catch(e){}
     let acted=false, tries=0;
     const TRIES=4;
     const A=analyse();
@@ -579,7 +655,8 @@ const plan=[];
 /* Apprentice first, always. It is 10 x 10 x 3 = 300 cells against the
    dungeon's 7776, so it answers "is the game broken" in seconds instead of
    tens of minutes. Only go to the big boards once the small one is clean. */
-if (/[?&]quick/.test(location.search)) { plan.push([0,0,'Apprentice']); }
+if (/[?&]dungeon/.test(location.search)) { plan.push([0,1,'Dungeon']); }
+else if (/[?&]quick/.test(location.search)) { plan.push([0,0,'Apprentice']); }
 else {
 for (let d=0; d<3; d++) plan.push([d,0,DIFFS[d].name]);
 DIFFS[3].nx=20; DIFFS[3].nz=20; DIFFS[3].ny=5; DIFFS[3].dens=0.14;
