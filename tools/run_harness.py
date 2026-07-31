@@ -29,7 +29,12 @@ def build(harness_path, out_path):
 def run(html, budget=6000, shot=None, size=None):
     args = [CHROME, "--headless=new", "--disable-gpu", "--use-angle=swiftshader",
             "--enable-unsafe-swiftshader", "--no-first-run", "--no-sandbox",
-            "--user-data-dir=" + os.path.join(HERE, "cdata_run"),
+            # ABSOLUTE, always. A relative --user-data-dir makes Chrome pop a
+            # GUI error dialog on the user's actual screen ("nao pode ler e
+            # gravar neste diretorio de dados"). It has done it twice. abspath
+            # here means no caller can reintroduce it by setting HERE to a
+            # relative path.
+            "--user-data-dir=" + os.path.abspath(os.path.join(HERE, "cdata_run")),
             "--virtual-time-budget=%d" % budget]
     if size:
         args.append("--window-size=%d,%d" % size)
@@ -37,9 +42,9 @@ def run(html, budget=6000, shot=None, size=None):
         args.append("--screenshot=" + shot)
     else:
         args.append("--dump-dom")
-    args.append("file:///" + html.replace("\\", "/"))
+    args.append("file:///" + os.path.abspath(html).replace("\\", "/"))
     p = subprocess.run(args, capture_output=True, text=True, encoding="utf-8",
-                       errors="replace", timeout=300)
+                       errors="replace", timeout=900)
     if shot:
         return ""
     m = re.search(r'data-r="([^"]*)"', p.stdout or "")

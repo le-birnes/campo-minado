@@ -402,10 +402,9 @@ body.touch.portrait #rotate{display:grid;}
         <div><kbd>Mouse</kbd>aim</div>
         <div><kbd>Left click</kbd>shoot. Always. A number in the way is not a<br>
           target — the shot goes through it into the wall behind</div>
-        <div><kbd>Hold right</kbd>think: a cold mist gathers on the block you<br>
-          are considering. Let go on a block to flag it. Let go on a number to<br>
-          light up what it counts — and if its mines are all flagged, the<br>
-          number turns your shot loose on everything else it touches</div>
+        <div><kbd>Right click</kbd>let go on a block to flag it. Let go on a<br>
+          number to light up what it counts — and if its mines are all flagged,<br>
+          the number turns your shot loose on everything else it touches</div>
         <div><kbd>H</kbd>hint · lights the reasoning and plays the move</div>
         <div><kbd>Chests</kbd>buried in the safe blocks of a minefield. Shoot one<br>
           and it gives up a single thing — almost always <b>the eye</b>, which<br>
@@ -709,6 +708,13 @@ void main(){
   float wallness = 1.0 - abs(N.y);
   float grey = dot(base, vec3(0.299, 0.587, 0.114));
   base = mix(base, vec3(grey) * 0.94, wallness * uWallGrey);
+  /* And the ceiling steps back from the floor. The sun is overhead, so an
+     upward face and a downward one already differ by a lighting band, but a
+     band is not enough when both are cut from the same stone: over your head
+     goes darker and cooler still, so a corridor reads as floor / wall / roof
+     and not as one continuous tube. */
+  float down = max(-N.y, 0.0);
+  base = mix(base, base * vec3(0.62, 0.66, 0.78), down * 0.55 * uWallGrey);
 
   /* --- luz em degraus (cel) --- */
   float ndl  = max(dot(N, uSun), 0.0);
@@ -1094,8 +1100,13 @@ const MATS = [
   {c:[0.80,0.55,0.26]}, // dark sandstone
   {c:[0.90,0.70,0.28], gold:true} // gold vein
 ];
-const BEDROCK   = [0.19,0.14,0.13];
-const BEDCRYST  = [0.82,0.54,0.19];
+/* Structure is grey stone and the puzzle is warm sand, at the source rather
+   than only per-face. In a dungeon corridor every surface you can see is
+   structure, so shading alone left floor, wall and ceiling the same brown
+   tube; making the material itself a different colour from the blocks you dig
+   is what actually separates "this is the level" from "this is the puzzle". */
+const BEDROCK   = [0.26,0.26,0.29];
+const BEDCRYST  = [0.62,0.66,0.78];
 
 /* ==========================================================================
    4b. ENEMY TYPES  (Boss Master)
@@ -1833,21 +1844,48 @@ const snd = (function(){
      and the two volumes are independent.
      --------------------------------------------------------------------- */
   const SEMI = s => Math.pow(2, s/12);
+  /* 'x' is a hit. Sixteen of them is one bar. */
+  const P16 = p => p.split('').map(c => c==='x' ? 1 : 0);
+  /* Each mode has FOUR sections, and every 32 bars it moves to a different one
+     at random. A section changes the drum pattern, the four-bar harmony, and
+     the two-note figure the lead plays, so the loop stays recognisably the same
+     piece while never settling into one shape long enough to become wallpaper.
+     32 bars is roughly a minute at Apprentice's tempo and about 35 seconds at
+     Boss Master's — long enough to establish itself, short enough that you
+     notice it turn over. */
   const THEMES = [
     // Apprentice: slow, wary, mostly space
-    {bpm: 84, root:55.00, prog:[0,0,-3,-5],  kick:[1,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0],
-     hat:0.30, lead:0.00, saw:0.10, pad:0.055},
+    {bpm: 84, root:55.00, hat:0.30, lead:0.00, saw:0.10, pad:0.055, vars:[
+      {kick:P16('x.....x...x.....'), prog:[ 0, 0,-3,-5], fig:[7,3]},
+      {kick:P16('x.......x...x...'), prog:[ 0,-5, 0,-3], fig:[3,5]},
+      {kick:P16('x...x.....x.....'), prog:[-3, 0,-5, 0], fig:[5,7]},
+      {kick:P16('x.........x.x...'), prog:[ 0,-3,-5,-3], fig:[7,10]}
+    ]},
     // Sorcerer: it starts pushing
-    {bpm:102, root:58.27, prog:[0,-2,-4,-5], kick:[1,0,0,1,0,0,1,0,1,0,0,0,1,0,0,0],
-     hat:0.44, lead:0.16, saw:0.15, pad:0.060},
+    {bpm:102, root:58.27, hat:0.44, lead:0.16, saw:0.15, pad:0.060, vars:[
+      {kick:P16('x..x..x.x...x...'), prog:[ 0,-2,-4,-5], fig:[3,7]},
+      {kick:P16('x..x..x.x..x..x.'), prog:[-5,-4,-2, 0], fig:[7,12]},
+      {kick:P16('x.x...x.x...x.x.'), prog:[ 0,-4, 0,-2], fig:[5,3]},
+      {kick:P16('x..x.x..x..x.x..'), prog:[-2, 0,-5,-4], fig:[10,7]}
+    ]},
     // Arcane: dense, no room to think
-    {bpm:120, root:61.74, prog:[0,-1,-5,-6], kick:[1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,1],
-     hat:0.58, lead:0.26, saw:0.20, pad:0.065},
+    {bpm:120, root:61.74, hat:0.58, lead:0.26, saw:0.20, pad:0.065, vars:[
+      {kick:P16('x.x.x.x.x.x.x.xx'), prog:[ 0,-1,-5,-6], fig:[6,3]},
+      {kick:P16('x.xx.x.xx.x.x.x.'), prog:[-6,-5,-1, 0], fig:[3,7]},
+      {kick:P16('xx.x.x.x.xx.x.x.'), prog:[ 0,-5,-1,-6], fig:[8,6]},
+      {kick:P16('x.x.xx.x.x.xx.x.'), prog:[-1,-6, 0,-5], fig:[11,8]}
+    ]},
     // Boss Master: fastest, lowest, meanest
-    {bpm:140, root:49.00, prog:[0,-1,3,-4],  kick:[1,0,1,1,1,0,1,0,1,1,1,0,1,0,1,1],
-     hat:0.72, lead:0.38, saw:0.26, pad:0.075}
+    {bpm:140, root:49.00, hat:0.72, lead:0.38, saw:0.26, pad:0.075, vars:[
+      {kick:P16('x.xxx.x.xxx.x.xx'), prog:[ 0,-1, 3,-4], fig:[6,10]},
+      {kick:P16('xx.xx.xxx.xx.xx.'), prog:[ 3,-4, 0,-1], fig:[3,6]},
+      {kick:P16('x.x.xxx.x.xxx.x.'), prog:[-4, 0,-1, 3], fig:[10,13]},
+      {kick:P16('xxx.x.xxx.x.xxxx'), prog:[-1, 3,-4, 0], fig:[8,3]}
+    ]}
   ];
   let mBus=null, mTimer=0, mStep=0, mNext=0, mTheme=null, mVol=0.16, mMuted=false;
+  const SECTION_BARS = 32;
+  let mVar=0, mSection=-1;
 
   function mEnsure(){
     if(!ensure()) return false;
@@ -1870,10 +1908,20 @@ const snd = (function(){
     if(!mTheme || !mBus) return;
     const T=mTheme, spb=60/T.bpm, sixteenth=spb/4;
     while(mNext < ac.currentTime + 0.20){
-      const t=mNext, s=mStep%16, bar=(mStep/16|0)%4;
-      const chord = T.root*SEMI(T.prog[bar]);
+      const t=mNext, s=mStep%16, barNo=(mStep/16)|0, bar=barNo%4;
+      /* Every 32 bars, move to one of the other three sections. Never the one
+         just played, or "random" occasionally means "the same again" and the
+         change you were promised does not arrive. */
+      const sec=(barNo/SECTION_BARS)|0;
+      if(sec!==mSection){
+        mSection=sec;
+        mVar = T.vars.length<2 ? 0
+             : (mVar + 1 + ((Math.random()*(T.vars.length-1))|0)) % T.vars.length;
+      }
+      const V=T.vars[mVar];
+      const chord = T.root*SEMI(V.prog[bar]);
 
-      if(T.kick[s]){                                  // the pulse
+      if(V.kick[s]){                                  // the pulse
         const o=ac.createOscillator(); o.type='sine';
         o.frequency.setValueAtTime(128,t); o.frequency.exponentialRampToValueAtTime(38,t+0.10);
         const g=ac.createGain();
@@ -1897,7 +1945,7 @@ const snd = (function(){
         blip('triangle', chord*2*SEMI(7),t, spb*3.6, T.pad*0.6, 900);
       }
       if(T.lead>0 && (s===7||s===13) && Math.random()<T.lead)
-        blip('square', chord*4*SEMI(bar%2?3:7), t, 0.14, 0.05, 2600);
+        blip('square', chord*4*SEMI(V.fig[s===7?0:1]), t, 0.14, 0.05, 2600);
 
       mNext += sixteenth; mStep++;
     }
@@ -2403,13 +2451,13 @@ function pingNumber(x,y,z){
   return n;
 }
 
-/* ---------- the right button: hold to think, release to act ----------
-   Holding it puts a cold mist over whatever you are pointing at, so the game
-   shows you it is considering that block before anything happens. Let go on a
-   number and it lights up what that number counts — and if the count already
-   adds up, the number turns your shot loose on every other block it touches.
-   Let go on a block and you have flagged it.
-   Nothing here destroys anything by accident: that is what left click is for. */
+/* ---------- the right button: press, release to act ----------
+   Let go on a number and it lights up what that number counts — and if the
+   count already adds up, the number turns your shot loose on every other block
+   it touches. Let go on a block and you have flagged it.
+   Nothing here destroys anything by accident: that is what left click is for.
+   The mist that used to gather while the button was held is gone; the button
+   still resolves what you are pointing at on release, exactly as before. */
 const THINK = {on:false, t:0, cell:-1, kind:''};
 
 function startThink(){
@@ -2424,23 +2472,6 @@ function thinkAim(){
   THINK.cell = idx(hit.x,hit.y,hit.z);
   THINK.kind = hit.kind;
   return hit;
-}
-/* the mist: cel-shaded, cool, and it rises. Spawned while the button is down. */
-function thinkMist(dt){
-  if(!THINK.on || THINK.cell<0) return;
-  const [x,y,z]=cellXYZ(THINK.cell);
-  const cx=(x+0.5)*BLOCK, cy=(y+0.5)*BLOCK, cz=(z+0.5)*BLOCK;
-  const k = Math.min(1, THINK.t/0.5);
-  if(rnd() < 0.55 + 0.45*k){
-    const a=rnd()*6.283, rr=BLOCK*(0.18+0.34*rnd());
-    addS(cx+Math.cos(a)*rr, cy-BLOCK*0.35+rnd()*BLOCK*0.7, cz+Math.sin(a)*rr,
-         Math.cos(a)*0.35, 0.9+rnd()*0.7, Math.sin(a)*0.35,
-         0.9+rnd()*1.1, 0.7+rnd()*0.5, [0.62,0.90,1.0], T_GLOW, 0.22+0.20*k);
-  }
-  if(rnd() < 0.18)
-    addP(cx+(rnd()-.5)*BLOCK*0.8, cy+(rnd()-.5)*BLOCK*0.8, cz+(rnd()-.5)*BLOCK*0.8,
-         (rnd()-.5)*1.2, 0.8+rnd(), (rnd()-.5)*1.2,
-         0.16+rnd()*0.18, 0.8, [0.70,0.94,1.0], 0.8, 0.05);
 }
 function endThink(){
   if(!THINK.on) return;
@@ -3790,7 +3821,7 @@ function frame(now){
     physics(dt);
     tickGround(dt);
     if(P.hurtT>0) P.hurtT -= dt;
-    if(THINK.on){ THINK.t += dt; thinkAim(); thinkMist(dt); }
+    if(THINK.on){ THINK.t += dt; thinkAim(); }
     G.elapsed = Math.max(0, (now - G.t0)/1000);
     updateHUD();
 
