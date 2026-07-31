@@ -37,6 +37,7 @@ const stats = { walked:0, jumps:0, stuck:0, noRoute:0, dugOut:0, insideRock:0,
                 fell:0, shots:0, flags:0, noEffect:0, killed:0, shotAt:0,
                 chords:0, chordDud:0, opened:0, chests:0, climbed:0, misflag:0,
                 chordOffered:0, chordNoAim:0, gaveUp:0, airJump:0,
+                ticks:0, routes:0, routeCells:0, approaches:0, sightRays:0, steps:0,
                 guesses:0, guessMines:0 };
 
 /* ---------------- audit ----------------
@@ -96,6 +97,7 @@ function playerInRock() {
 
 /* -------- one simulated frame of the real thing -------- */
 function tick() {
+  stats.ticks++;
   updateJump(DT); physics(DT); tickGround(DT);
   if (G.boss) { adv(DT); updateEnemies(DT); }
   if (P.y < -30) { stats.fell++; return false; }
@@ -150,11 +152,15 @@ function stepTarget(x, z, fromY){
   return -1;
 }
 const NB4 = [[1,0],[-1,0],[0,1],[0,-1]];
+/* Long enough to cross the dungeon, short enough that a hopeless target is
+   not walked to across the entire map. */
+const PATH_MAX = 70;
 let _prev=null, _seen=null, _cap=0;
 function route(fromCell, toCell) {
   const N = G.nx*G.ny*G.nz;
   if (_cap < N) { _prev=new Int32Array(N); _seen=new Uint8Array(N); _cap=N; }
   _prev.fill(-1); _seen.fill(0);
+  stats.routes++;
   const q=[fromCell]; _seen[fromCell]=1;
   for (let qi=0; qi<q.length; qi++) {
     const i=q[qi];
@@ -167,7 +173,7 @@ function route(fromCell, toCell) {
     for (const [dx,dz] of NB4) {
       const j=stepTarget(x+dx, z+dz, y);
       if (j<0 || _seen[j]) continue;
-      _seen[j]=1; _prev[j]=i; q.push(j);
+      _seen[j]=1; _prev[j]=i; q.push(j); stats.routeCells++;
     }
   }
   return null;
@@ -239,6 +245,7 @@ function lineTo(cell) {
 
 /* -------- go stand somewhere that can see `cell`, on foot -------- */
 function approach(cell) {
+  stats.approaches++;
   if (lineTo(cell)) return true;
   const [tx,ty,tz]=cellXYZ(cell);
   const from=standCell();
@@ -249,18 +256,18 @@ function approach(cell) {
      1073 times. Radius 5, because a shot carries 13 blocks — standing back is
      usually easier than squeezing in close. */
   const cands=[];
-  for (let r=1;r<=5;r++) for (let dy=-r;dy<=r;dy++) for (let dz=-r;dz<=r;dz++) for (let dx=-r;dx<=r;dx++) {
+  for (let r=1;r<=3;r++) for (let dy=-r;dy<=r;dy++) for (let dz=-r;dz<=r;dz++) for (let dx=-r;dx<=r;dx++) {
     if (Math.max(Math.abs(dx),Math.abs(dy),Math.abs(dz))!==r) continue;   // shell only
     const X=tx+dx, Y=ty+dy, Z=tz+dz;
     if (!standable(X,Y,Z)) continue;
     if (!seesFrom(X,Y,Z, cell)) continue;
     cands.push([idx(X,Y,Z), r]);
-    if (cands.length>=8) break;
+    if (cands.length>=4) break;
   }
   let routed=false;
   for (const [goal] of cands.slice(0,3)) {
     const path = route(from, goal);
-    if (!path) continue;
+    if (!path || path.length > PATH_MAX) continue;
     routed=true;
     if (follow(path, 2.2) && lineTo(cell)) return true;
   }
@@ -269,6 +276,7 @@ function approach(cell) {
 }
 /* Would the block be in view from a standing position in this cell? */
 function seesFrom(x,y,z, cell){
+  stats.sightRays++;
   const [tx,ty,tz]=cellXYZ(cell);
   const ex=(x+0.5)*BLOCK, ey=y*BLOCK+EYE, ez=(z+0.5)*BLOCK;
   const ax=(tx+0.5)*BLOCK, ay=(ty+0.5)*BLOCK, az=(tz+0.5)*BLOCK;
@@ -284,16 +292,16 @@ function approachNum(cell) {
   const from=standCell();
   if (from<0) return false;
   const cands=[];
-  for (let r=1;r<=5;r++) for (let dy=-r;dy<=r;dy++) for (let dz=-r;dz<=r;dz++) for (let dx=-r;dx<=r;dx++) {
+  for (let r=1;r<=3;r++) for (let dy=-r;dy<=r;dy++) for (let dz=-r;dz<=r;dz++) for (let dx=-r;dx<=r;dx++) {
     if (Math.max(Math.abs(dx),Math.abs(dy),Math.abs(dz))!==r) continue;
     const X=tx+dx, Y=ty+dy, Z=tz+dz;
     if (!standable(X,Y,Z)) continue;
     cands.push([idx(X,Y,Z), r]);
-    if (cands.length>=8) break;
+    if (cands.length>=4) break;
   }
   for (const [goal] of cands.slice(0,3)) {
     const path=route(from, goal);
-    if (!path) continue;
+    if (!path || path.length > PATH_MAX) continue;
     if (follow(path, 2.2) && lineToNum(cell)) return true;
   }
   stats.noRoute++;
@@ -465,7 +473,7 @@ function playGame(diff, boss, label) {
   snapshotWorld();
   audit(label+' fresh');
 
-  let moves=0, peak=0, endWhy='ran out of steps';
+  let moves=0, peak=0, endWhy='ran out of steps', dry=0;
   const cap = Math.min(700, G.safeTotal*2 + 200);
   for (let step=0; step<cap; step++) {
     if (won()) { endWhy='finished'; break; }
@@ -482,11 +490,14 @@ function playGame(diff, boss, label) {
     if (chests.length && grabChests()) { moves++; audit(label+' chest'); }
     if (G.state!=='play') break;
 
-    let acted=false;
+    stats.steps++;
+    let acted=false, tries=0;
+    const TRIES=4;
     const A=analyse();
 
     /* 1. Flag every mine the board proves. That is what wins it. */
     for (const mv of nearestFirst(A.mines).filter(m=>!giveUp(m.cell)).slice(0,6)) {
+      if (tries++ >= TRIES) break;
       if (!approach(mv.cell)) { refuse(mv.cell); continue; }
       /* approach() already aimed at the point on this block it can actually
          see. Re-aiming at the geometric centre undoes that, and mark() casts
@@ -505,6 +516,7 @@ function playGame(diff, boss, label) {
     /* 2. Then clear blanks wholesale by chording a satisfied number. */
     stats.chordOffered += A.chords.length;
     if (!acted) for (const mv of nearestFirst(A.chords).filter(m=>!giveUp(m.cell)).slice(0,6)) {
+      if (tries++ >= TRIES) break;
       if (!approachNum(mv.cell)) { stats.chordNoAim++; refuse(mv.cell); continue; }
       const before=G.revealed;
       thinkAct(); stats.chords++; moves++; acted=true;
@@ -517,6 +529,7 @@ function playGame(diff, boss, label) {
 
     /* 3. A proven-safe block, if chording could not reach one. */
     if (!acted) for (const mv of nearestFirst(A.safes).filter(m=>!giveUp(m.cell)).slice(0,6)) {
+      if (tries++ >= TRIES) break;
       if (!approach(mv.cell)) { refuse(mv.cell); continue; }
       /* The solver said this block is safe. If it is not, that is either a
          wrong deduction or a shot that went somewhere other than where it was
@@ -533,6 +546,7 @@ function playGame(diff, boss, label) {
 
     /* 4. Only when nothing is provable: the nearest frontier block. */
     if (!acted) for (const mv of frontierGuess(new Set(A.mines.map(m=>m.cell)))) {
+      if (tries++ >= TRIES) break;
       if (!approach(mv.cell)) { refuse(mv.cell); continue; }
       const before=G.revealed;
       shoot(); stats.shots++; moves++; acted=true;
@@ -542,7 +556,13 @@ function playGame(diff, boss, label) {
       break;
     }
 
-    if (!acted) { stats.dugOut++; endWhy='nothing it could reach'; break; }
+    /* A step that achieved nothing means the four targets it tried were
+       unreachable, not that the board is finished. They are refused, so the
+       next step tries different ones. Only give up after a run of steps that
+       all came back empty. */
+    if (!acted) {
+      if (++dry >= 12) { stats.dugOut++; endWhy='nothing it could reach'; break; }
+    } else dry=0;
   }
   return {moves, peak, state:G.state, won:won(), why:endWhy};
 }
@@ -552,12 +572,15 @@ const t0=Date.now();
 let games=0, wins=0, totalMoves=0, deaths=0;
 const per={};
 const plan=[];
+if (/[?&]quick/.test(location.search)) { plan.push([4,true,'Dungeon']); }
+else {
 for (let d=0; d<3; d++) plan.push([d,false,DIFFS[d].name]);
 DIFFS[3].nx=20; DIFFS[3].nz=20; DIFFS[3].ny=5; DIFFS[3].dens=0.14;
 plan.push([3,false,'Custom-max']);
 DIFFS[3].nx=6;  DIFFS[3].nz=6;  DIFFS[3].ny=2; DIFFS[3].dens=0.30;
 plan.push([3,false,'Custom-min']);
 for (let k=0;k<2;k++) plan.push([4,true,'Dungeon']);
+}
 
 for (const [d,boss,label] of plan) {
   const r=playGame(d,boss,label);
@@ -584,6 +607,8 @@ log(`guessing: ${stats.guesses} times nothing was provable; the nearest frontier
     `— SAFE_GUESS=${SAFE_GUESS} means the bot dodged those rather than dying to them`);
 log(`actions: ${stats.shots} shots, ${stats.flags} flags, ${stats.chords} chords (${stats.chordDud} dud), ${stats.chests} chests, ${stats.noEffect} with no effect`);
 log(`combat: killed ${stats.killed}/${stats.shotAt} shots at foes, bot shot dead ${deaths}x`);
+log(`cost: ${stats.steps} steps, ${stats.ticks} physics ticks, ${stats.approaches} approaches, `+
+    `${stats.routes} routes (${stats.routeCells} cells expanded), ${stats.sightRays} sightline rays`);
 log(`buffers: worldB ${worldB.count}/${worldB.max}`);
 log(errCount ? `FAULTS: ${errCount} (${seen.size} distinct)` : 'FAULTS: none');
 for (const e of errs) log('  ! '+e);

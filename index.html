@@ -521,8 +521,11 @@ const V_LO    = Math.sqrt(2*GRAV*JUMP_LO);
 const MAX_JUMPS = 20;
 const COYOTE  = 0.12;   // grace after stepping off an edge
 const JUMP_BUF= 0.18;   // grace before touching down
-const SPD_RUN = 5.8;    // corrida de humano de 2 m
-const SPD_SPR = 8.2;
+/* 30% over a real 2 m human's run. The cave got a great deal bigger when the
+   dungeon landed — 72 m across and 96 m down — and honest human pace turned
+   crossing it into admin. */
+const SPD_RUN = 7.54;
+const SPD_SPR = 10.66;
 const REACH   = 13*BLOCK;
 const NUM_R   = 0.45;   // number hit radius: smaller than the glyph (~0.52),
                         // (see MARK_NUM_R for the tighter right-click radius)
@@ -1422,8 +1425,12 @@ function shapeDungeon(){
      its band, and that block is what the level above walks on. Carving the
      full band left holes in the floor over every chamber — 23 runs in 150
      started with the player standing on nothing. */
+  /* Exactly the field's own footprint, with no margin. The one-cell skirt this
+     used to carve was a corridor around the outside of every minefield, so you
+     could walk around the puzzle instead of through it and reach the way down
+     without opening a single block — measured on 34 of 40 boards. */
   const chamber=(cx,cz,rad,yb)=>
-    carve(cx-rad-1, cx+rad+1, cz-rad-1, cz+rad+1, yb, yb+DL_H-2);
+    carve(cx-rad, cx+rad, cz-rad, cz+rad, yb, yb+DL_H-2);
   /* The mass itself. Every column is 2 to 5 blocks tall and about one in six
      is missing altogether, which is what gives the top surface its steps and
      valleys and the sides their ragged outline. The mouth stays clear so you
@@ -1488,14 +1495,16 @@ function shapeDungeon(){
     chamber(zx,zz,rad,yb);
     run(ex,ez, mx,mz, yb, rnd()<0.5);
 
-    // the way down has to start clear of the minefield it shares a level with
-    sx=clampX(ri(2,G.nx-3)); sz=clampZ(ri(2,G.nz-3));
-    let guard=0;
-    while((Math.max(Math.abs(sx-zx),Math.abs(sz-zz)) <= rad+2 ||
-           Math.hypot(sx-ex,sz-ez) < 4) && guard++<80){
-      sx=clampX(ri(2,G.nx-3)); sz=clampZ(ri(2,G.nz-3));
-    }
-    run(ex,ez, sx,sz, yb, rnd()<0.5);
+    /* The way down goes BEHIND the minefield, on the far side from the mouth,
+       and the only corridor on this level is the one you came in by. That makes
+       the descent linear: you cannot walk around a field to the next level,
+       you have to get through or over the one in front of you first, and the
+       shaft is not even visible until you have opened your way to it. */
+    const away = (a,b)=> a + Math.sign(a-b || 1)*(rad+2);
+    sx = clampX(away(zx,mx)); sz = clampZ(away(zz,mz));
+    // a short ragged run from the far face of the field to the shaft head
+    run(clampX(zx + Math.sign(sx-zx)*rad), clampZ(zz + Math.sign(sz-zz)*rad),
+        sx, sz, yb, rnd()<0.5);
     /* Into the next band's floor, except above the arena, where the shaft
        stops at the chamber ceiling and lets you fall the rest of the way. */
     const yBot = (lv===DL_N-2) ? (G.ny - DL_H*DL_N) + DL_H - 2
@@ -2326,7 +2335,7 @@ function hitNumber(x,y,z){
     const X=x+dx,Y=y+dy,Z=z+dz;
     if(!inside(X,Y,Z)) continue;
     const j=idx(X,Y,Z);
-    if(G.st[j]===AIR) continue;
+    if(G.st[j]===AIR || G.st[j]===ROCK) continue;   // structure is not a neighbour
     if(G.st[j]===MARKED) marcadas++;
     else abrir.push([j,X,Y,Z]);
   }
@@ -2336,6 +2345,12 @@ function hitNumber(x,y,z){
   if(marcadas !== need || !abrir.length){
     /* The eye: for one second the number stops being a riddle and just tells
        you. Only worth spending on a number you have not finished. */
+    /* Only spend it on a number that can actually tell you something. It used
+       to count structure as a hidden neighbour, so the eye could fire on a
+       block face whose only unopened neighbours were indestructible wall: it
+       lit up rock, said nothing, and was gone. Combined with a right click
+       aimed at a block being taken by a number roughly a third of the time,
+       that is an eye that vanishes without the player ever seeing it work. */
     if(G.eye && abrir.length){
       G.eye=false; syncPowHud();
       G.numHit[idx(x,y,z)] = tGlobal;
