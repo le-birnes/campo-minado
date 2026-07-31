@@ -2487,11 +2487,17 @@ function hitNumber(x,y,z){
     if(G.eye && abrir.length){
       G.eye=false; syncPowHud();
       G.numHit[idx(x,y,z)] = tGlobal;
-      for(const [j] of abrir)
+      for(const [j] of abrir){
         setEcho(j, 1.0, G.mine[j] ? [1.0,0.16,0.12] : [0.25,1.0,0.40]);
+        /* Looking straight through the rock at them is not free. Anything the
+           eye names comes out at the top of the table when you flag it —
+           however quietly you had been working up to that point. 255 is past
+           every band, so it does not matter what the counter had. */
+        if(G.mine[j] && G.digAdj) G.digAdj[j] = 255;
+      }
       G.dirty=true; snd.fanfare();
       addS((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, 0,0,0, 2.4, 0.6, [1,0.9,0.5], T_GLOW, 0.8);
-      toast('The eye. Red is a mine, green is not — one second.', 2400);
+      toast('The eye. Red is a mine, green is not — and now they know.', 2600);
       return 0;
     }
     pingNumber(x,y,z); return 0;
@@ -2582,8 +2588,10 @@ function mark(hit){
   G.st[i] = wasFlag ? SOLID : MARKED;
   G.marked += wasFlag ? -1 : 1;
   G.dirty=true; snd.mark();
-  if(!wasFlag) hatchMine(i, hit.x, hit.y, hit.z);
-  if(!wasFlag) maybeSpawn(i, hit.x, hit.y, hit.z);
+  /* One flag, one arrival. If the mine itself came out, nothing else does —
+     the block is already spoken for. */
+  if(!wasFlag && !hatchMine(i, hit.x, hit.y, hit.z))
+    maybeSpawn(i, hit.x, hit.y, hit.z);
   checkWin();          // in the dungeon the last flag is the winning move
 }
 
@@ -3040,12 +3048,12 @@ function digSpawn(cell, x,y,z){
 /* Flagging a real mine in the dungeon opens it. What comes out is sized by the
    noise you made getting here; mark it cold and nothing does. */
 function hatchMine(cell, x,y,z){
-  if(!G.dungeon || G.state!=='play') return;
-  if(!G.mine[cell] || G.hatch[cell]) return;
+  if(!G.dungeon || G.state!=='play') return false;
+  if(!G.mine[cell] || G.hatch[cell]) return false;
   const T = mineTier(G.digAdj[cell]);
-  if(T.hp<=0) return;                       // found without disturbing it
+  if(T.hp<=0) return false;                 // found without disturbing it
   const e = spawnEnemy(FAM_MINE, 0, cell);
-  if(!e) return;
+  if(!e) return false;
   G.hatch[cell]=1; G.dirty=true;
   e.hp = e.maxhp = T.hp;
   e.first = true;
@@ -3060,6 +3068,7 @@ function hatchMine(cell, x,y,z){
     addP((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK,
          (rnd()-.5)*11,(rnd()-.5)*11,(rnd()-.5)*11, 0.3+rnd()*0.5, 0.8,
          MATS[G.mat[cell]].c, 0.4);
+  return true;
 }
 
 function maybeSpawn(cell, x,y,z){
