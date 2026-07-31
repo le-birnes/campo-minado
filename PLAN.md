@@ -1,15 +1,87 @@
 # Plan — pick up here on `/resume`
 
 Live: https://le-birnes.github.io/campo-minado/
-Bot demo: https://le-birnes.github.io/campo-minado/bot-demo.html
-Last commit: `057a9e9` — right click now shows what a number touches.
+Last commit: `b1663df` — retired `MARK_NUM_R` with the measurement that retires it.
 
-Everything below is **not started**. Ordered so each step is independently
-pushable, because the working agreement is to push after every change.
+Last session ended **mid-way through fixing the playtest bot**. Everything else
+is done, pushed and live.
 
 ---
 
-## 1. Difficulty rating by simulated player time — the main task
+## 1. Resume here: the playtest bot
+
+```
+python tools/mkbot.py index.html     # builds tools/bot_index.html
+python tools/runbot.py               # headless Chrome, prints the report
+```
+
+`tools/bot.js` is the bot. `tools/mkbot.py` injects a hook exposing the game's
+internals and appends the bot. `tools/run_harness.py` does the same for one-off
+measurement harnesses: `python tools/run_harness.py my.js`.
+
+### What was broken, and what is fixed
+
+| was | now |
+|---|---|
+| Routed through **any** air cell, six-connected — flying, not walking | models standing (`standable` / `stepTarget`): step up one block, fall any distance |
+| Held `IN.jumpHeld` without re-arming `jumpFired`, so it could jump exactly once, ever | `jumpNow()` re-arms; it climbs now (282 climbing jumps in one suite) |
+| Re-aimed at the block centre after `approach()` had found a sightline to an *offset* point, so `mark()` cast into whatever the centre faced | aim from `approach()` is kept |
+| **Could not chord at all** — left click stopped looking at numbers in the click rework, so `shoot()` can never chord. 0 chords in 833 actions, and nothing failed; the move was silently unavailable | flags and chords both go through the real right button: `startThink()` / `endThink()` |
+| Retried an impossible target forever — one Sorcerer board spent 694 of 700 moves on a single block | `refused` map, gives up after two |
+| Audit invariants predated ROCK and pre-carved air (`air === revealed`, `safeTotal === N - mines`) and fired on every Arcane and every dungeon | baseline air/rock snapshot; `revealed + openable === safeTotal` |
+| Guessed blind, died on move two, exercised nothing | `SAFE_GUESS = true` **deliberately**: it may see the mine array only when out of deductions, and it still records what the guess would have cost — 33% of the time the nearest frontier block was a mine |
+
+### Last measured state — before the refusal-memory fix landed
+
+```
+games=7 finished=2 actions=1763
+  Apprentice   finished           Sorcerer   ran out of steps (stuck on one cell)
+  Arcane       nothing reachable  Custom-max finished
+  Custom-min   died to a mine     Dungeon x2 nothing it could reach
+3641 m walked, 328 jumps (282 climbing)
+noRoute=459  stuck=29  boxedIn=3  fellOutOfWorld=0  insideRock=0
+FAULTS: 694 — all one cell, which is exactly what the refusal memory fixes
+```
+
+**The run with the refusal fix never finished. Start by running it.** Expect the
+694 faults to collapse to near zero.
+
+### Then chase, in order
+
+1. **`chords` is still 0.** `approachNum` needs the ray back as `kind:'num'`,
+   which needs the aim within `NUM_R` of the cell centre. Count how often
+   `approachNum` fails versus how often a chord is even available.
+2. **Dungeons end "nothing it could reach."** The structural audit proves every
+   mine is diggable-to from spawn, so this is the bot, not the level. Suspect
+   the candidate sightline search giving up too early, or the router failing to
+   cross a shaft.
+3. **`noRoute=459`** is the same question from the other end.
+
+### Out of scope for now
+
+The watchable demo (`bot-demo.html`, `mkdemo.py`) is untouched and still has
+every one of the old bugs — same flying router, same `shoot()`-to-chord that
+cannot work. Marcelo asked to suspend it until the playtest bot is right.
+
+---
+
+## 2. A finding that belongs to the game, not the bot
+
+**`MARK_NUM_R` is retired, not wired up.** It was written to stop numbers
+stealing right clicks aimed at the wall behind them, and was never passed to the
+raycast. Wiring it up changes nothing: measured A/B over 606 attempts, **32.7%
+stolen at the 0.45 glyph radius and 32.7% at 0.20**. Numbers sit at cell centres,
+so a ray aimed at a block several cells down a row passes through the centre of
+every number between here and there — the perpendicular distance is ~0 by
+construction, and no radius can help.
+
+A real fix separates the two actions **by range**, not by radius: chording is
+close work, flagging a wall down a row is not. That is a design change, so it
+waits for a decision.
+
+---
+
+## 3. Difficulty rating by simulated player time — still not started
 
 Marcelo's ask, in his words: *"simulate the bot and the possible shots once and
 determine difficulty by time a player would take to do the simulation in player
@@ -17,114 +89,54 @@ movement time"*, using *"matrixes and determinants to find position across
 interlacing dimensions; each matrix represents a slice of the world, IF
 NECESSARY"*.
 
-Read that as: **rate a board by how long a competent player would need to
-finish it**, measured in real movement seconds, not in clicks. The matrix idea
-is offered as a means, hedged with *if necessary* — so it is a tool to reach
-for only where it earns its place, not a requirement to satisfy.
+Read that as: **rate a board by how long a competent player would need**, and
+show it live on the Custom sliders. Travel time at `SPD_RUN`, jump penalties,
+aim time from sensitivity, a decision cost per deduction, and a penalty per
+forced guess.
 
-### What to actually build
+Honest note on the maths, carried forward from before: **determinants are not
+the tool here.** The useful linear-algebra object is the *rank* of the clue
+matrix (which mines are determined, and how many independent guesses remain).
+Layer-to-layer influence is a convolution, not a determinant. Say so rather than
+building something that looks impressive and measures nothing.
 
-A one-shot solve — no rendering, no real-time loop — that walks the board the
-way a player must and accumulates **seconds**:
-
-- **Travel time.** Distance along a route through opened cells, at `SPD_RUN`
-  (5.8 m/s), plus a jump penalty per layer change (a 4 m step needs a jump; use
-  the real apex maths already in the constants rather than a guess).
-- **Aim time.** Per shot, from angular distance between successive aim
-  directions, at a plausible human turn rate. Do not invent one — derive it
-  from `G.sens` and a normal mouse sweep, and write down the assumption.
-- **Decision time.** A flat cost per deduction, higher for the subset rule than
-  for the single-number rules, since a human takes longer to see it.
-- **Guess penalty.** When nothing is provable, charge the time a player spends
-  scanning before committing.
-
-Sum over the whole solve → seconds → difficulty band. Calibrate the bands from
-a spread of boards rather than picking numbers.
-
-### Where a matrix genuinely helps, and where it does not
-
-Worth saying plainly so this does not get over-built:
-
-- The board is already `y*nz*nx + z*nx + x` — a flat array with a linear index.
-  Position and neighbourhood need no linear algebra at all.
-- **Where it does earn its place:** treating each of the `ny` layers as its own
-  `nx × nz` matrix and asking *how much does layer k constrain layer k±1*. A
-  26-neighbour count is a convolution of the three adjacent layer matrices with
-  a 3×3 kernel. Expressing it that way makes "how interlaced are these planes"
-  a real, computable quantity — and interlacing is exactly what makes this game
-  harder than 2D minesweeper.
-- **Determinants specifically:** a determinant answers whether a linear system
-  has a unique solution. The honest application here is the classic minesweeper
-  formulation — each clue is a linear equation over unknown cells, `Ax = b`,
-  `x` in {0,1}. The **rank** of `A` tells you how much of the board is forced
-  and how much needs a guess. That is a genuinely good difficulty signal, and
-  it is rank rather than determinant that carries it (`A` is rarely square).
-  Build rank via Gaussian elimination over the clue matrix. If Marcelo
-  specifically wants determinants, use them on square sub-blocks and say what
-  they do and do not tell us.
-
-Do this second, after the time model works, and only report it if it adds
-signal the time model does not already carry.
-
-### Deliverable
-
-- Difficulty number shown on the menu next to the board description, e.g.
-  *"~4 min 20 s for a competent player · 3 forced guesses"*.
-- Custom boards get it live as the sliders move, so Marcelo can dial a board to
-  a target length. This is the real payoff of the whole feature.
+This now depends on the bot, which is the thing that would do the simulating.
 
 ---
 
-## 2. Finish the headless walking bot
+## 4. Open questions for Marcelo
 
-Known and unfixed, stated plainly at the time: it ends **boxed in on 7 of 8
-boards**. Its invariant audits pass on every action it takes, but passing
-audits is not the same as completing a board.
-
-Cause: `route()` treats every air cell as walkable, including ones with nothing
-underneath. The bot walks into a shaft and falls.
-
-Fix: BFS only through cells whose neighbour below is solid, allow a one-cell
-rise (a jump) and any drop, and let it fall deliberately when that is the route.
-Then re-run and expect boards to finish. Much of this logic is reusable by
-task 1 — the travel-time model needs the same route function, so build it once,
-properly, and share it.
-
----
-
-## 3. Open questions for Marcelo — ask before building, not after
-
-- **HUD.** "All except timer, mines left, safe blocks" was followed, but Life
-  was kept in Boss Master, since not knowing whether the next hit kills you is
-  not a design choice. Confirm or remove.
-- **Enemy fire setting off a mine ends the run** with no mistake by the player.
-  That follows directly from *"its shot has the same effect as yours"*, and the
-  test caught it happening. It is per spec but a harsh loss — deliberate?
-- **Right click steal rate.** Aiming at a wall block still loses 22% of right
-  clicks to a number on the line (down from 33%). Inherent to numbers sitting
-  at cell centres. Live with it, or move numbers off-centre toward the block
-  face they describe?
+1. **Arcane is 60 x 16 x 60 m**, not 60 x 15 x 60 — 15 m is not a whole number
+   of 4 m blocks. Fine, or reshape?
+2. **The Archon is 18.6% of all spawns** now that it gates on a 3 rather than a
+   6. That follows from the odds set, but it is frequent for a boss.
+3. **Apprentice at 6% opens 39% of the board on the first dig** (Sorcerer 7.7%,
+   Arcane 2.6%). Honest consequence of the rebalance, not a bug.
+4. **Life stays in Boss Master** despite the HUD being cut back, since not
+   knowing whether the next hit kills you is not a design choice. Confirm.
+5. **An enemy shot setting off a mine ends the run** with no mistake by the
+   player. Per spec, but harsh — deliberate?
+6. Nothing has **played a dungeon start to finish**. That is what the bot is for.
 
 ---
 
-## 4. Smaller things already noted
+## 5. Smaller things
 
 - Repo is still `campo-minado`; the URL is Portuguese for an English game.
   Renaming redirects the old path, so nothing breaks — Marcelo's call.
 - First commit message is still Portuguese.
-- `README.md` predates the Win95 pass, custom boards, Boss Master, music and
-  the spatial hints. It is the launch post, so it should be rewritten before
-  the game is shown anywhere.
 
 ---
 
 ## Working agreement
 
 - **Push after every change.** Do not batch. Marcelo watches the live site.
-- When polling GitHub Pages, grep for a marker unique to the *newest* commit —
-  polling for an older marker reports success too early. This already caused
-  one false "deployed" call.
-- Verify by measuring, not by reasoning about the code. Every real bug this
-  session — the mine-counter desync, the moiré, the right-click steal rate —
-  came from a test that counted something. Three "bugs" the bot reported were
-  the bot's own, caught only by probing rather than trusting its output.
+- When polling GitHub Pages, grep for a marker unique to the *newest* commit.
+  Polling for an older marker reports success too early — it has already caused
+  one false "deployed", and nearly a second one this session.
+- The working copy is CRLF and git stores LF, so a byte-compare against the live
+  site must be against `git show HEAD:index.html`, not the file on disk.
+- **Verify by measuring, not by reasoning about the code.** Every real bug has
+  come from counting something. So has every false alarm: this session alone,
+  three "failures" were the harness measuring a ceiling instead of a jump, and
+  one was a screenshot script clearing the very cell it was about to test.
