@@ -715,6 +715,14 @@ void main(){
      and not as one continuous tube. */
   float down = max(-N.y, 0.0);
   base = mix(base, base * vec3(0.62, 0.66, 0.78), down * 0.55 * uWallGrey);
+  /* And the ground comes forward, warm, so the three surfaces of a corridor
+     are three different colours rather than one: floor warm, wall neutral
+     grey, roof cool and dark. Brightness alone was not doing it — the eye
+     reads a change of hue at a corner far more readily than a change of
+     value, especially under banded cel lighting where a whole face is one
+     flat tone. */
+  float up = max(N.y, 0.0);
+  base = mix(base, base * vec3(1.16, 1.00, 0.82), up * 0.50 * uWallGrey);
 
   /* --- luz em degraus (cel) --- */
   float ndl  = max(dot(N, uSun), 0.0);
