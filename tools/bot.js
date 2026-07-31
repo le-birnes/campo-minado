@@ -464,9 +464,9 @@ const won = () => G.dungeon
   : G.revealed>=G.safeTotal;
 
 /* ---------------- one game, played on foot ---------------- */
-function playGame(diff, boss, label) {
+function playGame(diff, mode, label) {
+  G.mode = mode;
   genWorld(diff);
-  if (boss) G.boss = true;
   G.state='play';
   IN.f=IN.b=IN.l=IN.r=0; IN.jumpHeld=false; IN.jumpFired=false; IN.sprint=false;
   stats.gaveUp += refused.size;      // carry it across games before resetting
@@ -579,18 +579,19 @@ const plan=[];
 /* Apprentice first, always. It is 10 x 10 x 3 = 300 cells against the
    dungeon's 7776, so it answers "is the game broken" in seconds instead of
    tens of minutes. Only go to the big boards once the small one is clean. */
-if (/[?&]quick/.test(location.search)) { plan.push([0,false,'Apprentice']); }
+if (/[?&]quick/.test(location.search)) { plan.push([0,0,'Apprentice']); }
 else {
-for (let d=0; d<3; d++) plan.push([d,false,DIFFS[d].name]);
+for (let d=0; d<3; d++) plan.push([d,0,DIFFS[d].name]);
 DIFFS[3].nx=20; DIFFS[3].nz=20; DIFFS[3].ny=5; DIFFS[3].dens=0.14;
-plan.push([3,false,'Custom-max']);
+plan.push([3,0,'Custom-max']);
 DIFFS[3].nx=6;  DIFFS[3].nz=6;  DIFFS[3].ny=2; DIFFS[3].dens=0.30;
-plan.push([3,false,'Custom-min']);
-for (let k=0;k<2;k++) plan.push([4,true,'Dungeon']);
+plan.push([3,0,'Custom-min']);
+/* the dungeon is a MODE now, not a fifth difficulty */
+for (let k=0;k<2;k++) plan.push([0,1,'Dungeon']);
 }
 
-for (const [d,boss,label] of plan) {
-  const r=playGame(d,boss,label);
+for (const [d,mode,label] of plan) {
+  const r=playGame(d,mode,label);
   games++; totalMoves+=r.moves;
   document.body.dataset.r = `... ${games}/${plan.length} games, ${totalMoves} actions, faults ${errCount}`;
   if (r.won) wins++;

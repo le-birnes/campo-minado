@@ -372,13 +372,13 @@ body.touch.portrait #rotate{display:grid;}
         <button data-d="1">Sorcerer</button>
         <button data-d="2">Arcane</button>
         <button data-d="3">Custom</button>
-        <button data-d="4">Boss Master</button>
+      </div>
+
+      <div class="diffs" role="group" aria-label="Mode" style="margin-top:8px">
+        <button data-m="0" class="sel">3D Minesweeper</button>
+        <button data-m="1">Dungeon Mode</button>
       </div>
       <p class="diffnote" id="dNote"></p>
-
-      <!-- boss rules are a switch, not a mode: they ride on any difficulty -->
-      <div class="opt"><label class="chk" for="cbo"><input type="checkbox" id="cbo">Boss
-        rules — things come out of the blocks you flag</label></div>
 
       <!-- only shown when Custom is the chosen difficulty -->
       <div id="customBox">
@@ -547,18 +547,26 @@ const FUSE_T  = 0.85;   // the hit mine glows before taking everything
 /* Mine density has a floor: with 26 neighbors, P(zero block) = (1-d)^26,
    and site percolation at that coordination turns over near 9.8%. Below
    ~10% mines the first shot opens the entire cave in one go. */
-/* `boss` is mutable on every entry — it is a rule you switch on, not a mode
-   you have to go to. The dungeon is the one place it cannot be switched off. */
+/* Two independent choices. WHICH BOARD — three difficulties plus Custom — and
+   WHICH GAME: 3D Minesweeper, which is the puzzle and nothing else, or Dungeon
+   Mode, which is the descent with things living in it.
+
+   3D Minesweeper spawns no enemies at all. That is the point of having two
+   modes rather than a switch: one of them is a pure puzzle you can think in.
+   All three difficulties share one dungeon for now; per-difficulty dungeons
+   come later. */
 const DIFFS = [
-  {name:"Apprentice", nx:10, nz:10, ny:3, dens:0.06, boss:false},
-  {name:"Sorcerer",   nx:12, nz:12, ny:3, dens:0.11, boss:false},
+  {name:"Apprentice", nx:10, nz:10, ny:3, dens:0.06},
+  {name:"Sorcerer",   nx:12, nz:12, ny:3, dens:0.11},
   // Arcane is not just denser: it is the one arena with a shape.
-  {name:"Arcane",     nx:15, nz:15, ny:4, dens:0.20, rough:true, boss:false},
+  {name:"Arcane",     nx:15, nz:15, ny:4, dens:0.20, rough:true},
   // mutable: the menu sliders write straight into this one
-  {name:"Custom",     nx:12, nz:12, ny:3, dens:0.130, custom:true, boss:false},
-  {name:"Boss Master",nx:18, nz:18, ny:24, dens:0, dungeon:true, boss:true}
+  {name:"Custom",     nx:12, nz:12, ny:3, dens:0.130, custom:true}
 ];
-const CUSTOM = 3, BOSS = 4;
+const CUSTOM = 3;
+/* The dungeon's own geometry, used whichever difficulty picked it. */
+const DUNGEON = {nx:18, nz:18, ny:24, dungeon:true};
+const MODE_SWEEP = 0, MODE_DUNGEON = 1;
 /* Every quoted figure in the level design — how much of Arcane is structure,
    how many mines a dungeon zone holds — is a target with a fifth of slack, not
    a wall. Generators that have to land exactly on a number either retry
@@ -1277,7 +1285,7 @@ const G = {
   arrows:true, muted:false, sens:0.0014, invY:false,
   dirty:true, cells:null,
   hint:null, hints:0, beacon:null, ghost:[], hintArrow:null,
-  boss:false, dungeon:false, flagsPlaced:0, kills:0, deathBy:'mine',
+  mode:MODE_SWEEP, boss:false, dungeon:false, flagsPlaced:0, kills:0, deathBy:'mine',
   safeShot:false, eye:false,
   musVol:25, musMuted:false, best:{},
   boom:0, win:false, shake:0, slowmo:1, fuse:0, boomCell:null
@@ -1582,7 +1590,11 @@ function shapeDungeon(){
 }
 
 function genWorld(d){
-  const D = DIFFS[d];
+  /* The dungeon brings its own dimensions; the difficulty only chooses the
+     board when you are playing the plain puzzle. When the dungeon learns to
+     differ per difficulty, this is the one line that changes. */
+  const dung = G.mode===MODE_DUNGEON;
+  const D = dung ? DUNGEON : DIFFS[d];
   G.diff=d; G.nx=D.nx; G.nz=D.nz; G.ny=D.ny;
   const N = G.nx*G.ny*G.nz;
   G.mine=new Uint8Array(N); G.cnt=new Uint8Array(N);
@@ -1595,8 +1607,8 @@ function genWorld(d){
   G.rockCount=0;
   for(let i=0;i<N;i++) G.mat[i] = (rnd()<0.055) ? 4 : (rnd()*4)|0;
 
-  G.dungeon = !!D.dungeon;
-  const L = D.dungeon ? shapeDungeon() : (D.rough ? shapeRough(D) : shapeArena(D));
+  G.dungeon = dung;
+  const L = dung ? shapeDungeon() : (D.rough ? shapeRough(D) : shapeArena(D));
   G.shafts = L.shafts;
   const safe = L.safe;
 
@@ -1651,7 +1663,8 @@ function genWorld(d){
   G.revealed=0; G.marked=0; G.gold=0; G.win=false; G.boom=0; G.slowmo=1; G.shake=0;
   G.fuse=0; G.boomCell=null;
   G.elapsed=0; G.t0=performance.now();
-  G.boss = !!D.boss; G.flagsPlaced=0; G.kills=0; G.deathBy='mine';
+  /* Only the dungeon has anything living in it. */
+  G.boss = dung; G.flagsPlaced=0; G.kills=0; G.deathBy='mine';
   enemies.length=0; eshots.length=0;
   P.hp = 4; P.hurtT = 0;   // counted in halves
 
@@ -2787,7 +2800,7 @@ function askHint(){
 }
 
 /* ==========================================================================
-   12c. BOSS MASTER — the things that come out of the blocks you flag
+   12c. DUNGEON MODE — the things that live down there
    ========================================================================== */
 const enemies=[], eshots=[];
 
@@ -3393,7 +3406,8 @@ function fmtTime(sec){
 }
 function bestKey(){
   const D=DIFFS[G.diff];
-  return G.diff===CUSTOM ? `c${D.nx}x${D.ny}x${D.nz}@${Math.round(D.dens*100)}${D.boss?'b':''}` : 'd'+G.diff;
+  const m = G.mode===MODE_DUNGEON ? 'g' : 's';
+  return m + (G.diff===CUSTOM ? `c${D.nx}x${D.ny}x${D.nz}@${Math.round(D.dens*100)}` : 'd'+G.diff);
 }
 function setScreen(s){
   G.state=s;
@@ -3427,23 +3441,22 @@ function updateHUD(){
   }
 }
 function updateDiffNote(){
+  if(G.mode===MODE_DUNGEON){
+    $('dNote').textContent =
+      `A descent, generated fresh every run · ${DL_N} levels down a ${DUNGEON.ny*BLOCK} m shaft · ` +
+      `three dead-end minefields and an arena you fall into · things live down here · ` +
+      `flag every mine to get out`;
+    return;
+  }
   const D=DIFFS[G.diff], n=D.nx*D.ny*D.nz;
-  const boss = (D.boss ? ' · they come out of the blocks you flag' : '');
   /* Arcane's structure eats 15%-30% of the box, and its mines are measured
      against the blocks that survive it — so quoting a count off the bounding
      box would be a lie by about a quarter. */
-  if(D.dungeon){
-    $('dNote').textContent =
-      `A descent, generated fresh every run · ${DL_N} levels down a ${D.ny*BLOCK} m shaft · ` +
-      `three dead-end minefields of 10–15 mines and an arena of 20 you fall into · ` +
-      `flag every mine to get out${boss}`;
-    return;
-  }
   const shaped = D.rough
     ? `${D.nx} × ${D.ny} × ${D.nz} with 15–30% solid structure · ${(D.dens*100).toFixed(0)}% of the remaining blocks are mines`
     : `${D.nx} × ${D.ny} × ${D.nz} = ${n} blocks · ${Math.round(n*D.dens)} mines (${(D.dens*100).toFixed(1)}%)`;
   $('dNote').textContent =
-    `${shaped} · cave ${D.nx*BLOCK} × ${D.ny*BLOCK} × ${D.nz*BLOCK} m${boss}`;
+    `${shaped} · cave ${D.nx*BLOCK} × ${D.ny*BLOCK} × ${D.nz*BLOCK} m · nothing lives here`;
 }
 /* Custom writes straight into its DIFFS entry, so genWorld needs no special
    case at all — it is just another difficulty whose numbers you picked. */
@@ -3454,12 +3467,13 @@ function syncCustom(){
   $('cny').value=D.ny; $('cnyV').textContent=D.ny;
   const pct=Math.round(D.dens*100);
   $('cde').value=pct; $('cdeV').textContent=pct+'%';
-  /* The boss switch belongs to whichever difficulty is selected, not to
-     Custom. Boss Master is the one board that cannot turn it off. */
-  const forced = G.diff===BOSS;
-  $('cbo').checked  = forced || !!DIFFS[G.diff].boss;
-  $('cbo').disabled = forced;
-  $('customBox').classList.toggle('on', G.diff===CUSTOM);
+  /* Custom is a board you dimension yourself, so its sliders only mean
+     anything in the plain puzzle: the dungeon brings its own geometry. */
+  $('customBox').classList.toggle('on', G.diff===CUSTOM && G.mode===MODE_SWEEP);
+  document.querySelectorAll('.diffs [data-m]').forEach(
+    b => b.classList.toggle('sel', +b.dataset.m === G.mode));
+  document.querySelectorAll('.diffs [data-d]').forEach(
+    b => b.classList.toggle('sel', +b.dataset.d === G.diff));
   /* Below about 10% the first flood fill opens the whole cave at once — the
      percolation threshold at 26 neighbors. Their board, their call, but they
      should know before they press start. */
@@ -3479,11 +3493,6 @@ function bindCustom(id, key, fmt){
   });
 }
 bindCustom('cnx','nx'); bindCustom('cnz','nz'); bindCustom('cny','ny'); bindCustom('cde','dens');
-$('cbo').addEventListener('change', e=>{
-  if(G.diff===BOSS){ e.target.checked=true; return; }   // the dungeon keeps them
-  DIFFS[G.diff].boss = e.target.checked;
-  updateDiffNote(); syncCustom();
-});
 $('mus').addEventListener('input',  e=>syncMusic(+e.target.value, null));
 $('mus2').addEventListener('input', e=>syncMusic(+e.target.value, null));
 $('btnMusic').addEventListener('click',  ()=>syncMusic(null, !G.musMuted));
@@ -3491,6 +3500,13 @@ $('btnMusic2').addEventListener('click', ()=>syncMusic(null, !G.musMuted));
 $('btnArrows2').addEventListener('click', ()=>{ G.arrows=!G.arrows; syncToggles(); });
 $('btnSound2').addEventListener('click', ()=>{ G.muted=!G.muted; snd.setMute(G.muted); syncToggles(); });
 
+document.querySelectorAll('.diffs [data-m]').forEach(b=>{
+  b.addEventListener('click', ()=>{
+    document.querySelectorAll('.diffs [data-m]').forEach(o=>o.classList.remove('sel'));
+    b.classList.add('sel'); G.mode = +b.dataset.m;
+    updateDiffNote(); syncCustom();
+  });
+});
 document.querySelectorAll('.diffs [data-d]').forEach(b=>{
   b.addEventListener('click', ()=>{
     document.querySelectorAll('.diffs [data-d]').forEach(o=>o.classList.remove('sel'));
@@ -3507,8 +3523,8 @@ function saveCfg(){
   try{ localStorage.setItem('campominado3d', JSON.stringify({
     s:+$('sens').value, i:G.invY, mv:G.musVol, mm:G.musMuted,
     cu:{nx:DIFFS[CUSTOM].nx, nz:DIFFS[CUSTOM].nz, ny:DIFFS[CUSTOM].ny,
-        dens:DIFFS[CUSTOM].dens, boss:DIFFS[CUSTOM].boss},
-    bo:DIFFS.map(D=>!!D.boss),      // the switch, remembered per difficulty
+        dens:DIFFS[CUSTOM].dens},
+    md:G.mode,
     best:G.best
   })); }catch(e){}
 }
@@ -3552,10 +3568,8 @@ function loadCfg(){
     const u=c.cu, D=DIFFS[CUSTOM];
     D.nx=clampI(u.nx,LIM.nx); D.nz=clampI(u.nz,LIM.nz); D.ny=clampI(u.ny,LIM.ny);
     D.dens=Math.max(LIM.dens[0],Math.min(LIM.dens[1],Math.round((u.dens||0.13)*100)))/100;
-    D.boss=!!u.boss;
   }
-  if(c && Array.isArray(c.bo))
-    DIFFS.forEach((D,i)=>{ if(i!==BOSS) D.boss = !!c.bo[i]; });
+  if(c && (c.md===MODE_SWEEP || c.md===MODE_DUNGEON)) G.mode=c.md;
   if(c && c.best) G.best = c.best;
   syncMusic(c && typeof c.mv==='number' ? c.mv : 25, c ? !!c.mm : false);
   syncCustom();
@@ -3570,7 +3584,7 @@ $('inv2').addEventListener('change', e=>syncInv(e.target.checked));
    you build to sit and think on. */
 function themeFor(d){
   if(d===CUSTOM) return null;
-  return d===BOSS ? 3 : d;
+  return G.mode===MODE_DUNGEON ? 3 : d;
 }
 function startGame(){
   if(TOUCH){

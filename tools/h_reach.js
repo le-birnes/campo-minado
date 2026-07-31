@@ -25,7 +25,7 @@ setTimeout(()=>{ try{
      the search? Take frontier blocks on a partly-dug board and ask, for each,
      whether ANY standable cell in the whole world can see it — then whether one
      exists inside the radius the bot actually searches. */
-  for(const [diff,label] of [[2,'Arcane'],[BOSS,'Dungeon']]){
+  for(const [diff,label] of [[2,'Arcane'],[0,'Dungeon']]){
     let tot=0, anywhere=0, withinR=0, standNear=0, noStandAtAll=0;
     const radHist={};
     for(let b=0;b<2;b++){

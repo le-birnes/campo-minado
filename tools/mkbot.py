@@ -12,6 +12,7 @@ assert s.count(OLD) == 1, 'anchor not found in ' + src
 HOOK = """requestAnimationFrame(frame);
 window.__T = {
   G, P, BLOCK, EYE, P_H, DIFFS, MARKED, SOLID, AIR, ROCK, MAX_JUMPS,
+  MODE_SWEEP, MODE_DUNGEON, DUNGEON,
   chests, rayChest, correctFlags, canJump, startJump,
   startThink, endThink, snd,
   genWorld, revealAt, idx, inside, isSolidCell, raycast, checkWin,
