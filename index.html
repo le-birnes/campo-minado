@@ -792,14 +792,26 @@ layout(location=1) in vec3 iPos;
 layout(location=2) in vec2 iSize;
 layout(location=3) in vec4 iUV;
 layout(location=4) in vec4 iColor;
-layout(location=5) in vec2 iRM;
+layout(location=5) in vec3 iRM;
 uniform mat4 uProj, uView;
 uniform vec3 uRight, uUp;
 out vec2 vUV; out vec4 vCol; out float vMode;
 void main(){
   float c = cos(iRM.x), s = sin(iRM.x);
   vec2 p = vec2(aCorner.x*c - aCorner.y*s, aCorner.x*s + aCorner.y*c) * iSize;
-  vec3 wp = iPos + uRight*p.x + uUp*p.y;
+  /* iRM.z: 0 means face the camera, like everything else here. 1..6 lock the
+     quad flat against one of a cube's six faces, so a mark drawn ON a block
+     stays on it — a camera-facing quad offset to a face swings as you walk
+     around it and slices into the block it is supposed to be painted on. */
+  vec3 R = uRight, U = uUp;
+  int f = int(iRM.z + 0.5);
+  if      (f==1){ R = vec3(0.0,0.0,-1.0); U = vec3(0.0,1.0,0.0); }   // +X
+  else if (f==2){ R = vec3(0.0,0.0, 1.0); U = vec3(0.0,1.0,0.0); }   // -X
+  else if (f==3){ R = vec3(1.0,0.0, 0.0); U = vec3(0.0,0.0,1.0); }   // +Y
+  else if (f==4){ R = vec3(1.0,0.0, 0.0); U = vec3(0.0,0.0,-1.0); }  // -Y
+  else if (f==5){ R = vec3(1.0,0.0, 0.0); U = vec3(0.0,1.0,0.0); }   // +Z
+  else if (f==6){ R = vec3(-1.0,0.0,0.0); U = vec3(0.0,1.0,0.0); }   // -Z
+  vec3 wp = iPos + R*p.x + U*p.y;
   vec2 t = aCorner + 0.5;
   vUV = mix(iUV.xy, iUV.zw, t);
   vCol = iColor; vMode = iRM.y;
@@ -903,7 +915,7 @@ function drawCubes(b){
   gl.bindVertexArray(null);
 }
 
-const BB_STRIDE = 15; // pos3 size2 uv4 col4 rm2
+const BB_STRIDE = 16; // pos3 size2 uv4 col4 rot+mode+face3
 function makeBBBatch(max){
   const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
   const q = new Float32Array([-0.5,-0.5, 0.5,-0.5, 0.5,0.5, -0.5,-0.5, 0.5,0.5, -0.5,0.5]);
@@ -917,7 +929,7 @@ function makeBBBatch(max){
   gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2,2,gl.FLOAT,false,S,12); gl.vertexAttribDivisor(2,1);
   gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3,4,gl.FLOAT,false,S,20); gl.vertexAttribDivisor(3,1);
   gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4,4,gl.FLOAT,false,S,36); gl.vertexAttribDivisor(4,1);
-  gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5,2,gl.FLOAT,false,S,52); gl.vertexAttribDivisor(5,1);
+  gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5,3,gl.FLOAT,false,S,52); gl.vertexAttribDivisor(5,1);
   gl.bindVertexArray(null);
   return {vao, inst, data:new Float32Array(max*BB_STRIDE), max, count:0};
 }
@@ -4069,13 +4081,13 @@ function frame(now){
   litNums.length=0;
   {
     const d=glyphB.data; let n=0;
-    const put=(x,y,z,sw,sh,tile,col,a,rot)=>{
+    const put=(x,y,z,sw,sh,tile,col,a,rot,face)=>{
       if(n>=glyphB.max) return;
       const o=n*BB_STRIDE, uv=UVS[tile];
       d[o]=x; d[o+1]=y; d[o+2]=z; d[o+3]=sw; d[o+4]=sh;
       d[o+5]=uv[0]; d[o+6]=uv[1]; d[o+7]=uv[2]; d[o+8]=uv[3];
       d[o+9]=col[0]; d[o+10]=col[1]; d[o+11]=col[2]; d[o+12]=a;
-      d[o+13]=rot||0; d[o+14]=0;
+      d[o+13]=rot||0; d[o+14]=0; d[o+15]=face||0;
       n++;
     };
     if(G.st && G.state!=='menu'){
@@ -4090,17 +4102,31 @@ function frame(now){
           /* A cracked block wears its fracture on the face you are looking
              at. Which of the two it is depends on what is underneath — that is
              the whole point of it. */
+          /* The fracture is painted on the stone, so it is locked flat to a
+             face and does not turn with the camera. It used to be a
+             camera-facing quad nudged out to whichever face was nearest, which
+             meant walking around the block spun the crack and drove half of it
+             back inside the block.
+             Only faces that are actually open get one — a crack drawn on a
+             face buried against its neighbour is hidden anyway, and picking a
+             buried face is what put it inside the rock. */
           if(G.crack && G.crack[i] && G.st[i]===SOLID && G.state==='play'){
             const dcam=Math.hypot(cx-camX, cy-camY, cz-camZ);
             if(dcam<=34){
-              const fx=camX-cx, fy=camY-cy, fz=camZ-cz;
-              const ax=Math.abs(fx), ay=Math.abs(fy), az=Math.abs(fz);
-              const off = BLOCK*0.5 + 0.06;
-              put((ax>=ay&&ax>=az) ? cx+Math.sign(fx)*off : cx,
-                  (ay>ax&&ay>=az)  ? cy+Math.sign(fy)*off : cy,
-                  (az>ax&&az>ay)   ? cz+Math.sign(fz)*off : cz,
-                  2.5,2.5, G.mine[i]?T_CRACK_A:T_CRACK_B,
-                  [0.16,0.12,0.11], clamp(1.30-dcam/30,0.45,1), 0);
+              const off = BLOCK*0.5 + 0.05;
+              const tile = G.mine[i]?T_CRACK_A:T_CRACK_B;
+              const col=[0.16,0.12,0.11], al=clamp(1.30-dcam/30,0.45,1);
+              /* +X -X +Y -Y +Z -Z, matching the face codes the shader knows */
+              const FACES=[[1,0,0,1],[-1,0,0,2],[0,1,0,3],[0,-1,0,4],[0,0,1,5],[0,0,-1,6]];
+              let bestD=-1e9, bx=0,by=0,bz=0,bf=0;
+              for(const [ox,oy,oz,code] of FACES){
+                const X=x+ox, Y=y+oy, Z=z+oz;
+                if(inside(X,Y,Z) && G.st[idx(X,Y,Z)]!==AIR) continue;   // buried
+                // the open face most turned toward the eye
+                const d = ox*(camX-cx) + oy*(camY-cy) + oz*(camZ-cz);
+                if(d>bestD){ bestD=d; bx=ox; by=oy; bz=oz; bf=code; }
+              }
+              if(bf) put(cx+bx*off, cy+by*off, cz+bz*off, 2.5,2.5, tile, col, al, 0, bf);
             }
           }
           if(G.st[i]===MARKED && G.state==='play'){
@@ -4189,7 +4215,7 @@ function frame(now){
       d[o]=x; d[o+1]=y; d[o+2]=z; d[o+3]=s; d[o+4]=s;
       d[o+5]=uv[0]; d[o+6]=uv[1]; d[o+7]=uv[2]; d[o+8]=uv[3];
       d[o+9]=col[0]; d[o+10]=col[1]; d[o+11]=col[2]; d[o+12]=a;
-      d[o+13]=0; d[o+14]=1;
+      d[o+13]=0; d[o+14]=1; d[o+15]=0;
       n++;
     };
     for(const s of sprites){
@@ -4271,7 +4297,7 @@ function frame(now){
       d[0]=bcx; d[1]=bcy; d[2]=bcz; d[3]=sz; d[4]=sz;
       d[5]=uv[0]; d[6]=uv[1]; d[7]=uv[2]; d[8]=uv[3];
       d[9]=col[0]; d[10]=col[1]; d[11]=col[2]; d[12]=a;
-      d[13]=0; d[14]=mode; boomB.count=1;
+      d[13]=0; d[14]=mode; d[15]=0; boomB.count=1;
     };
     gl.enable(gl.BLEND); gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.CULL_FACE); gl.depthMask(false);
