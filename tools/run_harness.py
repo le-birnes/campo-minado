@@ -169,7 +169,7 @@ def main():
 
     reap()
     out = os.path.join(HERE, "t_run.html")
-    build(harness, out)
+    build(harness, out, render=bool(shot))
     res, secs, bad = run(out, budget, shot, size, cap)
     print("[%.1fs]" % secs)
     for part in res.split(" | "):

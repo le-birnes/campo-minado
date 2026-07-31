@@ -1169,7 +1169,7 @@ const BEDCRYST  = [0.62,0.66,0.78];
    moved. Variant III holds for 0.42 s, which in practice means it hits you
    unless you are already moving when it fires. Variant I holds for 3 s, so it
    only ever catches someone who has stopped to think. */
-const FAM_FLAG=0, FAM_ORB=1, FAM_SLUG=2, FAM_FINAL=3, FAM_MINE=4;
+const FAM_FLAG=0, FAM_ORB=1, FAM_SLUG=2, FAM_FINAL=3, FAM_MINE=4, FAM_HELL=5;
 const EN_MAX   = 22;    // live enemies at once
 const EN_PARTS = 16;    // most cubes any one body is built from
 const ESHOT_SPD = 34;   // m/s — fast, but the lock is the real threat
@@ -1204,7 +1204,9 @@ const FAMS = [
   {fam:FAM_SLUG,  name:'Creeper',   col:[0.50,0.94,0.34], r:1.90, speed:1.5, range:40},
   {fam:FAM_FINAL, name:'Archon',    col:[0.82,0.40,1.00], r:1.15, speed:3.4, range:56},
   // the thing that was in the block all along
-  {fam:FAM_MINE,  name:'Mine',      col:[0.10,0.10,0.12], r:1.20, speed:2.8, range:50}
+  {fam:FAM_MINE,  name:'Mine',      col:[0.10,0.10,0.12], r:1.20, speed:2.8, range:50},
+  // what is waiting when the last flag goes down
+  {fam:FAM_HELL,  name:'Hell',      col:[0.72,0.16,0.12], r:2.30, speed:3.0, range:64}
 ];
 /* saturation pulls the family hue toward gray for the lesser variants, so you
    can read what is about to shoot you from across the cave */
@@ -1276,6 +1278,43 @@ function bodyOf(T){
               add(-2.00,-0.10,0, 0.44,0.30,0.60, dark,0);
               add( 2.10,-0.10,0, 0.34,0.26,0.50, dark,0); }
   }
+  else if(T.fam===FAM_HELL){
+    /* One of three shapes, chosen per creature. Cubes, like everything else in
+       this game — an homage built from scratch, never a sprite lifted. */
+    const sil = T.sil|0;
+    const horn = [0.88,0.86,0.80], eye = [1.0,0.86,0.20];
+    if(sil===1){                                   // floats: a head and nothing else
+      add(0,0,0,       2.10,1.90,2.00, c, 0);
+      add(0,0,0,       2.30,1.30,1.60, c, 0);
+      add(0,0.05,0.98, 0.78,0.78,0.22, eye, 1);
+      add(0,-0.62,0.92,1.50,0.42,0.26, [0.10,0.06,0.06], 0);
+      add(-0.95,0.78,0.10, 0.60,0.34,0.30, horn, 0);
+      add( 0.95,0.78,0.10, 0.60,0.34,0.30, horn, 0);
+    } else if(sil===2){                            // on legs
+      add(0,0.30,0,    2.20,1.10,1.90, c, 0);
+      add(0,0.86,0.40, 1.10,0.62,0.80, c, 0);
+      add(-0.34,0.92,0.86, 0.24,0.24,0.20, eye, 1);
+      add( 0.34,0.92,0.86, 0.24,0.24,0.20, eye, 1);
+      for(const sg of [-1,1]) for(const sz2 of [-1,0,1]){
+        add(sg*1.15, -0.35, sz2*0.80, 0.20,1.20,0.20, [0.55,0.53,0.50], 0);
+        add(sg*1.30, -0.95, sz2*0.80, 0.18,0.60,0.18, [0.55,0.53,0.50], 0);
+      }
+      add(0,0.10,1.05,  0.46,0.46,0.70, [0.40,0.38,0.36], 0);
+    } else {                                       // walks
+      add(0,-1.30,0,   1.40,0.36,1.10, [0.16,0.12,0.11], 0);
+      add(-0.42,-0.72,0, 0.44,0.90,0.44, c, 0);
+      add( 0.42,-0.72,0, 0.44,0.90,0.44, c, 0);
+      add(0,0.15,0,    1.55,1.30,0.95, c, 0);
+      add(-0.98,0.30,0, 0.42,1.10,0.42, c, 0);
+      add( 0.98,0.30,0, 0.42,1.10,0.42, c, 0);
+      add(0,1.05,0,    0.90,0.72,0.80, c, 0);
+      add(-0.26,1.10,0.42, 0.18,0.18,0.16, eye, 1);
+      add( 0.26,1.10,0.42, 0.18,0.18,0.16, eye, 1);
+      add(-0.52,1.42,0, 0.44,0.40,0.22, horn, 0);
+      add( 0.52,1.42,0, 0.44,0.40,0.22, horn, 0);
+      if(d>=1) add(1.15,0.30,0.35, 0.52,0.52,0.90, [0.42,0.40,0.38], 0);
+    }
+  }
   else if(T.fam===FAM_MINE){
     /* Round, out of cubes: a big core with the corners knocked off by two
        cross-slabs, so it reads as a ball rather than a box. Then a white spot,
@@ -1326,7 +1365,8 @@ const G = {
   arrows:true, muted:false, sens:0.0014, invY:false,
   dirty:true, cells:null,
   hint:null, hints:0, beacon:null, ghost:[], hintArrow:null,
-  mode:MODE_SWEEP, boss:false, dungeon:false, flagsPlaced:0, kills:0, deathBy:'mine',
+  mode:MODE_SWEEP, boss:false, dungeon:false, finale:false, lava:0,
+  flagsPlaced:0, kills:0, deathBy:'mine',
   safeShot:false, eye:false, digFuse:0, lockOn:null,
   musVol:25, musMuted:false, best:{},
   boom:0, win:false, shake:0, slowmo:1, fuse:0, boomCell:null
@@ -1711,6 +1751,7 @@ function genWorld(d){
   G.elapsed=0; G.t0=performance.now();
   /* Only the dungeon has anything living in it. */
   G.boss = dung; G.flagsPlaced=0; G.kills=0; G.deathBy='mine'; G.lockOn=null;
+  G.finale=false; G.lava=0;
   armDigFuse();
   enemies.length=0; eshots.length=0;
   P.hp = 4; P.hurtT = 0;   // counted in halves
@@ -2223,7 +2264,14 @@ function rebuildWorld(){
           [1.0, 0.42-0.34*k, 0.16-0.10*k], 0.5, 1, 0, 0);
       continue;
     }
-    const m=MATS[G.mat[i]];
+    let m=MATS[G.mat[i]];
+    /* The finale recolours the whole cave. Done here rather than in the shader
+       because it is a one-off state change, and rebuildWorld already runs only
+       when the board is dirty. */
+    if(G.lava){
+      const c0=m.c;
+      m = {c:[Math.min(1,c0[0]*0.55+0.62), c0[1]*0.30+0.20, c0[2]*0.16+0.03], gold:m.gold};
+    }
     /* Full strength for the first two thirds, then fade: the light has to
        hold long enough to walk around the block and look at it. */
     const left = G.echoT[i] - tGlobal;
@@ -2410,13 +2458,23 @@ function shoot(){
       toast('Banner down.', 1400);
       killEnemy(e, foe.i);
     } else {
-      e.hp--; e.flash=0.25;
-      if(e.hp>0 && e.mBlinks>0 && ++e.mHitsSince>=2) blinkMine(e);
-      if(e.hp<=0) killEnemy(e, foe.i);
-      else{
+      if(e.hell){
+        /* Four shotgun blasts a shot, against Doom's own hit points. */
+        e.dhp -= SHELL; e.flash=0.4;
         snd.clink();
-        for(let k=0;k<7;k++)
-          addP(e.x,e.y,e.z, (rnd()-.5)*9,(rnd()-.5)*9+3,(rnd()-.5)*9, 0.2, 0.5, T.col, 0.6);
+        for(let k=0;k<12;k++)
+          addP(e.x,e.y,e.z, (rnd()-.5)*11,(rnd()-.5)*11+3,(rnd()-.5)*11, 0.3, 0.6, e.hell.col, 0.6);
+        if(e.dhp<=0) killEnemy(e, foe.i);
+        else toast(e.hell.name + ': ' + Math.max(0,e.dhp) + ' of ' + e.dmax, 900);
+      } else {
+        e.hp--; e.flash=0.25;
+        if(e.hp>0 && e.mBlinks>0 && ++e.mHitsSince>=2) blinkMine(e);
+        if(e.hp<=0) killEnemy(e, foe.i);
+        else{
+          snd.clink();
+          for(let k=0;k<7;k++)
+            addP(e.x,e.y,e.z, (rnd()-.5)*9,(rnd()-.5)*9+3,(rnd()-.5)*9, 0.2, 0.5, T.col, 0.6);
+        }
       }
     }
     return;
@@ -2888,6 +2946,7 @@ function muzzleOf(e, out){
   else if(T.fam===FAM_SLUG){ lx=(e.ant?0.55:-0.55); ly=1.06; lz=0; }
   else if(T.fam===FAM_FINAL){ ly=0.30; lz=0.62; }
   else if(T.fam===FAM_MINE){ lx=(e.ant?0.86:-0.86); ly=0; lz=0.62; }
+  else if(T.fam===FAM_HELL){ lx=0.9; ly=0.3; lz=0.7; }
   frameM(_E, e.x,e.y,e.z, e.fx,e.fy,e.fz, e.ux,e.uy,e.uz, 1);
   out[0] = _E[0]*lx*s + _E[4]*ly*s + _E[8]*lz*s  + e.x;
   out[1] = _E[1]*lx*s + _E[5]*ly*s + _E[9]*lz*s  + e.y;
@@ -2972,6 +3031,46 @@ const ODDS_ARCHON = [0.045, 0.02, 0.008]; // the flier: halved now the gate is a
    who never flags anything is not immune, and the interval is long enough
    that it never becomes a metronome you can count. */
 const DIG_FUSE = [3, 75];
+
+/* ==========================================================================
+   THE LAST FLAG
+   ==========================================================================
+   Marking the final mine does not end the dungeon. It finishes the puzzle, and
+   the puzzle was the easy part: the cave turns the colour of a furnace and one
+   of the old things comes for you.
+
+   The roster is Doom's, and so are the hit points — these are the canonical
+   values, so a Baron really is ten Imps and a Cyberdemon really is four
+   Barons. The bodies are built here out of cubes like everything else in this
+   game; nothing is copied. Three silhouettes carry the whole cast: something
+   that walks, something that floats, and something on legs.
+
+   Your staff hits for four times a Doom shotgun. A shotgun is seven pellets
+   averaging ten, so 280 a shot: an Imp folds instantly, a Baron takes four,
+   and a Cyberdemon takes fifteen while shooting back.
+
+   Their shots cost a whole heart rather than the half that everything else in
+   the cave deals. There is no attrition here. */
+const SHELL = 280;                       // four shotgun blasts
+const SIL_WALK=0, SIL_FLOAT=1, SIL_LEGS=2;
+const HELL = [
+  {name:'Zombieman',        hp:  20, sil:SIL_WALK,  col:[0.45,0.32,0.26], s:0.85},
+  {name:'Shotgun Guy',      hp:  30, sil:SIL_WALK,  col:[0.30,0.28,0.24], s:0.88},
+  {name:'Imp',              hp:  60, sil:SIL_WALK,  col:[0.62,0.42,0.24], s:0.95},
+  {name:'Lost Soul',        hp: 100, sil:SIL_FLOAT, col:[0.94,0.62,0.18], s:0.70},
+  {name:'Demon',            hp: 150, sil:SIL_WALK,  col:[0.78,0.36,0.34], s:1.10},
+  {name:'Spectre',          hp: 150, sil:SIL_WALK,  col:[0.55,0.55,0.58], s:1.10},
+  {name:'Revenant',         hp: 300, sil:SIL_WALK,  col:[0.86,0.84,0.78], s:1.15},
+  {name:'Cacodemon',        hp: 400, sil:SIL_FLOAT, col:[0.80,0.16,0.16], s:1.35},
+  {name:'Pain Elemental',   hp: 400, sil:SIL_FLOAT, col:[0.68,0.50,0.34], s:1.30},
+  {name:'Hell Knight',      hp: 500, sil:SIL_WALK,  col:[0.66,0.52,0.34], s:1.30},
+  {name:'Arachnotron',      hp: 500, sil:SIL_LEGS,  col:[0.72,0.62,0.44], s:1.25},
+  {name:'Mancubus',         hp: 600, sil:SIL_WALK,  col:[0.74,0.50,0.30], s:1.45},
+  {name:'Archvile',         hp: 700, sil:SIL_WALK,  col:[0.80,0.66,0.44], s:1.20},
+  {name:'Baron of Hell',    hp:1000, sil:SIL_WALK,  col:[0.72,0.30,0.24], s:1.45},
+  {name:'Spider Mastermind',hp:3000, sil:SIL_LEGS,  col:[0.74,0.66,0.50], s:1.80},
+  {name:'Cyberdemon',       hp:4000, sil:SIL_WALK,  col:[0.70,0.22,0.18], s:1.90}
+];
 
 /* ==========================================================================
    THE MINE INSIDE THE BLOCK
@@ -3108,13 +3207,16 @@ function canSee(e){
 }
 
 function enemyFire(e){
+  const _hell = !!e.hell;
   const T=ETYPES[e.t];
   muzzleOf(e, _mz);
   let dx=e.aim[0]-_mz[0], dy=e.aim[1]-_mz[1], dz=e.aim[2]-_mz[2];
   const d=Math.hypot(dx,dy,dz)||1;
   eshots.push({x:_mz[0], y:_mz[1], z:_mz[2],
-               dx:dx/d, dy:dy/d, dz:dz/d, life:3.2, col:T.col,
-               sz: T.fam===FAM_FLAG ? 0.55 : 0.34});
+               dx:dx/d, dy:dy/d, dz:dz/d, life:3.2,
+               col: _hell ? [1.0,0.55,0.12] : T.col,
+               hell: _hell,                       // theirs costs a whole heart
+               sz: _hell ? 0.85 : (T.fam===FAM_FLAG ? 0.55 : 0.34)});
   snd.efire(T.fam===FAM_FLAG ? 180 : T.fam===FAM_SLUG ? 260 : 340);
   if(T.fam===FAM_FLAG){ e.banner=0; e.bannerT=1.05; }   // it throws its banner
   e.cool = T.rate*0.30;          // the rest of the cycle is the telegraph
@@ -3138,9 +3240,10 @@ function killEnemy(e, i){
 /* Enemy shots do half damage. Four of them kill, which is the same two hearts
    as before — but at this fire rate a single hit no longer costs half your
    life. */
-function hurtPlayer(){
+function hurtPlayer(dmg){
   if(G.state!=='play') return;
-  P.hp--;
+  P.hp -= (dmg||1);
+  if(P.hp<0) P.hp=0;
   G.shake = Math.max(G.shake, 0.55);
   P.hurtT = 1.0;
   snd.hurt();
@@ -3203,7 +3306,8 @@ function updateEShots(dt){
     let gone=false;
     for(let k=0;k<steps && !gone;k++){
       s.x += s.dx*travel/steps; s.y += s.dy*travel/steps; s.z += s.dz*travel/steps;
-      if(G.state==='play' && hitsPlayer(s.x,s.y,s.z)){ hurtPlayer(); gone=true; break; }
+      // one of theirs costs a whole heart; everything else in the cave costs half
+      if(G.state==='play' && hitsPlayer(s.x,s.y,s.z)){ hurtPlayer(s.hell?2:1); gone=true; break; }
       const cx=Math.floor(s.x/BLOCK), cy=Math.floor(s.y/BLOCK), cz=Math.floor(s.z/BLOCK);
       if(isSolidCell(cx,cy,cz)){
         addS(s.x,s.y,s.z, 0,0,0, 1.5, 0.3, s.col, T_GLOW, 0.7);
@@ -3290,6 +3394,7 @@ function updateEnemies(dt){
     else if(T.fam===FAM_ORB)   moveOrb(e, dt, T);
     else if(T.fam===FAM_SLUG)  moveSlug(e, dt, T);
     else if(T.fam===FAM_MINE)  { if(e.mFly) moveFinal(e, dt, T); }
+    else if(T.fam===FAM_HELL)  moveFinal(e, dt, T);
     else if(T.fam===FAM_FINAL) moveFinal(e, dt, T);
     // FAM_FLAG stays on the face it came out of, as it should
 
@@ -3461,6 +3566,14 @@ function checkWin(){
     ? (G.mines>0 && G.marked===G.mines && correctFlags()===G.mines)
       || G.revealed >= G.safeTotal
     : G.revealed >= G.safeTotal;
+  /* In the dungeon the last flag opens the door rather than closing it. Once
+     the thing that came through is dead, the run is won. */
+  if(done && G.dungeon && !G.finale){ startFinale(); return; }
+  if(done && G.dungeon && G.finale && enemies.some(e=>e.hell)) return;
+  /* In the dungeon the last flag opens a door rather than closing one. The run
+     is won when what came through it is dead. */
+  if(done && G.dungeon && !G.finale){ startFinale(); return; }
+  if(done && G.dungeon && enemies.some(e=>e.hell)) return;
   if(done){
     G.win=true; G.state='over'; G.boom=0.0001;
     snd.fanfare();
@@ -4135,6 +4248,37 @@ function blinkMine(e){
   for(let q=0;q<22;q++)
     addS(e.x,e.y,e.z, (rnd()-.5)*7,(rnd()-.5)*7,(rnd()-.5)*7, 0.8, 0.5, [0.7,0.9,1.0], T_GLOW, 0.9);
   toast('It moved.', 1600);
+}
+
+/* The last flag. The cave goes the colour of a furnace and one of the old
+   things arrives. Nothing else spawns while it is alive. */
+function startFinale(){
+  G.finale = true; G.lava = 1; G.dirty = true;
+  enemies.length = 0; eshots.length = 0;
+  const pick = HELL[(wrnd()*HELL.length)|0];
+  const px=Math.floor(P.x/BLOCK), py=Math.floor(P.y/BLOCK), pz=Math.floor(P.z/BLOCK);
+  const cell = inside(px,py,pz) ? idx(px,py,pz) : 0;
+  const e = spawnEnemy(FAM_HELL, 2, cell);
+  if(!e){ G.finale=false; G.lava=0; return; }
+  e.hell = pick;
+  e.dhp = e.dmax = pick.hp;
+  e.hp = 9999;                       // its life is counted in Doom damage now
+  e.mScale = pick.s * 1.7;
+  e.mFirst = 1.6; e.mRate = 1.1; e.first = true;
+  const r = aimRay();
+  for(let k=0;k<40;k++){
+    const dd = 14 + rnd()*8;
+    const nx = P.x + r.dx*dd + (rnd()-0.5)*8;
+    const ny = P.y + EYE + r.dy*dd + (rnd()-0.5)*4;
+    const nz = P.z + r.dz*dd + (rnd()-0.5)*8;
+    if(solidAtWorld(nx,ny,nz)) continue;
+    e.x=nx; e.y=ny; e.z=nz; break;
+  }
+  e.state='alive'; e.emerge=1;
+  G.shake = 1.0;
+  snd.fanfare(); snd.boom();
+  toast('Every mine is flagged — and something else was counting. ' +
+        pick.name + ', ' + pick.hp + ' hit points.', 6000);
 }
 
 function toggleLock(){
