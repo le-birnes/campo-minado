@@ -626,6 +626,22 @@ const clamp=(v,a,b)=>v<a?a:(v>b?b:v);
 const lerp=(a,b,t)=>a+(b-a)*t;
 let seed=1;
 function rnd(){ seed = (seed*1664525+1013904223)>>>0; return seed/4294967296; }
+/* A SECOND stream, and it must stay separate from the one above. `rnd` is the
+   world's: seeded deliberately so a board can be reproduced, and any extra
+   call to it silently changes every board generated afterwards. Anything that
+   wants to be genuinely different each session — when the next thing crawls
+   out of the rock — draws from here instead.
+   Seeded from the wall clock, mixed so that two runs started in the same
+   millisecond still diverge, and then it is a plain xorshift: cheap, and far
+   more even than counting primes in a timestamp. */
+let wseed = ((Date.now() ^ (performance.now()*1000)) >>> 0) || 0x9e3779b9;
+wseed ^= wseed<<13; wseed ^= wseed>>>17; wseed ^= wseed<<5;
+function wrnd(){
+  wseed ^= wseed<<13; wseed ^= wseed>>>17; wseed ^= wseed<<5;
+  return (wseed>>>0)/4294967296;
+}
+/* inclusive both ends */
+const wrange = (lo,hi) => lo + ((wrnd()*(hi-lo+1))|0);
 
 /* ==========================================================================
    2. WEBGL — context and programs
@@ -1286,7 +1302,7 @@ const G = {
   dirty:true, cells:null,
   hint:null, hints:0, beacon:null, ghost:[], hintArrow:null,
   mode:MODE_SWEEP, boss:false, dungeon:false, flagsPlaced:0, kills:0, deathBy:'mine',
-  safeShot:false, eye:false,
+  safeShot:false, eye:false, digFuse:0,
   musVol:25, musMuted:false, best:{},
   boom:0, win:false, shake:0, slowmo:1, fuse:0, boomCell:null
 };
@@ -1665,6 +1681,7 @@ function genWorld(d){
   G.elapsed=0; G.t0=performance.now();
   /* Only the dungeon has anything living in it. */
   G.boss = dung; G.flagsPlaced=0; G.kills=0; G.deathBy='mine';
+  armDigFuse();
   enemies.length=0; eshots.length=0;
   P.hp = 4; P.hurtT = 0;   // counted in halves
 
@@ -2398,6 +2415,7 @@ function shoot(){
     detonate(hit.x,hit.y,hit.z); return;
   }
   revealAt(i,false);
+  digSpawn(i, hit.x, hit.y, hit.z);
   checkWin();
   /* your shots are whole shots: a crack you inherited is just gone with it */
 }
@@ -2905,7 +2923,30 @@ function spawnEnemy(fam, tier, cell){
    survivable and a III is an event. Rolled rarest first, and the first hit
    wins, so at most one thing ever comes out of a single flag. */
 const ODDS_COMMON = [0.45, 0.20, 0.04];   // Bannerman / Wanderer / Creeper, I II III
-const ODDS_ARCHON = [0.09, 0.045, 0.018]; // the flier, I II III
+const ODDS_ARCHON = [0.045, 0.02, 0.008]; // the flier: halved now the gate is a 3
+/* Flagging is no longer the only thing that wakes them. Breaking rock does
+   too, on a fuse of between 3 and 75 destructive shots — so a careful player
+   who never flags anything is not immune, and the interval is long enough
+   that it never becomes a metronome you can count. */
+const DIG_FUSE = [3, 75];
+
+/* Something comes out of a block you just broke. Same cast as the flags, but
+   the fuse is a count of shots rather than a count of flags. */
+function armDigFuse(){ G.digFuse = wrange(DIG_FUSE[0], DIG_FUSE[1]); }
+function digSpawn(cell, x,y,z){
+  if(!G.boss || G.state!=='play') return;
+  if(enemies.length >= EN_MAX) return;
+  if(--G.digFuse > 0) return;
+  armDigFuse();
+  for(let t=2;t>=0;t--){
+    if(wrnd() < ODDS_COMMON[t]*1.2){
+      const e = spawnEnemy([FAM_FLAG, FAM_ORB, FAM_SLUG][(wrnd()*3)|0], t, cell);
+      if(e) toast('Something was living in that rock.', 3000);
+      return;
+    }
+  }
+  spawnEnemy([FAM_FLAG, FAM_ORB, FAM_SLUG][(wrnd()*3)|0], 0, cell);
+}
 
 function maybeSpawn(cell, x,y,z){
   if(!G.boss || G.state!=='play') return;
@@ -3204,18 +3245,27 @@ function rayEnemy(ox,oy,oz, dx,dy,dz, maxD){
    that most of what you find is the eye — which is the one that helps you
    think, and the one the dungeon is really about. */
 const chests=[];
-const POW = [
-  {key:'life', p:0.01, name:'Extra life',
-   line:'A whole heart back.'},
-  {key:'safe', p:0.01, name:'Safe shot',
-   line:'Your next shot into a mine uncovers it instead of setting it off.'},
-  {key:'eye',  p:0.98, name:'The eye',
-   line:'Look at an unfinished number and it shows you which of its blocks are mines.'}
-];
+/* A heart is worth far more on a board that can kill you quickly, so how often
+   a chest holds one depends on the difficulty rather than being a flat 1%:
+   30% on Apprentice, 13% on Sorcerer, 5% on Arcane. Custom sits with Sorcerer.
+   The safe shot keeps its own small fixed slice and the eye takes the rest,
+   so the eye stays the thing you usually find. */
+const LIFE_ODDS = [0.30, 0.13, 0.05, 0.13];
+const SAFE_ODDS = 0.06;
+const POW = {
+  life:{key:'life', name:'Extra life',
+        line:'A whole heart back.'},
+  safe:{key:'safe', name:'Safe shot',
+        line:'Your next shot into a mine uncovers it instead of setting it off.'},
+  eye: {key:'eye',  name:'The eye',
+        line:'Look at an unfinished number and it shows you which of its blocks are mines.'}
+};
 function rollPower(){
-  let r=rnd();
-  for(const p of POW){ if(r < p.p) return p; r -= p.p; }
-  return POW[POW.length-1];
+  const life = LIFE_ODDS[G.diff] !== undefined ? LIFE_ODDS[G.diff] : 0.13;
+  const r = rnd();
+  if(r < life) return POW.life;
+  if(r < life + SAFE_ODDS) return POW.safe;
+  return POW.eye;
 }
 function spawnChest(i){
   const [x,y,z]=cellXYZ(i);
