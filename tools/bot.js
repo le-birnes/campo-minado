@@ -19,7 +19,8 @@ const {G, P, IN, enemies, eshots, EN_MAX, BLOCK, EYE, P_H, P_R, SPD_RUN,
        genWorld, idx, inside, isSolidCell, cellXYZ, nbrsOf, raycast,
        shoot, mark, physics, tickGround, updateJump, rebuildWorld, worldB,
        updateEnemies, MARKED, SOLID, AIR, ROCK, aimAt, adv, DIFFS,
-       chests, rayChest, correctFlags, MAX_JUMPS, startThink, endThink, snd} = T;
+       chests, rayChest, correctFlags, MAX_JUMPS, startThink, endThink, snd,
+       canJump} = T;
 /* thousands of WebAudio nodes is most of the runtime and none of the value */
 try{ G.muted=true; snd.setMute(true); }catch(e){}
 
@@ -35,7 +36,7 @@ let auditN = 0;
 const stats = { walked:0, jumps:0, stuck:0, noRoute:0, dugOut:0, insideRock:0,
                 fell:0, shots:0, flags:0, noEffect:0, killed:0, shotAt:0,
                 chords:0, chordDud:0, opened:0, chests:0, climbed:0, misflag:0,
-                chordOffered:0, chordNoAim:0, gaveUp:0,
+                chordOffered:0, chordNoAim:0, gaveUp:0, airJump:0,
                 guesses:0, guessMines:0 };
 
 /* ---------------- audit ----------------
@@ -122,12 +123,26 @@ function supported(x,y,z){
 }
 function standable(x,y,z){ return passable(x,y,z) && supported(x,y,z); }
 
-/* Walk from height `fromY` into column (x,z): step up at most one block, or
-   fall any distance. Returns where the bot ends up, or -1 if the column is
-   a wall. */
+/* Walk from height `fromY` into column (x,z): climb, or fall any distance.
+   Returns where the bot ends up, or -1 if the column is a wall.
+
+   CLIMB is 2, not 1. One jump clears 6 m from standing — a block and a half —
+   but the player now gets twenty of them, and a second jump at the apex of the
+   first reaches three blocks. Modelling a one-block limit made falling
+   effectively one-way: the bot would dig a pit, drop into it, and the router
+   would report no path back out of a hole it could trivially jump. That is
+   what "nothing it could reach" was, on a board where 95% of frontier blocks
+   have a standing spot with a sightline one cell away. */
+const CLIMB = 2;
 function stepTarget(x, z, fromY){
   if (!inside(x,0,z)) return -1;
-  if (standable(x, fromY+1, z)) return idx(x, fromY+1, z);   // hop the lip
+  for (let up=CLIMB; up>=1; up--){
+    if (!standable(x, fromY+up, z)) continue;
+    // the cells you pass through on the way up have to be open
+    let clear=true;
+    for (let k=1; k<up; k++) if (!passable(x, fromY+k, z)) { clear=false; break; }
+    if (clear) return idx(x, fromY+up, z);
+  }
   for (let y=fromY; y>=0; y--){
     if (!passable(x,y,z)) return -1;
     if (supported(x,y,z)) return idx(x,y,z);
@@ -182,7 +197,10 @@ function walkTo(cell, budget) {
     /* Climbing: the waypoint is a block above us, so jump as we arrive.
        Falling needs nothing but walking off the edge. */
     if (ty > P.y + 0.6) {
+      /* Off the ground for the first block; then again at the apex for the
+         second, which is the whole point of having twenty. */
       if (P.ground) { jumpNow(); stats.climbed++; }
+      else if (P.vy <= 0 && ty > P.y + BLOCK*0.9 && canJump()) { jumpNow(); stats.airJump++; }
       else IN.jumpHeld=false;
     } else IN.jumpHeld=false;
     if (!tick()) { IN.f=0; IN.jumpHeld=false; return false; }
@@ -555,7 +573,8 @@ for (const [d,boss,label] of plan) {
 
 log(`games=${games} finished=${wins} actions=${totalMoves}`);
 for (const k in per) log(`  ${k}: ${per[k].n} games, ${per[k].w} finished, ${per[k].m} actions, peakFoes=${per[k].p} — ended: ${per[k].why}`);
-log(`on foot: ${stats.walked.toFixed(0)} m walked, ${stats.jumps} jumps (${stats.climbed} to climb)`);
+log(`on foot: ${stats.walked.toFixed(0)} m walked, ${stats.jumps} jumps `+
+    `(${stats.climbed} off the ground to climb, ${stats.airJump} in mid-air)`);
 log(`navigation: stuck=${stats.stuck} noRoute=${stats.noRoute} boxedIn=${stats.dugOut} fellOutOfWorld=${stats.fell} insideRock=${stats.insideRock}`);
 log(`misaimed flags: ${stats.misflag} | targets given up on: ${stats.gaveUp+refused.size}`);
 log(`chording: ${stats.chordOffered} chances offered across all steps, `+
