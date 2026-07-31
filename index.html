@@ -1169,7 +1169,7 @@ const BEDCRYST  = [0.62,0.66,0.78];
    moved. Variant III holds for 0.42 s, which in practice means it hits you
    unless you are already moving when it fires. Variant I holds for 3 s, so it
    only ever catches someone who has stopped to think. */
-const FAM_FLAG=0, FAM_ORB=1, FAM_SLUG=2, FAM_FINAL=3;
+const FAM_FLAG=0, FAM_ORB=1, FAM_SLUG=2, FAM_FINAL=3, FAM_MINE=4;
 const EN_MAX   = 22;    // live enemies at once
 const EN_PARTS = 16;    // most cubes any one body is built from
 const ESHOT_SPD = 34;   // m/s — fast, but the lock is the real threat
@@ -1202,7 +1202,9 @@ const FAMS = [
   {fam:FAM_FLAG,  name:'Bannerman', col:[0.95,0.17,0.13], r:1.05, speed:0,   range:46},
   {fam:FAM_ORB,   name:'Wanderer',  col:[0.38,0.70,1.00], r:1.05, speed:2.2, range:42},
   {fam:FAM_SLUG,  name:'Creeper',   col:[0.50,0.94,0.34], r:1.90, speed:1.5, range:40},
-  {fam:FAM_FINAL, name:'Archon',    col:[0.82,0.40,1.00], r:1.15, speed:3.4, range:56}
+  {fam:FAM_FINAL, name:'Archon',    col:[0.82,0.40,1.00], r:1.15, speed:3.4, range:56},
+  // the thing that was in the block all along
+  {fam:FAM_MINE,  name:'Mine',      col:[0.10,0.10,0.12], r:1.20, speed:2.8, range:50}
 ];
 /* saturation pulls the family hue toward gray for the lesser variants, so you
    can read what is about to shoot you from across the cave */
@@ -1274,6 +1276,25 @@ function bodyOf(T){
               add(-2.00,-0.10,0, 0.44,0.30,0.60, dark,0);
               add( 2.10,-0.10,0, 0.34,0.26,0.50, dark,0); }
   }
+  else if(T.fam===FAM_MINE){
+    /* Round, out of cubes: a big core with the corners knocked off by two
+       cross-slabs, so it reads as a ball rather than a box. Then a white spot,
+       because an 8-ball needs its number, and a cannon on each flank. */
+    add(0,0,0,        1.30,1.30,1.30, c, 0);
+    add(0,0,0,        1.46,1.02,1.02, c, 0);
+    add(0,0,0,        1.02,1.46,1.02, c, 0);
+    add(0,0,0,        1.02,1.02,1.46, c, 0);
+    add(0,0.10,0.70,  0.46,0.46,0.16, [0.94,0.93,0.90], 0.25);   // the spot
+    if(d>=1){
+      add(-0.86,0,0.12, 0.34,0.34,0.92, metal, 0);               // left cannon
+      add( 0.86,0,0.12, 0.34,0.34,0.92, metal, 0);
+    } else {
+      add(-0.80,0,0.10, 0.30,0.30,0.78, metal, 0);
+      add( 0.80,0,0.10, 0.30,0.30,0.78, metal, 0);
+    }
+    add(-0.86,0,0.62, 0.20,0.20,0.22, [0.95,0.42,0.20], 1);      // muzzles, lit
+    add( 0.86,0,0.62, 0.20,0.20,0.22, [0.95,0.42,0.20], 1);
+  }
   else {  // FAM_FINAL — a flier the size of the player
     add(0,0,0, 0.80,1.30,0.80, c, 0.18);                 // body
     add(0,0.86,0, 0.62,0.44,0.62, dark, 0);              // crown
@@ -1320,7 +1341,11 @@ function idx(x,y,z){ return (y*G.nz + z)*G.nx + x; }
 function inside(x,y,z){ return x>=0&&y>=0&&z>=0&&x<G.nx&&y<G.ny&&z<G.nz; }
 function isSolidCell(x,y,z){
   if(!inside(x,y,z)) return true;             // outside = bedrock
-  return G.st[idx(x,y,z)] !== AIR;
+  const i=idx(x,y,z);
+  /* A mine that has hatched left an empty socket. The cell stays MARKED so the
+     count and the win condition are untouched, but the block itself is gone. */
+  if(G.hatch && G.hatch[i]) return false;
+  return G.st[i] !== AIR;
 }
 
 /* ---------- world shape -------------------------------------------------
@@ -1672,6 +1697,7 @@ function genWorld(d){
   /* Chests go in after the mines, because a chest only ever sits in a block
      that is safe to open. Per minefield: 1% two, 70% one, and the rest none. */
   G.chest=new Uint8Array(N);
+  G.digAdj=new Uint8Array(N); G.hatch=new Uint8Array(N);
   chests.length=0; G.safeShot=false; G.eye=false;
   if(G.dungeon) for(const g of L.groups){
     const r=rnd(), want = r<0.01 ? 2 : (r<0.71 ? 1 : 0);
@@ -2179,6 +2205,7 @@ function rebuildWorld(){
   for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
     const i=idx(x,y,z);
     if(G.st[i]===AIR) continue;
+    if(G.hatch && G.hatch[i]) continue;   // the mine came out of it; nothing left
     /* Structure reads as the same stone as the shell, so a wall inside the
        cave and the wall at its edge are visibly the same promise: this does
        not open, do not waste a shot on it. */
@@ -2384,6 +2411,7 @@ function shoot(){
       killEnemy(e, foe.i);
     } else {
       e.hp--; e.flash=0.25;
+      if(e.hp>0 && e.mBlinks>0 && ++e.mHitsSince>=2) blinkMine(e);
       if(e.hp<=0) killEnemy(e, foe.i);
       else{
         snd.clink();
@@ -2419,6 +2447,7 @@ function shoot(){
     detonate(hit.x,hit.y,hit.z); return;
   }
   revealAt(i,false);
+  noteDigNear(i);          // only a shot counts, never a cascade or a blast
   digSpawn(i, hit.x, hit.y, hit.z);
   checkWin();
   /* your shots are whole shots: a crack you inherited is just gone with it */
@@ -2553,6 +2582,7 @@ function mark(hit){
   G.st[i] = wasFlag ? SOLID : MARKED;
   G.marked += wasFlag ? -1 : 1;
   G.dirty=true; snd.mark();
+  if(!wasFlag) hatchMine(i, hit.x, hit.y, hit.z);
   if(!wasFlag) maybeSpawn(i, hit.x, hit.y, hit.z);
   checkWin();          // in the dungeon the last flag is the winning move
 }
@@ -2849,6 +2879,7 @@ function muzzleOf(e, out){
   if(T.fam===FAM_FLAG){ lx=0.78; ly=0.46; lz=0; }
   else if(T.fam===FAM_SLUG){ lx=(e.ant?0.55:-0.55); ly=1.06; lz=0; }
   else if(T.fam===FAM_FINAL){ ly=0.30; lz=0.62; }
+  else if(T.fam===FAM_MINE){ lx=(e.ant?0.86:-0.86); ly=0; lz=0.62; }
   frameM(_E, e.x,e.y,e.z, e.fx,e.fy,e.fz, e.ux,e.uy,e.uz, 1);
   out[0] = _E[0]*lx*s + _E[4]*ly*s + _E[8]*lz*s  + e.x;
   out[1] = _E[1]*lx*s + _E[5]*ly*s + _E[9]*lz*s  + e.y;
@@ -2934,6 +2965,60 @@ const ODDS_ARCHON = [0.045, 0.02, 0.008]; // the flier: halved now the gate is a
    that it never becomes a metronome you can count. */
 const DIG_FUSE = [3, 75];
 
+/* ==========================================================================
+   THE MINE INSIDE THE BLOCK
+   ==========================================================================
+   Flag a mine in the dungeon and the block comes apart: what was inside is a
+   polished black sphere with a cannon on each flank, and it was listening the
+   whole time.
+
+   How dangerous it is depends on how much noise you made finding it. Every
+   block you SHOT next to it counts — but only from the moment the board could
+   actually prove the mine was there. Blocks that fell to a cascade or a blast
+   are somebody else's noise and do not count, and neither does work you did
+   before the mine was deducible, because you were not yet closing in on it.
+
+   Mark it cold, with no adjacent block shot, and nothing comes out: you found
+   it without disturbing it.
+
+   `life` and `rate` will be scaled per difficulty later; the shape of the
+   table is what matters now. Bands are non-overlapping — the brief had 4-5 and
+   "5 to 7" sharing a 5 — so 5 belongs to the lower, calmer band. */
+const MINE_TIERS = [
+  //  up to N adjacent shots : hp, first shot after, seconds between aims
+  {upTo:0, hp:0,  first:0,    rate:0,    scale:1.00, fly:false},   // never wakes
+  {upTo:1, hp:1,  first:2.00, rate:1.50, scale:1.00, fly:false},
+  {upTo:3, hp:3,  first:1.50, rate:1.45, scale:1.00, fly:false},
+  {upTo:5, hp:4,  first:1.50, rate:1.45, scale:1.00, fly:false},
+  {upTo:7, hp:3,  first:1.50, rate:1.05, scale:1.00, fly:false},
+  {upTo:99,hp:3,  first:1.50, rate:0.85, scale:1.45, fly:true}
+];
+const mineTier = n => MINE_TIERS.find(t => n <= t.upTo) || MINE_TIERS[MINE_TIERS.length-1];
+
+/* Could the board prove, right now, that this cell holds a mine? A clue is
+   enough when the mines it still has to account for are exactly the blocks it
+   still has hidden. This is the same reasoning the hint gives you, so the
+   counter starts precisely when the information becomes available to you. */
+function mineDeducible(i){
+  for(const j of nbrsOf(i)){
+    if(G.st[j]!==AIR || G.cnt[j]===0) continue;
+    let f=0, hid=0, has=false;
+    for(const k of nbrsOf(j)){
+      if(G.st[k]===MARKED) f++;
+      else if(G.st[k]===SOLID){ hid++; if(k===i) has=true; }
+    }
+    if(has && hid>0 && G.cnt[j]-f === hid) return true;
+  }
+  return false;
+}
+/* One block, shot by the player, has just come apart. Any mine beside it that
+   the board can already prove hears it. */
+function noteDigNear(cell){
+  if(!G.dungeon || !G.digAdj) return;
+  for(const j of nbrsOf(cell))
+    if(G.mine[j] && G.st[j]!==AIR && mineDeducible(j) && G.digAdj[j] < 250) G.digAdj[j]++;
+}
+
 /* Something comes out of a block you just broke. Same cast as the flags, but
    the fuse is a count of shots rather than a count of flags. */
 function armDigFuse(){ G.digFuse = wrange(DIG_FUSE[0], DIG_FUSE[1]); }
@@ -2950,6 +3035,31 @@ function digSpawn(cell, x,y,z){
     }
   }
   spawnEnemy([FAM_FLAG, FAM_ORB, FAM_SLUG][(wrnd()*3)|0], 0, cell);
+}
+
+/* Flagging a real mine in the dungeon opens it. What comes out is sized by the
+   noise you made getting here; mark it cold and nothing does. */
+function hatchMine(cell, x,y,z){
+  if(!G.dungeon || G.state!=='play') return;
+  if(!G.mine[cell] || G.hatch[cell]) return;
+  const T = mineTier(G.digAdj[cell]);
+  if(T.hp<=0) return;                       // found without disturbing it
+  const e = spawnEnemy(FAM_MINE, 0, cell);
+  if(!e) return;
+  G.hatch[cell]=1; G.dirty=true;
+  e.hp = e.maxhp = T.hp;
+  e.first = true;
+  e.mFirst = T.first; e.mRate = T.rate;
+  e.mScale = T.scale; e.mFly = T.fly;
+  e.mBlinks = T.fly ? 1 : 0;                // the top one gets one teleport
+  e.mHitsSince = 0;
+  e.dug = G.digAdj[cell];
+  toast(T.fly ? 'It was awake, and it has been waiting.'
+              : 'Something was inside that one.', 3200);
+  for(let k=0;k<26;k++)
+    addP((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK,
+         (rnd()-.5)*11,(rnd()-.5)*11,(rnd()-.5)*11, 0.3+rnd()*0.5, 0.8,
+         MATS[G.mat[cell]].c, 0.4);
 }
 
 function maybeSpawn(cell, x,y,z){
@@ -3170,6 +3280,7 @@ function updateEnemies(dt){
     if(e.state==='emerge'){ /* held in place */ }
     else if(T.fam===FAM_ORB)   moveOrb(e, dt, T);
     else if(T.fam===FAM_SLUG)  moveSlug(e, dt, T);
+    else if(T.fam===FAM_MINE)  { if(e.mFly) moveFinal(e, dt, T); }
     else if(T.fam===FAM_FINAL) moveFinal(e, dt, T);
     // FAM_FLAG stays on the face it came out of, as it should
 
@@ -3203,7 +3314,9 @@ function updateEnemies(dt){
            line is no defence at all — only changing your mind is. */
         /* the opening shot gets the long wind-up; each one after it gets the
            telegraph that fits inside the cycle */
-        e.lockMax = (e.first ? T.first : T.rate*0.70) * (0.92+0.16*rnd());
+        const first = e.mFirst !== undefined ? e.mFirst : T.first;
+        const rate  = e.mRate  !== undefined ? e.mRate  : T.rate;
+        e.lockMax = (e.first ? first : rate*0.70) * (0.92+0.16*rnd());
         e.first = false;
         e.lock = e.lockMax;
         const flight = Math.hypot(P.x-e.x, P.y-e.y, P.z-e.z)/ESHOT_SPD;
@@ -3982,6 +4095,39 @@ function pollPad(dt){
    the aim on it until it dies, leaves, or you take the stick back. On a pad
    this is the difference between fighting and flailing — a thumbstick cannot
    track a moving target the way a mouse does. */
+/* Hit it twice and it is somewhere else — but somewhere you can still SEE, or
+   it is not a fight, it is hide and seek. It reappears inside your view, out at
+   arm's length, and its opening wind-up starts over: you bought distance, not
+   safety. */
+function blinkMine(e){
+  e.mBlinks--; e.mHitsSince=0;
+  const r=aimRay();
+  const rx=Math.cos(P.yaw), rz=-Math.sin(P.yaw);        // camera right, on the flat
+  let placed=false;
+  for(let k=0;k<24 && !placed;k++){
+    const dist = 9 + rnd()*10;
+    const side = (rnd()-0.5)*10;
+    const rise = (rnd()-0.5)*7;
+    const nx = P.x + r.dx*dist + rx*side;
+    const ny = P.y + EYE + r.dy*dist + rise;
+    const nz = P.z + r.dz*dist + rz*side;
+    if(solidAtWorld(nx,ny,nz)) continue;
+    // and it has to be able to see you from there, or the blink is a cheat
+    const bx=P.x-nx, by=(P.y+EYE)-ny, bz=P.z-nz;
+    const bd=Math.hypot(bx,by,bz)||1;
+    const h=raycast(nx,ny,nz, bx/bd,by/bd,bz/bd, bd, false);
+    if(h.hit && h.t < bd-1.0) continue;
+    e.x=nx; e.y=ny; e.z=nz; e.vx=e.vy=e.vz=0;
+    placed=true;
+  }
+  if(!placed) return;
+  e.first=true; e.aim=null; e.lock=0; e.cool=0;          // the long wind-up again
+  snd.spawn();
+  for(let q=0;q<22;q++)
+    addS(e.x,e.y,e.z, (rnd()-.5)*7,(rnd()-.5)*7,(rnd()-.5)*7, 0.8, 0.5, [0.7,0.9,1.0], T_GLOW, 0.9);
+  toast('It moved.', 1600);
+}
+
 function toggleLock(){
   if(G.lockOn){ G.lockOn=null; toast('Lock released.', 1200); return; }
   const r=aimRay();
@@ -4180,7 +4326,7 @@ function frame(now){
     for(const e of enemies){
       const T=ETYPES[e.t], parts=EBODY[e.t];
       // while emerging it grows out of the block instead of popping into place
-      const grow = e.state==='emerge' ? 0.25+0.75*e.emerge : 1;
+      const grow = (e.state==='emerge' ? 0.25+0.75*e.emerge : 1) * (e.mScale||1);
       frameM(_E, e.x,e.y,e.z, e.fx,e.fy,e.fz, e.ux,e.uy,e.uz, grow);
       /* the tell: it brightens as the lock runs down, so the shot is never
          a surprise — only your standing still is */
