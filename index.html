@@ -565,8 +565,24 @@ const FUSE_T  = 0.85;   // the hit mine glows before taking everything
    in the band, so this is a promise rather than a hope. Apprentice promises
    none: it is the board you learn on and it must always be winnable by
    thinking. Custom has no band; it is whatever you built. */
+/* Difficulty is how hard the LOGIC is, not how many mines there are. Mines are
+   laid as clusters, because a lone mine is one subtraction and a cluster is a
+   chain: its members share clues, so the same number constrains several of them
+   at once and you have to stack deductions to separate them.
+
+   `clusters` is how many go on the board and `csize` how many mines each holds.
+   The mine COUNT falls out of those rather than being chosen — density is what
+   players read difficulty as, which is why it was the starting point, but it is
+   not what makes a board hard.
+
+   `guess` is the number of genuine 50/50s allowed, and past Apprentice it is
+   zero: these boards are meant to be hard AND fully solvable, so the difficulty
+   is in how much logic you have to stack, never in a coin toss.
+   `depth` is the share of moves where nothing simpler than the two-clue subset
+   rule will do — the actual measure of how much stacking a board demands. */
 const DIFFS = [
-  {name:"Apprentice", nx:10, nz:10, ny:3, dens:0.06, guess:[0,0]},
+  {name:"Apprentice", nx:10, nz:10, ny:3, dens:0.06, guess:[0,0],
+   clusters:[10,15], csize:[1,2], depth:[0.00,0.12]},
   /* Sorcerer gets a little structure, and it is the ONLY thing that produces
      the 50/50s it promises. Measured on a bare arena, forced guesses barely
      exist at this size: 1 board in 14, and raising density from 11% to 15%
@@ -575,9 +591,24 @@ const DIFFS = [
      50/50 is a wall, because a wall isolates a pocket that no clue outside it
      can reach. 6-12% structure took it to 4 in 14 before sampling, which
      rejection sampling then finishes. */
-  {name:"Sorcerer",   nx:12, nz:12, ny:3, dens:0.11, rough:[0.06,0.12], guess:[1,2]},
+  {name:"Sorcerer",   nx:12, nz:12, ny:3, dens:0.11, rough:[0.06,0.12], guess:[0,0],
+   clusters:[15,20], csize:[2,4], depth:[0.06,0.30]},
   // Arcane is not just denser: it is the one arena with a shape.
-  {name:"Arcane",     nx:15, nz:15, ny:4, dens:0.20, rough:[0.15,0.30], guess:[2,4]},
+  /* Arcane is as deep as a guess-free board gets, and that ceiling is real.
+     Measured: bigger clusters buy stacked logic and forced guesses TOGETHER,
+     because the same over-constrained pocket that demands you hold two numbers
+     at once is what leaves a third cell undecidable.
+
+       clusters 20-50 of 2-6   3% stacked,  90 mines, mostly 0 guesses
+       clusters 30-60 of 3-8  12% stacked, 154 mines, 2-14 guesses
+       clusters 40-80 of 4-10 21% stacked, 252 mines, 8-37 guesses
+
+     Since these boards must stay solvable, Arcane sits at the top of the first
+     band and leans on sampling to find the deepest deal that still needs no
+     coin toss. If a guess ever becomes acceptable here, the depth available
+     roughly quadruples. */
+  {name:"Arcane",     nx:15, nz:15, ny:4, dens:0.20, rough:[0.16,0.30], guess:[0,0],
+   clusters:[20,36], csize:[2,6], depth:[0.04,0.30]},
   // mutable: the menu sliders write straight into this one
   {name:"Custom",     nx:12, nz:12, ny:3, dens:0.130, custom:true}
 ];
@@ -1448,6 +1479,36 @@ function distWeight(i, sx, sy, sz){
 }
 /* Efraimidis-Spirakis: give each candidate a key of U^(1/w) and take the
    largest. Exactly proportional to weight, one pass, no rejection loop. */
+/* Grow a cluster outward from a seed: each new mine has to touch one already
+   placed, so the group shares clues and cannot be picked apart one at a time. */
+function growCluster(seedCell, size, allowed, taken, out){
+  const got=[seedCell]; taken.add(seedCell); out.push(seedCell);
+  let guard=0;
+  while(got.length<size && guard++<200){
+    const from = got[(rnd()*got.length)|0];
+    const nb = nbrsOf(from).filter(j => allowed.has(j) && !taken.has(j));
+    if(!nb.length){
+      // this arm is boxed in; try growing from another member
+      if(got.every(c => nbrsOf(c).every(j => !allowed.has(j) || taken.has(j)))) break;
+      continue;
+    }
+    const j = nb[(rnd()*nb.length)|0];
+    taken.add(j); got.push(j); out.push(j);
+  }
+  return got.length;
+}
+function placeClusters(pool, nClusters, sizeLo, sizeHi, sx, sy, sz){
+  const allowed = new Set(pool), taken = new Set(), out = [];
+  // seeds are still drawn on the distance curve, so clusters sit where the
+  // curve wants them; only their SHAPE is new
+  const seeds = weightedPick(pool, Math.min(nClusters, pool.length), sx, sy, sz);
+  for(const seed of seeds){
+    if(taken.has(seed)) continue;
+    growCluster(seed, sizeLo + ((rnd()*(sizeHi-sizeLo+1))|0), allowed, taken, out);
+  }
+  return out;
+}
+
 function weightedPick(cells, count, sx, sy, sz, skip){
   const keyed=[];
   for(const i of cells){
@@ -1502,7 +1563,8 @@ function shapeArena(D){
   for(let dx=-1;dx<=1;dx++) for(let dz=-1;dz<=1;dz++)
     if(inside(cx+dx,cy,cz+dz)) L.safe.add(idx(cx+dx,cy,cz+dz));
   const cells=[]; for(let i=0;i<N;i++) cells.push(i);
-  L.groups=[{cells, mines:Math.round(N*D.dens), from:[cx,cy,cz]}];
+  L.groups=[{cells, mines:Math.round(N*D.dens), from:[cx,cy,cz],
+             clusters:D.clusters, csize:D.csize}];
   L.spawn=[(cx+0.5)*BLOCK, cy*BLOCK, (cz+0.5)*BLOCK];
   return L;
 }
@@ -1559,7 +1621,8 @@ function shapeRough(D){
     for(let dx=-1;dx<=1;dx++) for(let dz=-1;dz<=1;dz++) L.safe.add(idx(cx+dx,cy,cz+dz));
     const cells=[];
     for(let i=0;i<N;i++) if(G.st[i]!==ROCK) cells.push(i);
-    L.groups=[{cells, mines:Math.round(cells.length*D.dens), from:[cx,cy,cz]}];
+    L.groups=[{cells, mines:Math.round(cells.length*D.dens), from:[cx,cy,cz],
+               clusters:D.clusters, csize:D.csize}];
     L.spawn=[(cx+0.5)*BLOCK, cy*BLOCK, (cz+0.5)*BLOCK];
     G.rockCount=rock;
     return L;
@@ -1772,15 +1835,45 @@ function shapeDungeon(){
 
 /* Play the board out with the game's own solver and count the moments it can
    prove nothing. Runs on a copy: the board is put back exactly as it was. */
+/* Is there a deduction that needs nothing but ONE clue — an arrow, or a single
+   number's own count? If there is, the position is easy whatever else is also
+   true. If there is not, and only the two-clue subset rule works, the player
+   has to hold two numbers in their head at once. That ratio is what "hard but
+   fair" actually means here, and it is the thing the difficulties are graded
+   on now. */
+function shallowMoveExists(){
+  const N=G.nx*G.ny*G.nz;
+  for(let i=0;i<N;i++){
+    if(G.st[i]!==AIR || G.cnt[i]===0) continue;
+    const [x,y,z]=cellXYZ(i);
+    // an arrow that is absent rules out a whole plane, with no counting at all
+    const [up,dn]=planeFlags(x,y,z);
+    if(G.arrows){
+      if(!up && planeHidden(x,y,z,+1).length) return true;
+      if(!dn && planeHidden(x,y,z,-1).length) return true;
+    }
+    let f=0, hid=0;
+    for(const j of nbrsOf(i)){
+      if(G.st[j]===MARKED) f++; else if(G.st[j]===SOLID) hid++;
+    }
+    if(!hid) continue;
+    const need=G.cnt[i]-f;
+    if(need===0 || need===hid) return true;      // one number, on its own
+  }
+  return false;
+}
+
 function countForcedGuesses(){
   const st0=G.st.slice(), m0=G.marked, r0=G.revealed, hov=hover;
   hover={hit:false};
-  let forced=0, guard=0;
+  let forced=0, guard=0, deep=0, steps=0;
   const N=G.nx*G.ny*G.nz;
   while(guard++ < 3000){
     if(G.revealed>=G.safeTotal) break;
     const h=findHint();
     if(h){
+      steps++;
+      if(!shallowMoveExists()) deep++;      // only stacked logic would do here
       if(h.mine){ if(G.st[h.target]===SOLID){ G.st[h.target]=MARKED; G.marked++; } }
       else if(G.st[h.target]===SOLID) revealAt(h.target,true);
       continue;
@@ -1798,8 +1891,10 @@ function countForcedGuesses(){
     revealAt(t,true);
   }
   G.st.set(st0); G.marked=m0; G.revealed=r0; hover=hov;
+  lastDepth = steps ? deep/steps : 0;
   return forced;
 }
+let lastDepth = 0;
 
 function genWorld(d){
   /* The dungeon brings its own dimensions; the difficulty only chooses the
@@ -1835,9 +1930,15 @@ function genWorld(d){
       let placed=0;
       for(const g of L.groups){
         const pool=g.cells.filter(i => !safe.has(i) && G.st[i]!==ROCK);
-        const want=Math.min(g.mines, pool.length);
         const f=g.from || [0,0,0];
-        for(const i of weightedPick(pool, want, f[0], f[1], f[2])){
+        let cells;
+        if(g.clusters){
+          const n = g.clusters[0] + ((rnd()*(g.clusters[1]-g.clusters[0]+1))|0);
+          cells = placeClusters(pool, Math.round(n*clusterScale), g.csize[0], g.csize[1], f[0],f[1],f[2]);
+        } else {
+          cells = weightedPick(pool, Math.min(g.mines, pool.length), f[0],f[1],f[2]);
+        }
+        for(const i of cells){
           if(G.mine[i]) continue;
           G.mine[i]=1; placed++;
         }
@@ -1869,12 +1970,13 @@ function genWorld(d){
      hoping the density lands somewhere reasonable. If the band cannot be hit
      in TRIES deals, keep the closest miss rather than shipping a wild one. */
   const band = (!dung && D.guess) ? D.guess : null;
-  const TRIES = band ? 60 : 1;
+  const TRIES = band ? 80 : 1;
   let bestSnap=null, bestOff=1e9;
   /* Kept so the nudge is applied to the ORIGINAL count every time. Multiplying
      the running value compounds: 2% over thirty-six deals is not 2%, it is
      double, and Sorcerer quietly drifted from 48 mines to 57. */
   const baseMines = L.groups.map(g=>g.mines);
+  let clusterScale = 1;      // nudged when a band keeps coming out too easy
   for(let t=0; t<TRIES; t++){
     G.st.set(stBase);
     /* A new curve every deal. The exponent is what decides whether the mines
@@ -1893,17 +1995,25 @@ function genWorld(d){
     layMines();
     if(!band){ G.guesses=null; break; }
     const fg = countForcedGuesses();
-    if(fg>=band[0] && fg<=band[1]){ G.guesses=fg; bestSnap=null; break; }
-    const off = fg<band[0] ? band[0]-fg : fg-band[1];
+    const dp = lastDepth;
+    const dband = D.depth || [0,1];
+    const okG = fg>=band[0] && fg<=band[1];
+    const okD = dp>=dband[0] && dp<=dband[1];
+    if(okG && okD){ G.guesses=fg; G.depth=dp; bestSnap=null; break; }
+    /* Guesses first: a board outside the guess band is wrong, a board outside
+       the depth band is only less interesting. */
+    const off = (fg<band[0] ? band[0]-fg : fg>band[1] ? fg-band[1] : 0)*10
+              + (dp<dband[0] ? dband[0]-dp : dp>dband[1] ? dp-dband[1] : 0);
     if(off < bestOff){
       bestOff=off;
-      bestSnap={fg, mine:G.mine.slice(), cnt:G.cnt.slice(), st:G.st.slice(),
+      bestSnap={fg, dp, mine:G.mine.slice(), cnt:G.cnt.slice(), st:G.st.slice(),
                 safeTotal:G.safeTotal, revealed:G.revealed, marked:G.marked, mines:G.mines};
     }
     if(t===TRIES-1 && bestSnap){
       G.mine.set(bestSnap.mine); G.cnt.set(bestSnap.cnt); G.st.set(bestSnap.st);
       G.safeTotal=bestSnap.safeTotal; G.revealed=bestSnap.revealed;
-      G.marked=bestSnap.marked; G.mines=bestSnap.mines; G.guesses=bestSnap.fg;
+      G.marked=bestSnap.marked; G.mines=bestSnap.mines;
+      G.guesses=bestSnap.fg; G.depth=bestSnap.dp;
     }
   }
   /* Chests go in after the mines, because a chest only ever sits in a block
@@ -3910,11 +4020,15 @@ function updateDiffNote(){
   /* Arcane's structure eats 15%-30% of the box, and its mines are measured
      against the blocks that survive it — so quoting a count off the bounding
      box would be a lie by about a quarter. */
-  const shaped = D.rough
-    ? `${D.nx} × ${D.ny} × ${D.nz} with 15–30% solid structure · ${(D.dens*100).toFixed(0)}% of the remaining blocks are mines`
-    : `${D.nx} × ${D.ny} × ${D.nz} = ${n} blocks · ${Math.round(n*D.dens)} mines (${(D.dens*100).toFixed(1)}%)`;
+  const cl = D.clusters
+    ? `${D.clusters[0]}–${D.clusters[1]} clusters of ${D.csize[0]}–${D.csize[1]} mines`
+    : `${Math.round(n*D.dens)} mines`;
+  const st = D.rough ? ` · ${Math.round(D.rough[0]*100)}–${Math.round(D.rough[1]*100)}% solid structure` : '';
+  const gs = D.guess && D.guess[1]===0
+    ? ' · no guesswork: every board is solvable by logic alone'
+    : (D.guess ? ` · ${D.guess[0]}–${D.guess[1]} coin tosses` : '');
   $('dNote').textContent =
-    `${shaped} · cave ${D.nx*BLOCK} × ${D.ny*BLOCK} × ${D.nz*BLOCK} m · nothing lives here`;
+    `${cl}${st} · cave ${D.nx*BLOCK} × ${D.ny*BLOCK} × ${D.nz*BLOCK} m${gs} · nothing lives here`;
 }
 /* Custom writes straight into its DIFFS entry, so genWorld needs no special
    case at all — it is just another difficulty whose numbers you picked. */
