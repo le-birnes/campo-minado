@@ -528,12 +528,17 @@ const NUM_R   = 0.45;   // number hit radius: smaller than the glyph (~0.52),
                         // (see MARK_NUM_R for the tighter right-click radius)
                         // or the number steals shots aimed at the block behind
 const ECHO_DUR= 3.45;   // echo duration on neighboring blocks (75% of 4.6)
-/* Right click has to serve flagging first. Numbers sit at cell centres and
-   your eye sits 0.28 m below them, so a level shot at a block down the row
-   grazes every number on the way: at the full radius a third of right clicks
-   aimed at a wall were being eaten by a digit. Tighter here means you have to
-   be looking straight at the number to light it up, and everything else flags. */
-const MARK_NUM_R = 0.20;
+/* Numbers sit at cell centres, so a level shot at a block several cells down a
+   row passes through the centre of every number between here and there, and a
+   third of right clicks meant for the wall get eaten by a digit.
+
+   This constant was the attempted fix and it is deliberately not used. Measured
+   A/B over 606 attempts: 32.7% of flags stolen at the 0.45 glyph radius, and
+   32.7% at 0.20. Shrinking the radius cannot help when the perpendicular
+   distance is ~0 by construction — collinear is collinear. Left here, unused,
+   with the number that retired it, so nobody wires it up again expecting a fix.
+   A real fix would separate the two actions by range, not by radius. */
+const MARK_NUM_R = 0.20;   // unused: see above
 const HINT_DUR= 9.0;    // hints hold longer: you are meant to read them
 const FUSE_T  = 0.85;   // the hit mine glows before taking everything
 
