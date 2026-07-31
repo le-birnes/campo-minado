@@ -37,6 +37,7 @@ const stats = { walked:0, jumps:0, stuck:0, noRoute:0, dugOut:0, insideRock:0,
                 fell:0, shots:0, flags:0, noEffect:0, killed:0, shotAt:0,
                 chords:0, chordDud:0, opened:0, chests:0, climbed:0, misflag:0,
                 chordOffered:0, chordNoAim:0, gaveUp:0, airJump:0,
+                mineOffered:0, safeOffered:0, chordSteps:0,
                 ticks:0, routes:0, routeCells:0, approaches:0, sightRays:0, steps:0,
                 guesses:0, guessMines:0 };
 
@@ -494,6 +495,9 @@ function playGame(diff, boss, label) {
     let acted=false, tries=0;
     const TRIES=4;
     const A=analyse();
+    stats.mineOffered += A.mines.length;
+    stats.safeOffered += A.safes.length;
+    if (A.chords.length) stats.chordSteps++;
 
     /* 1. Flag every mine the board proves. That is what wins it. */
     for (const mv of nearestFirst(A.mines).filter(m=>!giveUp(m.cell)).slice(0,6)) {
@@ -603,6 +607,9 @@ log(`on foot: ${stats.walked.toFixed(0)} m walked, ${stats.jumps} jumps `+
     `(${stats.climbed} off the ground to climb, ${stats.airJump} in mid-air)`);
 log(`navigation: stuck=${stats.stuck} noRoute=${stats.noRoute} boxedIn=${stats.dugOut} fellOutOfWorld=${stats.fell} insideRock=${stats.insideRock}`);
 log(`misaimed flags: ${stats.misflag} | targets given up on: ${stats.gaveUp+refused.size}`);
+log(`what the solver saw per step, summed: ${stats.mineOffered} proven mines, `+
+    `${stats.safeOffered} proven safes, ${stats.chordOffered} chords `+
+    `(on ${stats.chordSteps} of ${stats.steps} steps)`);
 log(`chording: ${stats.chordOffered} chances offered across all steps, `+
     `${stats.chords} taken, ${stats.chordNoAim} refused for want of an aim`);
 log(`guessing: ${stats.guesses} times nothing was provable; the nearest frontier block `+
