@@ -29,8 +29,11 @@ So:
   * a timeout is reported as "endless loop", not "slow", because on a blocked
     main thread that is what it always is.
 
-Reaping only ever targets processes whose command line contains --headless, so
-the browser Marcelo is actually playing in is never touched.
+Reaping only ever kills Chrome carrying THIS TOOL'S OWN profile directory in
+its command line. Matching on "--headless" alone was a serious mistake:
+E:/FerrariVoz/wpp/wpp_queue_sender.mjs drives its own headless Chrome, and a
+broad reap killed that WhatsApp session repeatedly. Never kill by "looks like
+something I might have started" — only by a fingerprint you know is yours.
 
 Always run the smallest case that can show the bug: Apprentice is 300 cells,
 the dungeon is 7776.
@@ -48,14 +51,26 @@ if not os.path.exists(CHROME):
 CLOSE = "\nrequestAnimationFrame(frame);\n\n})();"
 
 
+# Every profile this tool ever creates lives under here, and the path appears
+# in the command line as --user-data-dir. That is the ONLY thing reap matches
+# on. Matching on "--headless" alone was a serious mistake: Marcelo runs
+# E:/FerrariVoz/wpp/wpp_queue_sender.mjs, a WhatsApp queue sender that drives
+# its own headless Chrome, and a broad reap killed that browser over and over.
+# Never kill by "looks like a browser I might have started" — kill only what
+# carries this tool's own fingerprint.
+MARK = os.path.join(HERE, "cdata").replace("\\", "/").lower()
+
+
 def reap(verbose=False):
-    """Kill headless Chrome left over from earlier runs. Headless only."""
+    """Kill ONLY the headless Chrome this tool started, identified by its
+    throwaway profile directory. Never anything else."""
     killed = []
     try:
         out = subprocess.run(
             ["powershell", "-NoProfile", "-Command",
              "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
-             "Where-Object { $_.CommandLine -like '*--headless*' } | "
+             "Where-Object { $_.CommandLine -like '*--headless*' -and "
+             "$_.CommandLine -like '*" + MARK.replace("/", "\\") + "*' } | "
              "Select-Object -ExpandProperty ProcessId"],
             capture_output=True, text=True, timeout=30)
         for line in (out.stdout or "").split():
@@ -86,6 +101,7 @@ def run(html_path, budget=8000, shot=None, size=None, cap=CAP_DEFAULT, profile=N
     # ABSOLUTE, always: a relative --user-data-dir makes Chrome pop a GUI error
     # dialog on the user's own screen. It has done that twice.
     prof = os.path.abspath(profile or os.path.join(HERE, "cdata_run"))
+    assert "cdata" in os.path.basename(prof), "profile must carry the reap fingerprint"
     os.makedirs(prof, exist_ok=True)
     args = [CHROME, "--headless=new", "--disable-gpu", "--use-angle=swiftshader",
             "--enable-unsafe-swiftshader", "--no-first-run", "--no-sandbox",
