@@ -1,7 +1,7 @@
 # Plan — pick up here on `/resume`
 
 Live: https://le-birnes.github.io/campo-minado/
-Last commit: `b1663df` — retired `MARK_NUM_R` with the measurement that retires it.
+All six open questions were answered on 2026-07-31 and the work is done and live.
 
 Last session ended **mid-way through fixing the playtest bot**. Everything else
 is done, pushed and live.
@@ -112,39 +112,21 @@ This now depends on the bot, which is the thing that would do the simulating.
 
 ---
 
-## 4. Open questions for Marcelo
+## 4. Open questions — ANSWERED 2026-07-31
 
-1. **Arcane is 60 x 16 x 60 m**, not 60 x 15 x 60 — 15 m is not a whole number
-   of 4 m blocks. Fine, or reshape?
-2. **The Archon is 18.6% of all spawns** now that it gates on a 3 rather than a
-   6. That follows from the odds set, but it is frequent for a boss.
-3. **Apprentice at 6% opens 39% of the board on the first dig** (Sorcerer 7.7%,
-   Arcane 2.6%). Honest consequence of the rebalance, not a bug.
-4. **Life stays in Boss Master** despite the HUD being cut back, since not
-   knowing whether the next hit kills you is not a design choice. Confirm.
-5. **An enemy shot setting off a mine ends the run** with no mistake by the
-   player. Per spec, but harsh — deliberate?
-6. Nothing has **played a dungeon start to finish**. That is what the bot is for.
+1. **Arcane 60 x 16 x 60** — keep it. Done.
+2. **Archon frequency** — keep the 3-gate, halve the per-variant odds, and add
+   enemies coming out of destroyed blocks on a 3-75 shot fuse. Done.
+3. **Apprentice 6%** — keep it. Done.
+4. **Life in the HUD** — keep it, and scale the extra-life chest with the board:
+   30 / 13 / 5%. Done.
+5. **Enemy fire setting off a mine** — keep it, crack first. Already the
+   behaviour; the crack graphic was fixed to sit on the block.
+6. **Modes** — three difficulties x two modes. 3D Minesweeper spawns nothing at
+   all. Done.
 
----
+### Still to do, per difficulty
+The dungeon is shared by all three difficulties for now. Marcelo will configure
+per-difficulty dungeons later; `DUNGEON` in index.html is the single place that
+changes.
 
-## 5. Smaller things
-
-- Repo is still `campo-minado`; the URL is Portuguese for an English game.
-  Renaming redirects the old path, so nothing breaks — Marcelo's call.
-- First commit message is still Portuguese.
-
----
-
-## Working agreement
-
-- **Push after every change.** Do not batch. Marcelo watches the live site.
-- When polling GitHub Pages, grep for a marker unique to the *newest* commit.
-  Polling for an older marker reports success too early — it has already caused
-  one false "deployed", and nearly a second one this session.
-- The working copy is CRLF and git stores LF, so a byte-compare against the live
-  site must be against `git show HEAD:index.html`, not the file on disk.
-- **Verify by measuring, not by reasoning about the code.** Every real bug has
-  come from counting something. So has every false alarm: this session alone,
-  three "failures" were the harness measuring a ceiling instead of a jump, and
-  one was a screenshot script clearing the very cell it was about to test.
