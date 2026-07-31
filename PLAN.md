@@ -31,20 +31,21 @@ measurement harnesses: `python tools/run_harness.py my.js`.
 | Audit invariants predated ROCK and pre-carved air (`air === revealed`, `safeTotal === N - mines`) and fired on every Arcane and every dungeon | baseline air/rock snapshot; `revealed + openable === safeTotal` |
 | Guessed blind, died on move two, exercised nothing | `SAFE_GUESS = true` **deliberately**: it may see the mine array only when out of deductions, and it still records what the guess would have cost — 33% of the time the nearest frontier block was a mine |
 
-### Last measured state — before the refusal-memory fix landed
+### Last measured state — all fixes in, run completed
 
 ```
-games=7 finished=2 actions=1763
-  Apprentice   finished           Sorcerer   ran out of steps (stuck on one cell)
+games=7 finished=3 actions=1092
+  Apprentice   finished           Sorcerer   finished
   Arcane       nothing reachable  Custom-max finished
-  Custom-min   died to a mine     Dungeon x2 nothing it could reach
-3641 m walked, 328 jumps (282 climbing)
-noRoute=459  stuck=29  boxedIn=3  fellOutOfWorld=0  insideRock=0
-FAULTS: 694 — all one cell, which is exactly what the refusal memory fixes
+  Custom-min   nothing reachable  Dungeon x2 nothing it could reach
+3600 m walked, 342 jumps (291 climbing)
+noRoute=735  stuck=34  boxedIn=4  fellOutOfWorld=0  insideRock=0
+misaimed flags: 4          (was 694)
+FAULTS: none               (was 694)
 ```
 
-**The run with the refusal fix never finished. Start by running it.** Expect the
-694 faults to collapse to near zero.
+The audit is clean and Sorcerer, which used to burn 700 moves on one block, now
+finishes. **No need to re-run to confirm — this is that run.**
 
 ### Then chase, in order
 
@@ -55,7 +56,14 @@ FAULTS: 694 — all one cell, which is exactly what the refusal memory fixes
    mine is diggable-to from spawn, so this is the bot, not the level. Suspect
    the candidate sightline search giving up too early, or the router failing to
    cross a shaft.
-3. **`noRoute=459`** is the same question from the other end.
+3. **`noRoute=735`** is the same question from the other end, and it went *up*
+   as the bot survived longer — so it is a rate, not a count: the longer it
+   plays, the more targets it cannot find a standing spot for. Three of seven
+   games still end "nothing it could reach", which is now the single thing
+   between the bot and playing a board start to finish.
+4. **`targets given up on: 0` is a reporting bug**, not a result. `refused` is
+   reset per game and read after the last one, so it only ever shows the final
+   game's leftovers. Accumulate it across games.
 
 ### Out of scope for now
 
