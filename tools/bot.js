@@ -36,7 +36,7 @@ let auditN = 0;
 const stats = { walked:0, jumps:0, stuck:0, noRoute:0, dugOut:0, insideRock:0,
                 fell:0, shots:0, flags:0, noEffect:0, killed:0, shotAt:0,
                 chords:0, chordDud:0, opened:0, chests:0, climbed:0, misflag:0,
-                chordOffered:0, chordNoAim:0, gaveUp:0, airJump:0,
+                chordOffered:0, chordNoAim:0, gaveUp:0, airJump:0, explored:0, dodged:0,
                 mineOffered:0, safeOffered:0, chordSteps:0,
                 ticks:0, routes:0, routeCells:0, approaches:0, sightRays:0, steps:0,
                 guesses:0, guessMines:0 };
@@ -107,6 +107,32 @@ function tick() {
   return true;
 }
 function idle(sec) { for (let k=0;k<sec/DT;k++) if(!tick()) return false; return true; }
+
+/* Anything with a lock running down has already chosen where to shoot, and it
+   chose by leading you — so holding a straight line is no defence and standing
+   still is worse. Break sideways for as long as the telegraph lasts. Mine
+   enemies are welcome to their shot; this is about not being a stationary
+   target for the rest. */
+function beingAimedAt(){
+  for(const e of enemies) if(e.aim && e.lock>0) return e;
+  return null;
+}
+function dodge(){
+  const e = beingAimedAt();
+  if(!e) return false;
+  stats.dodged++;
+  // strafe across its line rather than along it
+  const ax=P.x-e.x, az=P.z-e.z;
+  const len=Math.hypot(ax,az)||1;
+  const sx=-az/len, sz=ax/len;                 // perpendicular, on the flat
+  const dir = (stats.dodged & 1) ? 1 : -1;     // alternate, so it cannot lead us either
+  P.yaw = Math.atan2(-sx*dir, -sz*dir);
+  IN.f=1; IN.b=IN.l=IN.r=0; IN.sprint=true;
+  const frames = Math.max(4, Math.ceil(Math.min(0.5, e.lock)/DT));
+  for(let k=0;k<frames;k++) if(!tick()){ IN.f=0; IN.sprint=false; return false; }
+  IN.f=0; IN.sprint=false;
+  return true;
+}
 
 /* A jump has to re-arm jumpFired, or the game (correctly) refuses to fire a
    second one from a button that was never released. Holding the flag down
@@ -329,6 +355,19 @@ function approachOld(cell) {
   return false;
 }
 /* Would the block be in view from a standing position in this cell? */
+/* How a player actually finds something to do, which is not what this bot was
+   doing. It only ever acted when it could already prove a target AND stand
+   somewhere with a clean line to it; with nothing provable in sight it simply
+   stood still. A person walks.
+
+   STANDOFF is three blocks. Walking right up to a block to shoot it is both
+   unlike a player and dangerous — you cannot see what you are standing in.
+   Twelve is as far as the shot carries.
+
+   `explore` picks somewhere worth being: the reachable spot that can see the
+   most unopened blocks it cannot see from here. That is "map the area by
+   moving" — the bot goes where there is something new to look at. */
+const STANDOFF = 3*BLOCK, RANGE_MAX = 12*BLOCK;
 function seesFrom(x,y,z, cell){
   stats.sightRays++;
   const [tx,ty,tz]=cellXYZ(cell);
@@ -337,8 +376,53 @@ function seesFrom(x,y,z, cell){
   let vx=ax-ex, vy=ay-ey, vz=az-ez;
   const d=Math.hypot(vx,vy,vz)||1;
   if (d>13*BLOCK) return false;
-  const h=raycast(ex,ey,ez, vx/d,vy/d,vz/d, 13*BLOCK, false);
+  if(d < STANDOFF || d > RANGE_MAX) return false;
+  const h=raycast(ex,ey,ez, vx/d,vy/d,vz/d, RANGE_MAX, false);
   return !!(h.hit && h.x===tx && h.y===ty && h.z===tz);
+}
+
+/* Somewhere new to stand. Scores every reachable spot by how many unopened
+   blocks it can see that the bot cannot see from where it is, and walks to the
+   best one. This is the difference between a bot that gives up and a bot that
+   goes and has a look. */
+function explore(){
+  const from=standCell();
+  if(from<0) return false;
+  if(from!==reachFrom || !reachList.length) floodReach(from);
+  if(reachList.length<2) return false;
+  const seenNow = visibleFrontier(from);
+  let best=null;
+  // sample rather than score all of them; the flood is distance-ordered, so
+  // taking every fourth still spreads across the whole reachable area
+  for(let i=1;i<reachList.length;i+=4){
+    const g=reachList[i];
+    const gain=visibleFrontier(g) - seenNow;
+    const path=pathFrom(g);
+    if(!path || !path.length) continue;
+    const score = gain - path.length*0.15;      // near and revealing beats far
+    if(!best || score>best.score) best={g, score, path, gain};
+  }
+  if(!best || best.gain<=0) return false;
+  stats.explored++;
+  if(follow(best.path, 2.2)){ floodReach(standCell()); return true; }
+  floodReach(standCell());
+  return false;
+}
+/* How many unopened blocks are in view from a standing cell. Sampled on a
+   coarse ring rather than every cell: this runs for a lot of candidates. */
+function visibleFrontier(cell){
+  const [x,y,z]=cellXYZ(cell);
+  const ex=(x+0.5)*BLOCK, ey=y*BLOCK+EYE, ez=(z+0.5)*BLOCK;
+  let n=0;
+  for(let a=0;a<12;a++){
+    const th=a/12*6.283;
+    for(const pitch of [-0.35, 0, 0.35]){
+      const dx=Math.cos(th)*Math.cos(pitch), dy=Math.sin(pitch), dz=Math.sin(th)*Math.cos(pitch);
+      const h=raycast(ex,ey,ez, dx,dy,dz, RANGE_MAX, false);
+      if(h.hit && h.kind==='block' && G.st[idx(h.x,h.y,h.z)]===SOLID && h.t>=STANDOFF) n++;
+    }
+  }
+  return n;
 }
 function approachNum(cell) {
   if (lineToNum(cell)) return true;
@@ -558,6 +642,8 @@ function playGame(diff, mode, label) {
 
     if (G.boss && enemies.length) {
       peak=Math.max(peak,enemies.length);
+      if (dodge()) moves++;                    // do not stand in the telegraph
+      if (G.state!=='play') break;
       if (huntEnemies()) moves++;
     }
     if (G.state!=='play') break;
@@ -636,10 +722,15 @@ function playGame(diff, mode, label) {
       break;
     }
 
-    /* A step that achieved nothing means the four targets it tried were
-       unreachable, not that the board is finished. They are refused, so the
-       next step tries different ones. Only give up after a run of steps that
-       all came back empty. */
+    /* Nothing was reachable from here — so go somewhere else and look again,
+       the way a player would, instead of standing in one spot deciding the
+       board is over. */
+    if (!acted && explore()) { acted=true; moves++; audit(label+' explore'); }
+
+    /* A step that achieved nothing means every target it tried was
+       unreachable AND there was nowhere better to stand. They are refused, so
+       the next step tries different ones. Only give up after a run of steps
+       that all came back empty. */
     if (!acted) {
       if (++dry >= 12) { stats.dugOut++; endWhy='nothing it could reach'; break; }
     } else dry=0;
@@ -681,6 +772,7 @@ for (const [d,mode,label] of plan) {
 
 log(`games=${games} finished=${wins} actions=${totalMoves}`);
 for (const k in per) log(`  ${k}: ${per[k].n} games, ${per[k].w} finished, ${per[k].m} actions, peakFoes=${per[k].p} — ended: ${per[k].why}`);
+log(`exploring: ${stats.explored} moves to a better vantage, ${stats.dodged} dodges`);
 log(`on foot: ${stats.walked.toFixed(0)} m walked, ${stats.jumps} jumps `+
     `(${stats.climbed} off the ground to climb, ${stats.airJump} in mid-air)`);
 log(`navigation: stuck=${stats.stuck} noRoute=${stats.noRoute} boxedIn=${stats.dugOut} fellOutOfWorld=${stats.fell} insideRock=${stats.insideRock}`);
