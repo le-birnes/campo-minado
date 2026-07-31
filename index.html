@@ -673,7 +673,7 @@ in vec3 vN, vW, vC, vHi;
 in vec2 vUV;
 in float vSeed, vEmis, vMark, vEcho, vHover;
 uniform vec3 uCam, uSun, uFog;
-uniform float uTime, uOutline, uAlpha;
+uniform float uTime, uOutline, uAlpha, uWallGrey;
 out vec4 frag;
 float hash(vec2 p, float s){ return fract(sin(dot(p, vec2(127.1,311.7)) + s*13.37) * 43758.5453); }
 void main(){
@@ -694,6 +694,18 @@ void main(){
      flat color exactly where the texture stops being resolvable. */
   float pxc = max(fwidth(vUV.x), fwidth(vUV.y)) * PX;
   base = mix(base, vC*0.96, smoothstep(0.45, 1.30, pxc));
+
+  /* Wall and floor are cut from the same stone, and the sun is almost directly
+     overhead, so a vertical face and the floor it meets differ by one cel band
+     and the corner between them disappears — worst in the dungeon, where a
+     corridor is bedrock on all six sides. Pull the vertical faces toward grey:
+     the floor keeps the warm sand, the walls go cooler and flatter, and the
+     edge between them is a change of colour rather than only of brightness.
+     Only the world batch asks for this; enemies and the staff pass 0, or the
+     tier colours would be washed out from the side. */
+  float wallness = 1.0 - abs(N.y);
+  float grey = dot(base, vec3(0.299, 0.587, 0.114));
+  base = mix(base, vec3(grey) * 0.94, wallness * uWallGrey);
 
   /* --- luz em degraus (cel) --- */
   float ndl  = max(dot(N, uSun), 0.0);
@@ -808,7 +820,8 @@ const uC = {
   cam:gl.getUniformLocation(pCube,'uCam'),   sun:gl.getUniformLocation(pCube,'uSun'),
   fog:gl.getUniformLocation(pCube,'uFog'),   time:gl.getUniformLocation(pCube,'uTime'),
   hover:gl.getUniformLocation(pCube,'uHover'), outline:gl.getUniformLocation(pCube,'uOutline'),
-  alpha:gl.getUniformLocation(pCube,'uAlpha')
+  alpha:gl.getUniformLocation(pCube,'uAlpha'),
+  wallGrey:gl.getUniformLocation(pCube,'uWallGrey')
 };
 const uB = {
   proj:gl.getUniformLocation(pBB,'uProj'), view:gl.getUniformLocation(pBB,'uView'),
@@ -3812,7 +3825,9 @@ function frame(now){
   if(hover.hit && hover.kind==='block' && G.state==='play')
     gl.uniform3f(uC.hover,(hover.x+0.5)*BLOCK,(hover.y+0.5)*BLOCK,(hover.z+0.5)*BLOCK);
   else gl.uniform3f(uC.hover, 1e9,1e9,1e9);
+  gl.uniform1f(uC.wallGrey, 0.38);
   drawCubes(worldB);
+  gl.uniform1f(uC.wallGrey, 0.0);
 
   // escombros
   {

@@ -35,6 +35,7 @@ let auditN = 0;
 const stats = { walked:0, jumps:0, stuck:0, noRoute:0, dugOut:0, insideRock:0,
                 fell:0, shots:0, flags:0, noEffect:0, killed:0, shotAt:0,
                 chords:0, chordDud:0, opened:0, chests:0, climbed:0, misflag:0,
+                chordOffered:0, chordNoAim:0, gaveUp:0,
                 guesses:0, guessMines:0 };
 
 /* ---------------- audit ----------------
@@ -441,6 +442,7 @@ function playGame(diff, boss, label) {
   if (boss) G.boss = true;
   G.state='play';
   IN.f=IN.b=IN.l=IN.r=0; IN.jumpHeld=false; IN.jumpFired=false; IN.sprint=false;
+  stats.gaveUp += refused.size;      // carry it across games before resetting
   refused = new Map();
   snapshotWorld();
   audit(label+' fresh');
@@ -466,8 +468,8 @@ function playGame(diff, boss, label) {
     const A=analyse();
 
     /* 1. Flag every mine the board proves. That is what wins it. */
-    for (const mv of nearestFirst(A.mines).filter(m=>!giveUp(m.cell)).slice(0,4)) {
-      if (!approach(mv.cell)) continue;
+    for (const mv of nearestFirst(A.mines).filter(m=>!giveUp(m.cell)).slice(0,6)) {
+      if (!approach(mv.cell)) { refuse(mv.cell); continue; }
       /* approach() already aimed at the point on this block it can actually
          see. Re-aiming at the geometric centre undoes that, and mark() casts
          its own ray — so the flag lands on whatever is in front of the centre
@@ -483,8 +485,9 @@ function playGame(diff, boss, label) {
     }
 
     /* 2. Then clear blanks wholesale by chording a satisfied number. */
-    if (!acted) for (const mv of nearestFirst(A.chords).filter(m=>!giveUp(m.cell)).slice(0,4)) {
-      if (!approachNum(mv.cell)) continue;
+    stats.chordOffered += A.chords.length;
+    if (!acted) for (const mv of nearestFirst(A.chords).filter(m=>!giveUp(m.cell)).slice(0,6)) {
+      if (!approachNum(mv.cell)) { stats.chordNoAim++; refuse(mv.cell); continue; }
       const before=G.revealed;
       thinkAct(); stats.chords++; moves++; acted=true;
       audit(label+' chord '+moves);
@@ -495,8 +498,8 @@ function playGame(diff, boss, label) {
     }
 
     /* 3. A proven-safe block, if chording could not reach one. */
-    if (!acted) for (const mv of nearestFirst(A.safes).filter(m=>!giveUp(m.cell)).slice(0,4)) {
-      if (!approach(mv.cell)) continue;
+    if (!acted) for (const mv of nearestFirst(A.safes).filter(m=>!giveUp(m.cell)).slice(0,6)) {
+      if (!approach(mv.cell)) { refuse(mv.cell); continue; }
       /* The solver said this block is safe. If it is not, that is either a
          wrong deduction or a shot that went somewhere other than where it was
          aimed — both worth knowing about, and neither is visible from the
@@ -512,7 +515,7 @@ function playGame(diff, boss, label) {
 
     /* 4. Only when nothing is provable: the nearest frontier block. */
     if (!acted) for (const mv of frontierGuess(new Set(A.mines.map(m=>m.cell)))) {
-      if (!approach(mv.cell)) continue;
+      if (!approach(mv.cell)) { refuse(mv.cell); continue; }
       const before=G.revealed;
       shoot(); stats.shots++; moves++; acted=true;
       audit(label+' guess '+moves);
@@ -554,7 +557,9 @@ log(`games=${games} finished=${wins} actions=${totalMoves}`);
 for (const k in per) log(`  ${k}: ${per[k].n} games, ${per[k].w} finished, ${per[k].m} actions, peakFoes=${per[k].p} — ended: ${per[k].why}`);
 log(`on foot: ${stats.walked.toFixed(0)} m walked, ${stats.jumps} jumps (${stats.climbed} to climb)`);
 log(`navigation: stuck=${stats.stuck} noRoute=${stats.noRoute} boxedIn=${stats.dugOut} fellOutOfWorld=${stats.fell} insideRock=${stats.insideRock}`);
-log(`misaimed flags: ${stats.misflag} (targets given up on: ${refused.size})`);
+log(`misaimed flags: ${stats.misflag} | targets given up on: ${stats.gaveUp+refused.size}`);
+log(`chording: ${stats.chordOffered} chances offered across all steps, `+
+    `${stats.chords} taken, ${stats.chordNoAim} refused for want of an aim`);
 log(`guessing: ${stats.guesses} times nothing was provable; the nearest frontier block `+
     `would have been a mine ${stats.guessMines}x (${stats.guesses?(100*stats.guessMines/stats.guesses).toFixed(1):0}%) `+
     `— SAFE_GUESS=${SAFE_GUESS} means the bot dodged those rather than dying to them`);

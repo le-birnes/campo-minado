@@ -1,4 +1,6 @@
-tools/bot_*.html
-tools/cdata*/
-tools/t_*.html
-tools/p_*/
+bot_*.html
+t_*.html
+cdata*/
+p_*/
+__pycache__/
+*.png
