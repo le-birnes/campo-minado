@@ -184,9 +184,12 @@ function stepTarget(x, z, fromY){
   return -1;
 }
 const NB4 = [[1,0],[-1,0],[0,1],[0,-1]];
-/* Long enough to cross the dungeon, short enough that a hopeless target is
-   not walked to across the entire map. */
-const PATH_MAX = 70;
+/* Twenty-five, not seventy. Every waypoint is up to 66 simulated frames of
+   real physics, and CLIMB=4 made routes far longer, so a single step could
+   spend eighteen thousand ticks walking to four different targets. A player
+   does not cross the level for one block either — if it is that far away,
+   there is something nearer worth doing. */
+const PATH_MAX = 25;
 
 /* Everywhere the bot can stand, worked out ONCE per step and reused.
    Scanning a volume around each target and firing a sightline ray at every
@@ -263,7 +266,7 @@ function walkTo(cell, budget) {
   const [cx,cy,cz]=cellXYZ(cell);
   const tx=(cx+0.5)*BLOCK, tz=(cz+0.5)*BLOCK, ty=cy*BLOCK;
   let best=Infinity, since=0;
-  const steps=(budget||2.2)/DT;
+  const steps=(budget||1.3)/DT;
   for (let k=0;k<steps;k++) {
     const dx=tx-P.x, dz=tz-P.z, d=Math.hypot(dx,dz);
     if (d<1.2 && Math.abs(P.y-ty)<BLOCK*0.9) { IN.f=0; IN.jumpHeld=false; return true; }
@@ -331,7 +334,7 @@ function approach(cell) {
     if (++rays > 3) break;                 // three attempts, then it is not worth it
     const path=pathFrom(goal);
     if (!path) continue;
-    if (follow(path, 2.2) && lineTo(cell)) return true;
+    if (follow(path, 1.3) && lineTo(cell)) return true;
     floodReach(standCell());               // we moved; the tree is stale
     return false;
   }
@@ -363,7 +366,7 @@ function approachOld(cell) {
     const path = route(from, goal);
     if (!path || path.length > PATH_MAX) continue;
     routed=true;
-    if (follow(path, 2.2) && lineTo(cell)) return true;
+    if (follow(path, 1.3) && lineTo(cell)) return true;
   }
   if (!routed) stats.noRoute++; else stats.stuck++;
   return false;
@@ -487,7 +490,7 @@ function approachNum(cell) {
     if (++rays > 3) break;
     const path=pathFrom(goal);
     if (!path) continue;
-    if (follow(path, 2.2) && lineToNum(cell)) return true;
+    if (follow(path, 1.3) && lineToNum(cell)) return true;
     floodReach(standCell());
     return false;
   }
@@ -510,7 +513,7 @@ function approachNumOld(cell) {
   for (const [goal] of cands.slice(0,6)) {
     const path=route(from, goal);
     if (!path || path.length > PATH_MAX) continue;
-    if (follow(path, 2.2) && lineToNum(cell)) return true;
+    if (follow(path, 1.3) && lineToNum(cell)) return true;
   }
   stats.noRoute++;
   return false;

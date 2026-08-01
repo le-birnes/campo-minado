@@ -31,39 +31,50 @@ measurement harnesses: `python tools/run_harness.py my.js`.
 | Audit invariants predated ROCK and pre-carved air (`air === revealed`, `safeTotal === N - mines`) and fired on every Arcane and every dungeon | baseline air/rock snapshot; `revealed + openable === safeTotal` |
 | Guessed blind, died on move two, exercised nothing | `SAFE_GUESS = true` **deliberately**: it may see the mine array only when out of deductions, and it still records what the guess would have cost — 33% of the time the nearest frontier block was a mine |
 
-### Where it stands — PAUSED 2026-07-31
+### Where it stands — 2026-08-01
 
-**Arenas: working.** Apprentice finishes the board in 15-36 s with FAULTS: none.
-The last full suite finished 3 of 7 games with zero invariant violations.
+**Apprentice: solved.** 284/284 opened, 16/16 flagged, zero faults, ~35 s.
+Guesses fell from 51 to 4 once it used the game's own solver (findHint) instead
+of its own two-rule one.
 
-**Dungeon: still 0 actions.** Last measurement, 30 steps on a fresh dungeon:
-48 approaches, all of them noRoute, 1296 sightline rays and not one success,
-only ~27 standable cells reachable from spawn. So the bot floods the entry
-corridor and then cannot find anywhere to stand that can see a proven mine.
+**Dungeon: never completed a run.** Escalating 30s -> 45 -> 67 -> 101 -> 151 ->
+227 -> 300, every rung timed out. Best partial, from the last run that finished
+at all: 100 steps, opened 33 of 265 blocks, flagged 7 of 54, then stopped with
+"nothing it could reach" — 232 blocks left and exactly ONE of them visible from
+anywhere it could stand, because it was on the chamber floor and could not climb
+onto a mass two to five blocks tall.
 
-Unfinished diagnostic: `tools/h_nav.js` — counts standable cells on the board
-versus reachable from spawn, then for the first proven mine reports the nearest
-reachable stand, how many reachable spots can see it, and what the ray hits
-instead. Run that first; it decides between "the level is not navigable there"
-and "the bot's standable model is too strict".
+**Five performance fixes in a row failed**, which is the signal that the
+architecture is wrong rather than the constants:
 
-Two suspicions worth testing in that order:
-1. On a FRESH dungeon the proven mines are on the face of an intact mass, and
-   the chamber floor in front of them may not be `standable` — the mass sits on
-   it. A bot that refuses to shoot unless it can stand somewhere with a clean
-   sightline may simply have nowhere legal to be.
-2. `seesFrom` requires the ray to terminate exactly on the target cell. Against
-   a flat face at an oblique angle it will usually hit a neighbour instead.
+  CLIMB 2 -> 4          fixed the climbing, made the reachable set explode
+  flood capped at 1200  no
+  approach scan at 150  no
+  explore candidates 40 no
+  solver every 6 steps  no
+  paths 70 -> 25, walk budget -40%   no
 
-### Things that looked like bot bugs and were not
+### The diagnosis
 
-- Harnesses "hanging" was an identifier collision: declaring `const mark` in a
-  harness clashes with the game's own `mark()`, which is a parse error, so the
-  whole script never runs and Chrome sits out its budget in silence.
-- The rest of the slowness was the game's render loop grinding through
-  `--virtual-time-budget` under software GL. `build(render=False)` now stops it.
-- The CPU that appeared to be a runaway loop of mine was Marcelo's own
-  WhatsApp queue sender, which my over-broad process reap kept killing.
+The bot decides where to go by SCORING THE REACHABLE SET, so its cost grows with
+the level. Apprentice is 300 cells and fits; the dungeon is 7776 and does not.
+Bounding the scans trades correctness for speed and gets neither.
+
+### The fix, in Marcelo's words
+
+Follow the largest viewable path in a straight line until clues appear. On
+finding them, look at ALL angles before shooting, to collect every visible cue.
+Jump only to reach more mines or unviewed cues, never as ordinary movement. Each
+completed straight run triggers a fresh scan of the surroundings, and the paths
+get mapped. Descend or ascend only once every mine in the current cluster is
+marked; if you went down early, come back up.
+
+That is fixed work per step whatever the level size — a scan from where you
+stand, take the longest sightline, walk it, rescan. The performance problem and
+the "does not behave like a player" problem have the same fix.
+
+Keep: the solver (findHint), the dodging, the refusal memory, the invariant
+audit. Replace: the exploration and navigation layer only.
 
 ### Out of scope for now
 
