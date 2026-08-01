@@ -63,7 +63,8 @@ let auditN = 0;
 const stats = { walked:0, jumps:0, shots:0, flags:0, noEffect:0,
                 killed:0, shotAt:0, chests:0, dodged:0, scans:0, rays:0,
                 ticks:0, follows:0, blocked:0, misflag:0, guesses:0, sidesteps:0, surveys:0, clueWork:0,
-                guessMines:0, byRule:{}, insideRock:0, fell:0, numFlags:0, numOpens:0 };
+                guessMines:0, byRule:{}, insideRock:0, fell:0, numFlags:0, numOpens:0,
+                lastAct:'nothing yet', foesAtDeath:0, hpAtDeath:0, deaths:{} };
 
 /* ---------------- audit ---------------- */
 let baseAir = 0, baseRock = 0;
@@ -407,9 +408,25 @@ const won = () => G.dungeon
   : G.revealed>=G.safeTotal;
 
 /* ---------------- one game ---------------- */
+/* "died to a mine" does not say whose mine. The bot declines to dig one, so a
+   detonation is either an enemy shot going through a mined block — which the
+   rules allow on purpose — or the bot's own last action doing something it did
+   not expect. Those need opposite fixes, so name it. */
+function diedHow(){
+  const foes = enemies.length;
+  stats.foesAtDeath = foes; stats.hpAtDeath = P.hp;
+  const k = G.deathBy==='shot' ? 'shot dead by an enemy'
+          : (foes ? `a mine went off with ${foes} enemy(s) alive, last own action: ${stats.lastAct}`
+                  : `a mine went off with nothing alive, last own action: ${stats.lastAct}`);
+  stats.deaths[k]=(stats.deaths[k]||0)+1;
+  return 'died — '+k;
+}
+
+const NOFOES = /[?&]nofoes/.test(location.search);
 function playGame(diff, mode, label){
   G.mode = mode;
   genWorld(diff);
+  if (NOFOES){ G.boss=false; enemies.length=0; }
   G.state='play';
   IN.f=IN.b=IN.l=IN.r=0; IN.jumpHeld=false; IN.jumpFired=false; IN.sprint=false;
   snapshotWorld();
@@ -426,15 +443,16 @@ function playGame(diff, mode, label){
 
   for (; step<cap; step++){
     if (won()){ why='finished'; break; }
-    if (G.state!=='play'){ why='died to a '+G.deathBy; break; }
+    if (G.state!=='play'){ why=diedHow(); break; }
     if (!idle(0.1)){ why='physics fault'; break; }
-    if (G.state!=='play'){ why='died to a '+G.deathBy; break; }
+    if (G.state!=='play'){ why=diedHow(); break; }
     try{ document.body.dataset.r = label+' step '+step; }catch(e){}
 
+    if (NOFOES && enemies.length) enemies.length=0;
     if (G.boss && enemies.length){
       peak=Math.max(peak,enemies.length);
       if (dodge()) moves++;
-      if (G.state!=='play') break;
+      if (G.state!=='play'){ why=diedHow(); break; }
       if (fightBack()){ moves++; audit(label+' fight'); continue; }
     }
     if (chests.length && grabChest()){ moves++; continue; }
@@ -463,6 +481,7 @@ function playGame(diff, mode, label){
           moved=true;
           if (!closeOn(u.clue) || !lineToNum(u.clue)){ refuse(u.clue); continue; }
         }
+        stats.lastAct='numflag';
         const m0=G.marked;
         startThink(); endThink();
         if (G.marked>m0){ moves++; acted=true; stats.numFlags += G.marked-m0; audit(label+' numflag'); }
@@ -521,6 +540,8 @@ function playGame(diff, mode, label){
         if (!ok){ moved=true; if (closeOn(mv.cell)) ok = clearLine(mv.cell); }
         if (ok){
           const before=G.revealed+G.marked;
+        stats.lastAct='solve';
+          if (!mv.mine && G.mine[mv.cell]) err(`${label}: the SOLVER called cell ${mv.cell} safe and it is a mine`);
           if (mv.mine) flagIt(mv.cell); else { shoot(); stats.shots++; }
           stats.byRule[mv.rule]=(stats.byRule[mv.rule]||0)+1;
           if (G.revealed+G.marked===before){ stats.noEffect++; refuse(mv.cell); }
@@ -568,6 +589,7 @@ function playGame(diff, mode, label){
         if (G.mine[w.cell]){ stats.guessMines++; refuse(w.cell); continue; }
         if (!clearLine(w.cell)){ refuse(w.cell); continue; }
         const before=G.revealed;
+        stats.lastAct='dig';
         shoot(); stats.shots++;
         if (G.revealed===before) refuse(w.cell); else { moves++; acted=true; audit(label+' dig'); }
         break;

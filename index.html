@@ -2662,7 +2662,9 @@ const enemyB  = makeCubeBatch(EN_MAX*EN_PARTS);
 const glyphB  = makeBBBatch(6800);
 const glowB   = makeBBBatch(MAXS + 500);
 const boomB   = makeBBBatch(4);   // the hit mine, drawn over everything
-const sprB    = makeBBBatch(8);   // the old things, painted
+const sprB    = makeBBBatch(8);   // kept for the death flash only
+/* One finale creature at a time, a few hundred voxels each. */
+const hellB   = makeCubeBatch(900);
 
 function rebuildWorld(){
   const d = worldB.data; let n=0;
@@ -3959,8 +3961,13 @@ const SPR_FIXED = {
   e:[1.00,0.93,0.32],  r:[0.40,0.04,0.05], R:[0.88,0.13,0.10], y:[1.00,0.68,0.14]
 };
 function hellPalette(c){
+  /* Darker and flatter than it was. The old ramp ran to a 1.62 highlight over a
+     warm mid-tone, which is the recipe for a plastic toy — "all brown and
+     fatty" was the verdict, and it was right. The body sits below its own base
+     colour now and the highlight barely lifts, so shape comes from the voxel
+     shading rather than from a bright rim. */
   const mul = k => [Math.min(1,c[0]*k), Math.min(1,c[1]*k), Math.min(1,c[2]*k)];
-  return Object.assign({k:mul(0.20), d:mul(0.55), m:mul(1.00), l:mul(1.30), h:mul(1.62)},
+  return Object.assign({k:mul(0.10), d:mul(0.34), m:mul(0.62), l:mul(0.82), h:mul(1.02)},
                        SPR_FIXED);
 }
 function buildSprites(){
@@ -4002,6 +4009,53 @@ const spriteTex = gl.createTexture();
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.bindTexture(gl.TEXTURE_2D, null);
+}
+/* ---------- the old things, in three dimensions ----------
+   A billboard always faces you, which is the Doom idiom and also exactly what
+   it looks like: a painting carried around in front of the camera. Marcelo
+   walked round one and said so.
+
+   So the same drawing becomes VOXELS. Each pixel is a cube, and how deep that
+   cube runs depends on how far the pixel sits from the edge of the silhouette:
+   an outline pixel is one deep, the middle of a belly is nine. That sculpts a
+   body out of the drawing instead of extruding a slab, and it costs one
+   distance transform per creature, computed once and cached.
+
+   The result is a real object — it has a side and a back, it turns to face you
+   the way a creature turns rather than the way a sticker does, and it is built
+   out of the same cubes as everything else in this cave. */
+const HELL_VOX = {};
+function hellVoxels(h){
+  const key = h.art;
+  if(HELL_VOX[key]) return HELL_VOX[key];
+  const rows = HELL_ART[key] || HELL_ART[HELL_SHARE[key]];
+  if(!rows) return (HELL_VOX[key]=[]);
+  const W=rows[0].length, H=rows.length;
+  const solid=(x,y)=> x>=0&&y>=0&&x<W&&y<H && rows[y][x]!=='.';
+  /* Chebyshev distance to the nearest empty pixel: cheap, and it rounds a
+     shape the way a sculptor would rather than the way a printer would. */
+  const dist=new Int16Array(W*H);
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+    if(!solid(x,y)){ dist[y*W+x]=0; continue; }
+    let r=1;
+    for(; r<=5; r++){
+      let open=false;
+      for(let dy=-r;dy<=r&&!open;dy++) for(let dx=-r;dx<=r;dx++)
+        if(Math.max(Math.abs(dx),Math.abs(dy))===r && !solid(x+dx,y+dy)){ open=true; break; }
+      if(open) break;
+    }
+    dist[y*W+x]=r;
+  }
+  const out=[];
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+    const ch=rows[y][x];
+    if(ch==='.') continue;
+    const d=dist[y*W+x];
+    const depth = Math.max(1, Math.min(9, d*2-1));      // 1, 3, 5, 7, 9
+    out.push({x: x-(W-1)/2, y: (H-1)/2-y, ch, depth});
+  }
+  HELL_VOX[key]={vox:out, W, H};
+  return HELL_VOX[key];
 }
 const SPR_UV=[];
 for(let i=0;i<SPR_N*SPR_N;i++){
@@ -5493,32 +5547,61 @@ function frame(now){
     gl.uniform1f(uC.outline, 1.0);
   }
 
-  /* The finale, painted. One quad, always square: the drawing is letterboxed
-     inside a square tile, so a square quad keeps its proportions without the
-     draw code having to know anything about how wide the creature is. */
+  /* The finale, in three dimensions. The drawing is the front elevation; the
+     depth comes from hellVoxels(). It turns to face you around its own upright
+     axis, so walking round it shows you its side and its back — the thing the
+     billboard could never do. */
   {
-    const d=sprB.data; let n=0;
+    const d=hellB.data; let n=0;
     for(const e of enemies){
-      if(!e.hell || n>=sprB.max) continue;
+      if(!e.hell) continue;
+      const V = hellVoxels(e.hell);
+      if(!V.vox || !V.vox.length) continue;
       const grow = (e.state==='emerge' ? 0.25+0.75*e.emerge : 1) * (e.mScale||1);
-      const size = 2.9*grow;
+      /* height in metres / pixels tall = the size of one voxel */
+      const unit = (3.2*grow)/V.H;
       const flash = e.flash>0 ? e.flash/0.25 : 0;
       const aimK = e.aim ? 1 - e.lock/Math.max(0.05,e.lockMax) : 0;
-      const uv = SPR_UV[e.hell.tile];
-      const o=n*BB_STRIDE;
-      d[o]=e.x; d[o+1]=e.y; d[o+2]=e.z; d[o+3]=size; d[o+4]=size;
-      d[o+5]=uv[0]; d[o+6]=uv[1]; d[o+7]=uv[2]; d[o+8]=uv[3];
-      /* It whitens when hit and warms as the shot charges — the same tells the
-         cube bodies give, moved onto the paint. */
-      d[o+9] =1+flash*1.3+aimK*0.45; d[o+10]=1+flash*1.3; d[o+11]=1+flash*1.3;
-      /* The Spectre is the Demon you can hardly see, which is the entire joke
-         of the Spectre, and it shimmers so it is not mistaken for a ghost of
-         the renderer. */
-      d[o+12]=e.hell.ghost ? 0.30+0.10*Math.sin(tGlobal*5.0) : 1;
-      d[o+13]=0; d[o+14]=2; d[o+15]=0;
-      n++;
+      const pal = hellPalette(e.hell.col);
+      const ghost = e.hell.ghost;
+      // face the player, upright: a creature turns on its feet, not in the air
+      const yaw = Math.atan2(P.x-e.x, P.z-e.z);
+      const cy=Math.cos(yaw), sy=Math.sin(yaw);
+      for(const v of V.vox){
+        if(n>=hellB.max) break;
+        const col = pal[v.ch] || pal.m;
+        const lx = v.x*unit, ly = v.y*unit;
+        const dz = v.depth*unit;
+        // local (lx, ly, 0) rotated about Y, then placed on the creature
+        const wx = e.x + cy*lx, wz = e.z - sy*lx;
+        const o = n*CUBE_STRIDE;
+        compose(d,o, wx, e.y+ly, wz, 0, yaw, 0, unit*1.02, unit*1.02, dz);
+        /* whitens when hit, warms while its shot lines up — the same tells the
+           cube bodies already give */
+        const f = 1+flash*1.1;
+        d[o+16]=Math.min(1,col[0]*f+aimK*0.30);
+        d[o+17]=Math.min(1,col[1]*f);
+        d[o+18]=Math.min(1,col[2]*f);
+        d[o+19]=0.5; d[o+20]=(v.ch==='e') ? 1 : 0; d[o+21]=0; d[o+22]=0;
+        d[o+23]=d[o+24]=d[o+25]=0;
+        n++;
+      }
+      if(ghost) break;   // the Spectre is drawn faint, below
     }
-    sprB.count=n;
+    hellB.count=n;
+    if(n){
+      const spectre = enemies.some(e=>e.hell && e.hell.ghost);
+      gl.uniform1f(uC.outline, 1.35);
+      if(spectre){
+        gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.depthMask(false);
+        gl.uniform1f(uC.alpha, 0.26+0.08*Math.sin(tGlobal*5.0));
+      }
+      drawCubes(hellB);
+      if(spectre){ gl.uniform1f(uC.alpha,1.0); gl.depthMask(true); gl.disable(gl.BLEND); }
+      gl.uniform1f(uC.outline, 1.0);
+    }
+    sprB.count=0;
   }
 
   /* ------- chests -------
