@@ -4329,6 +4329,25 @@ canvas.addEventListener('contextmenu', e=>e.preventDefault());
    is a much better failure than spinning on the spot. */
 const MOUSE_MAX = 260;
 let lookSkip = 0;
+/* A ceiling on how far the view may turn in ONE FRAME, whatever asks for it.
+   Clamping each event was not enough: a burst of events inside a single frame
+   still adds up, and after chasing four separate causes — pointer-lock spikes,
+   keys stuck down through a focus change, a gamepad nobody was holding, and
+   screen shake jittering the angles — the honest move is to bound the RESULT
+   rather than keep guessing at inputs. 0.6 rad is 34 degrees in a frame, about
+   two and a half full turns a second: faster than any real aim, slow enough
+   that nothing can spin you. */
+const FRAME_TURN = 0.6;
+let turnedThisFrame = 0, turnClamped = 0;
+function turnView(dYaw, dPitch){
+  const room = FRAME_TURN - turnedThisFrame;
+  if(room <= 0){ turnClamped++; return; }
+  const mag = Math.hypot(dYaw, dPitch);
+  if(mag > room){ const k = room/mag; dYaw*=k; dPitch*=k; turnClamped++; }
+  turnedThisFrame += Math.hypot(dYaw, dPitch);
+  P.yaw   += dYaw;
+  P.pitch = clamp(P.pitch + dPitch, -1.5, 1.5);
+}
 document.addEventListener('mousemove', e=>{
   if(G.state!=='play') return;
   if(!(locked || (dragLook && dragging))) return;
@@ -4339,9 +4358,7 @@ document.addEventListener('mousemove', e=>{
   my = clamp(my, -MOUSE_MAX, MOUSE_MAX);
   // staff sway follows the real rotation, so it inverts along with it
   const myi = my * (G.invY ? -1 : 1);
-  P.yaw   -= mx * G.sens;
-  P.pitch -= myi * G.sens;
-  P.pitch = clamp(P.pitch, -1.5, 1.5);
+  turnView(-mx * G.sens, -myi * G.sens);
   swayX = clamp(swayX - mx*0.00035, -0.05, 0.05);
   swayY = clamp(swayY - myi*0.00030, -0.05, 0.05);
 });
@@ -4546,9 +4563,7 @@ function pollPad(dt){
   const [rx,ry] = gpStick(a,2,3);
   if(rx||ry){
     const k = GP_LOOK * dt * (G.sens/0.0014) * 0.35;
-    P.yaw   -= rx * k;
-    P.pitch += (G.invY ? ry : -ry) * k;
-    P.pitch = clamp(P.pitch, -1.5, 1.5);
+    turnView(-rx * k, (G.invY ? ry : -ry) * k);
     if(rx||ry) G.lockOn = null;                             // taking manual aim drops the lock
   }
 
@@ -4709,6 +4724,7 @@ const litNums=[];
 function frame(now){
   requestAnimationFrame(frame);
   let dt = Math.min(0.05, (now-last)/1000); last=now;
+  turnedThisFrame = 0;          // the view's turning budget, refilled each frame
   tGlobal += dt;
   resize();
 
@@ -5293,9 +5309,7 @@ function lookMove(t){
   dx = clamp(dx, -180, 180); dy = clamp(dy, -180, 180);
   lookX = t.clientX; lookY = t.clientY;
   const k = LOOK_K * (G.sens / 0.0014);
-  P.yaw   -= dx * k;
-  P.pitch += (G.invY ? dy : -dy) * k;
-  P.pitch = Math.max(-1.55, Math.min(1.55, P.pitch));
+  turnView(-dx * k, (G.invY ? dy : -dy) * k);
 }
 
 /* ---------- routing ---------- */
