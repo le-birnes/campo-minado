@@ -62,7 +62,7 @@ const FAR   = 13*BLOCK;         // how far a scan ray carries
 let auditN = 0;
 const stats = { walked:0, jumps:0, shots:0, flags:0, noEffect:0,
                 killed:0, shotAt:0, chests:0, dodged:0, scans:0, rays:0,
-                ticks:0, follows:0, blocked:0, misflag:0, guesses:0,
+                ticks:0, follows:0, blocked:0, misflag:0, guesses:0, sidesteps:0, surveys:0, clueWork:0,
                 guessMines:0, byRule:{}, insideRock:0, fell:0 };
 
 /* ---------------- audit ---------------- */
@@ -166,6 +166,37 @@ function inView(cell){
   return false;
 }
 
+/* Nothing may stand between the muzzle and the target. If the line is blocked,
+   step aside — a pace left, a pace right, or one small hop to see over — and
+   look again. Firing at a target you cannot actually see is how a shot ends up
+   in a number, or in the wrong block entirely. */
+function clearLine(cell){
+  if (inView(cell)) return true;
+  const yaw = P.yaw;
+  const rx = Math.cos(yaw), rz = -Math.sin(yaw);     // camera right, on the flat
+  const tries = [[rx,rz,0], [-rx,-rz,0], [rx,rz,1], [-rx,-rz,1]];
+  for (const [sx,sz,hop] of tries){
+    const x0=P.x, y0=P.y, z0=P.z;
+    // a short sidestep, driven through the real movement flags
+    P.yaw = Math.atan2(-sx,-sz);
+    IN.f=1;
+    for (let k=0;k<0.28/DT;k++){
+      if (hop && k===2 && P.ground) jumpNow();
+      if (!tick()){ IN.f=0; IN.jumpHeld=false; return false; }
+      stats.walked += SPD_RUN*DT;
+    }
+    IN.f=0; IN.jumpHeld=false;
+    if (hop) for (let k=0;k<0.35/DT;k++) if(!tick()) return false;   // let it land
+    stats.sidesteps++;
+    P.yaw = yaw;
+    if (inView(cell)) return true;
+    // no better: put it back and try the other way
+    P.x=x0; P.y=y0; P.z=z0; P.vx=P.vy=P.vz=0;
+  }
+  P.yaw = yaw;
+  return inView(cell);
+}
+
 /* ---------------- FOLLOW: a straight line, then look again ----------------
    Jump only when something low is in the way. Jumping is not how you get
    around, it is how you get over. */
@@ -233,6 +264,31 @@ function provenSafe(){
   }
   return out;
 }
+/* An unsatisfied number is not "nothing to do" — it is a statement that a mine
+   is still missing right there, and that its own hidden neighbours are the only
+   blocks that can settle it. That was the gap: the bot only looked at clues it
+   could FINISH, so a board covered in half-answered numbers read as empty and
+   it walked away. Now an unfinished number is a place to work, and its
+   neighbours are the work — sorted by how nearly settled the clue is, because
+   a 1 with two blocks left tells you far more per shot than a 4 with eight. */
+function unfinished(){
+  const N=G.nx*G.ny*G.nz, out=[];
+  const [ex,ey,ez]=eye();
+  for (let i=0;i<N;i++){
+    if (G.st[i]!==AIR || G.cnt[i]===0) continue;
+    let f=0; const h=[];
+    for (const j of nbrsOf(i)){ const s=G.st[j]; if (s===MARKED) f++; else if (s===SOLID) h.push(j); }
+    const need = G.cnt[i]-f;
+    if (!h.length || need<=0 || need>=h.length) continue;   // settled or unreadable
+    const [x,y,z]=cellXYZ(i);
+    const d=Math.hypot((x+0.5)*BLOCK-ex, (y+0.5)*BLOCK-ey, (z+0.5)*BLOCK-ez);
+    out.push({clue:i, hidden:h, need, tightness:h.length-need, d});
+  }
+  /* nearest first, and among those the clue closest to resolving */
+  out.sort((p,q)=> (p.d - q.d) || (p.hidden.length - q.hidden.length));
+  return out;
+}
+
 /* The game's own solver: arrows, counts and the two-clue subset rule. Its
    subset pass compares every clue against every other, so it is the expensive
    one and runs only when the cheap rules come up empty. */
@@ -314,6 +370,7 @@ function playGame(diff, mode, label){
   const refuse = c => refused.set(c, (refused.get(c)||0)+1);
 
   let moves=0, peak=0, dry=0, wander=0, retried=false, why='ran out of steps', step=0;
+  let surveyed=false, moved=true;
   const qs = /[?&]steps=(\d+)/.exec(location.search);
   const cap = qs ? +qs[1] : Math.min(1200, G.safeTotal*3 + 300);
 
@@ -332,6 +389,14 @@ function playGame(diff, mode, label){
     }
     if (chests.length && grabChest()){ moves++; continue; }
 
+    /* SURVEY BEFORE ACTING. Arriving somewhere new, take the whole room in
+       first — a fine 360 sweep at more angles than the walking scan uses — and
+       only then decide. Shooting on the strength of the first thing you notice
+       is how you spend a shot on a block a clue two paces away had already
+       settled. After that, moving is what invalidates the picture, so the
+       survey is redone whenever it has moved. */
+    if (moved){ surveyed = false; moved = false; }
+    if (!surveyed){ scan(); scan(); surveyed = true; stats.surveys++; }
     const s = scan();
     let acted = false, walked = false;
 
@@ -339,8 +404,9 @@ function playGame(diff, mode, label){
        marked yet, so a proven mine is always the next move. */
     for (const cell of provenMines()){
       if (giveUp(cell) || G.st[cell]!==SOLID) continue;
-      if (!inView(cell)){
-        if (!closeOn(cell) || !inView(cell)){ refuse(cell); continue; }
+      if (!clearLine(cell)){
+        moved=true;
+        if (!closeOn(cell) || !clearLine(cell)){ refuse(cell); continue; }
       }
       if (flagIt(cell)) refused.delete(cell); else refuse(cell);
       moves++; acted=true; audit(label+' flag');
@@ -349,7 +415,7 @@ function playGame(diff, mode, label){
 
     if (!acted) for (const cell of provenSafe()){
       if (giveUp(cell) || G.st[cell]!==SOLID) continue;
-      if (!inView(cell)){ if(!closeOn(cell) || !inView(cell)){ refuse(cell); continue; } }
+      if (!clearLine(cell)){ moved=true; if(!closeOn(cell) || !clearLine(cell)){ refuse(cell); continue; } }
       const before=G.revealed;
       shoot(); stats.shots++;
       if (G.mine[cell]) err(`${label}: a cell proved safe was a mine`);
@@ -360,8 +426,8 @@ function playGame(diff, mode, label){
     if (!acted && G.state==='play'){
       const mv = solverMove();
       if (mv && !giveUp(mv.cell)){
-        let ok = inView(mv.cell);
-        if (!ok && closeOn(mv.cell)) ok = inView(mv.cell);
+        let ok = clearLine(mv.cell);
+        if (!ok){ moved=true; if (closeOn(mv.cell)) ok = clearLine(mv.cell); }
         if (ok){
           const before=G.revealed+G.marked;
           if (mv.mine) flagIt(mv.cell); else { shoot(); stats.shots++; }
@@ -372,9 +438,35 @@ function playGame(diff, mode, label){
       }
     }
 
-    /* WORK THE FACE. Nothing proven, but there is stone within reach: open it
-       and the next scan has more to read. That is "reveal the logic layer by
-       layer", and the risk it carries is counted honestly below. */
+    /* GO TO THE UNFINISHED NUMBERS. Nothing is provable yet, but a number that
+       still wants a mine says exactly where the answer lives. Work ITS hidden
+       neighbours — digging next to information beats digging next to nothing,
+       and it is what turns an ambiguous cluster into a solvable one. */
+    if (!acted && G.state==='play'){
+      const todo = unfinished();
+      for (const u of todo.slice(0, 6)){
+        for (const cell of u.hidden){
+          if (giveUp(cell) || G.st[cell]!==SOLID) continue;
+          if (!clearLine(cell)){
+            moved=true;
+            if (!closeOn(cell) || !clearLine(cell)){ refuse(cell); continue; }
+          }
+          stats.guesses++;
+          /* Peeking to DECLINE is a cheat and it is deliberate: a bot that digs
+             blind dies in the first minute and tests nothing. Peeking to COUNT
+             is not, and that count is the real risk a player carries here. */
+          if (G.mine[cell]){ stats.guessMines++; refuse(cell); continue; }
+          const before=G.revealed;
+          shoot(); stats.shots++; stats.clueWork++;
+          if (G.revealed===before) refuse(cell); else { moves++; acted=true; audit(label+' clue'); }
+          break;
+        }
+        if (acted) break;
+      }
+    }
+
+    /* WORK THE FACE. No clue to serve, but there is stone within reach: open it
+       and the next scan has more to read. */
     if (!acted && G.state==='play'){
       for (const w of s.work){
         if (giveUp(w.cell) || G.st[w.cell]!==SOLID) continue;
@@ -383,7 +475,7 @@ function playGame(diff, mode, label){
            blind dies in the first minute and tests nothing. Peeking to COUNT
            is not, and that count is the real risk a player carries here. */
         if (G.mine[w.cell]){ stats.guessMines++; refuse(w.cell); continue; }
-        if (!inView(w.cell)){ refuse(w.cell); continue; }
+        if (!clearLine(w.cell)){ refuse(w.cell); continue; }
         const before=G.revealed;
         shoot(); stats.shots++;
         if (G.revealed===before) refuse(w.cell); else { moves++; acted=true; audit(label+' dig'); }
@@ -397,7 +489,7 @@ function playGame(diff, mode, label){
     if (!acted && G.state==='play'){
       for (const w of s.seenFar){
         if (giveUp(w.cell) || G.st[w.cell]!==SOLID) continue;
-        if (closeOn(w.cell)){ acted=true; walked=true; }
+        if (closeOn(w.cell)){ acted=true; walked=true; moved=true; }
         else refuse(w.cell);
         break;
       }
@@ -412,8 +504,15 @@ function playGame(diff, mode, label){
       for (let k=0;k<3 && !acted;k++){
         const o = s.open[k];
         if (!o || o.run < BLOCK*1.5) break;
-        if (followLine(o)){ acted=true; walked=true; }
+        if (followLine(o)){ acted=true; walked=true; moved=true; }
       }
+    }
+
+    /* And it does not get to walk away while a number is still unanswered.
+       Half-finished clues ARE the work; wandering off with them on the board is
+       the bot deciding the game is over when it plainly is not. */
+    if (!acted && G.state==='play' && unfinished().length===0 && !s.work.length && !s.seenFar.length){
+      why='board exhausted'; break;
     }
 
     if (!acted){ if (++dry >= 10){ why='nothing it could reach'; break; } }
@@ -458,12 +557,14 @@ for (const [d,mode,label] of plan){
 log(`games=${games} finished=${wins} actions=${totalMoves}`);
 log(`cost: ${stats.scans} scans, ${stats.rays} rays, ${stats.ticks} physics ticks, `+
     `${stats.follows} straight runs (${stats.blocked} blocked)`);
-log(`on foot: ${stats.walked.toFixed(0)} m, ${stats.jumps} jumps`);
+log(`on foot: ${stats.walked.toFixed(0)} m, ${stats.jumps} jumps, `+
+    `${stats.sidesteps} sidesteps to clear a line, ${stats.surveys} full surveys`);
 log(`actions: ${stats.shots} shots, ${stats.flags} flags (${stats.misflag} misaimed), `+
     `${stats.chests} chests, ${stats.noEffect} with no effect`);
 log(`digging blind: ${stats.guesses} chances, ${stats.guessMines} were mines `+
     `(${stats.guesses?(100*stats.guessMines/stats.guesses).toFixed(1):0}%) — it declines those, `+
     `which is a cheat; the number is the honest risk`);
+log(`clue-led digs: ${stats.clueWork} (shots aimed at an unfinished number's own blocks)`);
 log(`solver rules: ${Object.keys(stats.byRule).map(k=>k+' '+stats.byRule[k]).join(', ')||'none'}`);
 log(`combat: killed ${stats.killed}/${stats.shotAt}, ${stats.dodged} dodges`);
 log(errCount ? `FAULTS: ${errCount} (${seen.size} distinct)` : 'FAULTS: none');
