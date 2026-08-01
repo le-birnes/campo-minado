@@ -34,7 +34,8 @@
 window.addEventListener('error', e=>{
   try{ document.body.dataset.r = 'UNCAUGHT '+e.message+' @ line '+e.lineno; }catch(_){}
 });
-window.addEventListener('load', () => setTimeout(() => {
+const YIELD = () => new Promise(r => setTimeout(r, 0));
+window.addEventListener('load', () => setTimeout(async () => {
 try{
 const T = window.__T;
 const out = [], errs = [];
@@ -46,7 +47,8 @@ const {G, P, IN, enemies, EN_MAX, BLOCK, EYE, P_H, SPD_RUN,
        shoot, physics, tickGround, updateJump, rebuildWorld, worldB,
        updateEnemies, MARKED, SOLID, AIR, ROCK, aimAt, adv, DIFFS,
        chests, correctFlags, MAX_JUMPS, startThink, endThink, snd,
-       findHint, MODE_SWEEP, MODE_DUNGEON, rayEnemy, setDungeonLevels} = T;
+       findHint, MODE_SWEEP, MODE_DUNGEON, rayEnemy, setDungeonLevels,
+       aimRay} = T;
 try{ G.muted=true; snd.setMute(true); }catch(e){}
 
 let errCount = 0; const seen = new Set();
@@ -57,6 +59,15 @@ function err(msg){
 }
 
 const DT = 1/30;
+/* A hang has to name itself. `phase` is set on entry to everything that loops,
+   and the guard is called from BOTH tick() and the big non-ticking loops, so
+   it fires wherever the run is stuck. */
+let phase='start';
+const T0 = performance.now();
+function WD(){
+  if (performance.now()-T0 > 45000) throw new Error('watchdog stuck in: '+phase);
+}
+const PH = p => { phase = p; };
 const REACH = 3*BLOCK;          // close enough to work on
 const FAR   = 13*BLOCK;         // how far a scan ray carries
 let auditN = 0;
@@ -110,6 +121,7 @@ function playerInRock(){
   return isSolidCell(x,y,z) || isSolidCell(x, Math.floor((P.y+P_H-0.1)/BLOCK), z);
 }
 function tick(){
+  WD();
   stats.ticks++;
   updateJump(DT); physics(DT); tickGround(DT);
   if (G.boss){ adv(DT); updateEnemies(DT); }
@@ -127,6 +139,7 @@ const eye = () => [P.x, P.y+EYE, P.z];
 /* ---------------- SCAN: the entire world model ---------------- */
 const YAWS = 16, PITCHES = [-0.55, -0.22, 0.0, 0.22, 0.55];
 function scan(){
+  PH('scan'); WD();
   stats.scans++;
   const [ex,ey,ez]=eye();
   const work=[], open=[], seenFar=[];
@@ -153,6 +166,7 @@ function scan(){
 }
 /* Is this exact cell visible from here, close enough to work on? Aims at it. */
 function inView(cell){
+  PH('inView'); WD();
   const [tx,ty,tz]=cellXYZ(cell);
   const [ex,ey,ez]=eye();
   const ax=(tx+0.5)*BLOCK, ay=(ty+0.5)*BLOCK, az=(tz+0.5)*BLOCK;
@@ -173,6 +187,7 @@ function inView(cell){
    look again. Firing at a target you cannot actually see is how a shot ends up
    in a number, or in the wrong block entirely. */
 function clearLine(cell){
+  PH('clearLine'); WD();
   if (inView(cell)) return true;
   const yaw = P.yaw;
   const rx = Math.cos(yaw), rz = -Math.sin(yaw);     // camera right, on the flat
@@ -203,6 +218,7 @@ function clearLine(cell){
    Jump only when something low is in the way. Jumping is not how you get
    around, it is how you get over. */
 function followLine(o){
+  PH('followLine'); WD();
   stats.follows++;
   const want = Math.min(o.run - BLOCK*0.6, FAR);
   if (want < BLOCK) return false;
@@ -228,6 +244,7 @@ function followLine(o){
 /* Walk at one cell until it is close enough to work on. Straight line again —
    if the line is blocked, whatever blocks it is itself worth opening. */
 function closeOn(cell){
+  PH('closeOn'); WD();
   const [cx,cy,cz]=cellXYZ(cell);
   const tx=(cx+0.5)*BLOCK, tz=(cz+0.5)*BLOCK, ty=(cy+0.5)*BLOCK;
   for (let k=0;k<2.0/DT;k++){
@@ -246,6 +263,7 @@ function closeOn(cell){
 
 /* ---------------- what the board proves ---------------- */
 function provenMines(){
+  PH('provenMines'); WD();
   const N=G.nx*G.ny*G.nz, out=[], taken=new Set();
   for (let i=0;i<N;i++){
     if (G.st[i]!==AIR || G.cnt[i]===0) continue;
@@ -257,6 +275,7 @@ function provenMines(){
   return out;
 }
 function provenSafe(){
+  PH('provenSafe'); WD();
   const N=G.nx*G.ny*G.nz, out=[];
   for (let i=0;i<N;i++){
     if (G.st[i]!==AIR || G.cnt[i]===0) continue;
@@ -276,6 +295,7 @@ function provenSafe(){
 /* Numbers whose remaining hidden blocks must ALL be mines. Right-clicking one
    of these flags them where they stand. */
 function forcedClues(){
+  PH('forcedClues'); WD();
   const N=G.nx*G.ny*G.nz, out=[];
   const [ex,ey,ez]=eye();
   if (G.revealed < G.safeTotal) return out;      // the game refuses before then
@@ -308,6 +328,7 @@ function lineToNum(cell){
 
 /* Numbers with every mine already flagged: right-clicking opens the rest. */
 function satisfiedClues(){
+  PH('satisfiedClues'); WD();
   const N=G.nx*G.ny*G.nz, out=[];
   const [ex,ey,ez]=eye();
   for (let i=0;i<N;i++){
@@ -324,6 +345,7 @@ function satisfiedClues(){
 }
 
 function unfinished(){
+  PH('unfinished'); WD();
   const N=G.nx*G.ny*G.nz, out=[];
   const [ex,ey,ez]=eye();
   for (let i=0;i<N;i++){
@@ -345,6 +367,7 @@ function unfinished(){
    subset pass compares every clue against every other, so it is the expensive
    one and runs only when the cheap rules come up empty. */
 function solverMove(){
+  PH('solverMove'); WD();
   try{ T.hover = {hit:false}; }catch(e){}
   const h = findHint();
   return h ? {cell:h.target, mine:!!h.mine, rule:h.rule||'?'} : null;
@@ -359,6 +382,7 @@ function flagIt(cell){
 /* ---------------- combat ---------------- */
 function beingAimedAt(){ for (const e of enemies) if (e.aim && e.lock>0) return e; return null; }
 function dodge(){
+  PH('dodge'); WD();
   const e = beingAimedAt();
   if (!e) return false;
   stats.dodged++;
@@ -444,6 +468,7 @@ function advance(m){
   return true;
 }
 function fightBack(){
+  PH('fightBack'); WD();
   if (!enemies.length){ lastSeen=null; chasing=0; return false; }
   let best=null;
   for (const e of enemies){
@@ -507,7 +532,7 @@ function diedHow(){
 }
 
 const NOFOES = /[?&]nofoes/.test(location.search);
-function playGame(diff, mode, label){
+async function playGame(diff, mode, label){
   G.mode = mode;
   /* ?zones=N builds a smaller dungeon: one mine area, then two, then the
      lot. If a fault only appears at four, it scales with the level; if it
@@ -531,6 +556,7 @@ function playGame(diff, mode, label){
   const cap = qs ? +qs[1] : Math.min(1200, G.safeTotal*3 + 300);
 
   for (; step<cap; step++){
+    if ((step & 3) === 0) await YIELD();   // let the page breathe and repaint
     if (won()){ why='finished'; break; }
     if (G.state!=='play'){ why=diedHow(); break; }
     if (!idle(0.1)){ why='physics fault'; break; }
@@ -781,7 +807,7 @@ else {
 
 let games=0, wins=0, totalMoves=0;
 for (const [d,mode,label] of plan){
-  const r=playGame(d,mode,label);
+  const r=await playGame(d,mode,label);
   games++; totalMoves+=r.moves; if (r.won) wins++;
   log(`${label}: ${r.won?'FINISHED':'stopped'} after ${r.steps} steps / ${r.moves} actions — ${r.why}`);
   log(`   opened ${r.opened}/${r.of} (${(100*r.opened/r.of).toFixed(0)}%), `+
