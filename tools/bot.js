@@ -46,7 +46,7 @@ const {G, P, IN, enemies, EN_MAX, BLOCK, EYE, P_H, SPD_RUN,
        shoot, physics, tickGround, updateJump, rebuildWorld, worldB,
        updateEnemies, MARKED, SOLID, AIR, ROCK, aimAt, adv, DIFFS,
        chests, correctFlags, MAX_JUMPS, startThink, endThink, snd,
-       findHint, MODE_SWEEP, MODE_DUNGEON, rayEnemy} = T;
+       findHint, MODE_SWEEP, MODE_DUNGEON, rayEnemy, setDungeonLevels} = T;
 try{ G.muted=true; snd.setMute(true); }catch(e){}
 
 let errCount = 0; const seen = new Set();
@@ -509,6 +509,11 @@ function diedHow(){
 const NOFOES = /[?&]nofoes/.test(location.search);
 function playGame(diff, mode, label){
   G.mode = mode;
+  /* ?zones=N builds a smaller dungeon: one mine area, then two, then the
+     lot. If a fault only appears at four, it scales with the level; if it
+     is there at one, it is in the level. */
+  const zq = /[?&]zones=(\d+)/.exec(location.search);
+  if (zq && mode===MODE_DUNGEON) setDungeonLevels(+zq[1]);
   genWorld(diff);
   if (NOFOES){ G.boss=false; enemies.length=0; }
   G.state='play';

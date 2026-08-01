@@ -16,6 +16,7 @@ window.__T = {
   findHint, gatherClues, hover: null,
   chests, rayChest, correctFlags, canJump, startJump,
   rayEnemy, ETYPES, corpses,
+  setDungeonLevels,
   startThink, endThink, snd,
   genWorld, revealAt, idx, inside, isSolidCell, raycast, checkWin,
   shoot, mark, rebuildWorld, worldB, glyphB, setScreen, startGame,

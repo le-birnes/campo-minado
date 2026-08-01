@@ -1709,6 +1709,16 @@ function shapeRough(D){
    to. */
 const DL_H = 6;    // blocks in one level band
 const DL_N = 4;    // three zones and the arena
+/* How many level bands the next dungeon gets. Normally DL_N; a test can turn
+   it down to build the same dungeon with one mine area instead of four, which
+   is how you find out whether a fault scales with the level or is simply in
+   the level. The grid height follows it, so a one-band dungeon really is a
+   sixth of the world rather than a full one with the lights off. */
+let DL_LEVELS = DL_N;
+function setDungeonLevels(n){
+  DL_LEVELS = Math.max(1, Math.min(DL_N, n|0));
+  DUNGEON.ny = DL_H * DL_LEVELS;
+}
 
 /* The shape of a minefield, and the one real lever on how dangerous the mines
    inside it are.
@@ -1799,14 +1809,24 @@ function shapeDungeon(){
   };
 
   let ex=0, ez=0;                       // where the level being built is entered
-  for(let lv=0; lv<DL_N; lv++){
+  for(let lv=0; lv<DL_LEVELS; lv++){
     const yb = G.ny - DL_H*(lv+1);      // this band's floor
 
-    if(lv===DL_N-1){
+    if(lv===DL_LEVELS-1){
       /* The arena. You come in through the ceiling and land on top of it. */
       const rad=3;
       const cx=clampX(ex), cz=clampZ(ez);
       chamber(cx,cz,rad,yb);
+      /* If the arena is the ONLY level — which a shrunken test dungeon is —
+         nothing upstream ever chose a spawn, and the player is left at the
+         world origin inside solid rock. Put them on the chamber floor at its
+         edge, looking in. */
+      if(lv===0){
+        const sx2=clampX(cx-rad-1), sz2=clampZ(cz);
+        carve(sx2-1, sx2+1, sz2-1, sz2+1, yb, yb+DL_H-2);
+        L.spawn=[(sx2+0.5)*BLOCK, yb*BLOCK, (sz2+0.5)*BLOCK];
+        L.yaw = Math.atan2(-((cx-sx2)), -((cz-sz2)));
+      }
       const cells=mass(cx,cz,rad,yb,-99,-99);
       L.groups.push({cells, target:0.16, lo:20, hi:24, arena:true});
       break;
@@ -1853,8 +1873,8 @@ function shapeDungeon(){
         sx, sz, yb, rnd()<0.5);
     /* Into the next band's floor, except above the arena, where the shaft
        stops at the chamber ceiling and lets you fall the rest of the way. */
-    const yBot = (lv===DL_N-2) ? (G.ny - DL_H*DL_N) + DL_H - 2
-                               : (G.ny - DL_H*(lv+2));
+    const yBot = (lv===DL_LEVELS-2) ? (G.ny - DL_H*DL_LEVELS) + DL_H - 2
+                                    : (G.ny - DL_H*(lv+2));
     shaft(sx,sz, yb, yBot);
 
     // now, with every tunnel on this level cut, stand the minefield up in it
