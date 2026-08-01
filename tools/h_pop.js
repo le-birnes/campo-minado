@@ -23,16 +23,27 @@ setTimeout(()=>{ try{
   R.push(`killed: enemies ${enemies.length} (want 0), corpses ${corpses.length} (want 1), `+
          `burst particles so far ${particles.length-p0} (want 0 — it swells first)`);
   const sizes=[];
-  for(let k=0;k<4;k++){
-    updateCorpses(POP_T/5);
+  for(let k=0;k<3;k++){
+    updateCorpses(POP_S/4);
     const c=corpses[0];
-    sizes.push(c ? (1+1.25*Math.pow(c.t/POP_T,2)).toFixed(2) : 'gone');
+    sizes.push(c ? (1+0.22*(c.t/POP_S)).toFixed(2) : 'gone');
   }
-  R.push(`swelling: x${sizes.join(' -> x')} of its own size`);
-  const p1=particles.length;
+  R.push(`ordinary death swells: x${sizes.join(' -> x')} (a nudge, not a balloon)`);
+  const p1=particles.length; G.shake=0;
+  updateCorpses(POP_S);
+  R.push(`ordinary death clears in ${POP_S}s: corpses ${corpses.length} (want 0), `+
+         `${particles.length-p1} pieces, shake ${G.shake.toFixed(2)} (want 0 — no shove)`);
+  // and the finale, which should still be the big one
+  G.shake=0;
+  corpses.push({x:1,y:1,z:1,t:0,hell:HELL[15],et:0,fx:0,fy:0,fz:1,ux:0,uy:1,uz:0,
+                mScale:2,col:HELL[15].col});
+  const p2=particles.length;
+  updateCorpses(POP_S+0.001);
+  R.push(`finale after an ORDINARY death's worth of time: corpses ${corpses.length} `+
+         `(want 1 — it takes longer on purpose)`);
   updateCorpses(POP_T);
-  R.push(`after ${POP_T}s: corpses ${corpses.length} (want 0), `+
-         `burst threw ${particles.length-p1} particles, shake ${G.shake.toFixed(2)}`);
+  R.push(`finale after its own: corpses ${corpses.length} (want 0), `+
+         `${particles.length-p2} pieces, shake ${G.shake.toFixed(2)} (want a shove)`);
   // and a finale creature, which uses the other draw path
   corpses.push({x:1,y:1,z:1,t:0,hell:HELL[15],et:0,fx:0,fy:0,fz:1,ux:0,uy:1,uz:0,
                 mScale:2,col:HELL[15].col});
