@@ -63,7 +63,7 @@ let auditN = 0;
 const stats = { walked:0, jumps:0, shots:0, flags:0, noEffect:0,
                 killed:0, shotAt:0, chests:0, dodged:0, scans:0, rays:0,
                 ticks:0, follows:0, blocked:0, misflag:0, guesses:0, sidesteps:0, surveys:0, clueWork:0,
-                guessMines:0, byRule:{}, insideRock:0, fell:0, numFlags:0 };
+                guessMines:0, byRule:{}, insideRock:0, fell:0, numFlags:0, numOpens:0 };
 
 /* ---------------- audit ---------------- */
 let baseAir = 0, baseRock = 0;
@@ -276,6 +276,7 @@ function provenSafe(){
 function forcedClues(){
   const N=G.nx*G.ny*G.nz, out=[];
   const [ex,ey,ez]=eye();
+  if (G.revealed < G.safeTotal) return out;      // the game refuses before then
   for (let i=0;i<N;i++){
     if (G.st[i]!==AIR || G.cnt[i]===0) continue;
     let f=0, hid=0;
@@ -301,6 +302,23 @@ function lineToNum(cell){
   stats.rays++;
   if (h.hit && h.kind==='num' && h.x===tx && h.y===ty && h.z===tz){ aimAt(cx,cy,cz); return true; }
   return false;
+}
+
+/* Numbers with every mine already flagged: right-clicking opens the rest. */
+function satisfiedClues(){
+  const N=G.nx*G.ny*G.nz, out=[];
+  const [ex,ey,ez]=eye();
+  for (let i=0;i<N;i++){
+    if (G.st[i]!==AIR || G.cnt[i]===0) continue;
+    let f=0, hid=0;
+    for (const j of nbrsOf(i)){ const s=G.st[j]; if (s===MARKED) f++; else if (s===SOLID) hid++; }
+    if (!hid || G.cnt[i]-f !== 0) continue;
+    const [x,y,z]=cellXYZ(i);
+    out.push({clue:i, hid,
+              d:Math.hypot((x+0.5)*BLOCK-ex,(y+0.5)*BLOCK-ey,(z+0.5)*BLOCK-ez)});
+  }
+  out.sort((p,q)=> (q.hid - p.hid) || (p.d - q.d));   // most opened first
+  return out;
 }
 
 function unfinished(){
@@ -436,8 +454,9 @@ function playGame(diff, mode, label){
        mine, the number will plant the flags itself — so aim at the DIGIT, not
        at the blocks. That reaches mines you cannot: buried in a corner, or
        walled in by what you dug around them, which is how a run ends one
-       unreachable mine short of finished. */
-    if (!acted && G.state==='play'){
+       unreachable mine short of finished. The game only allows this once the
+       whole board is dug out, so it is an ending, not a solving method. */
+    if (!acted && G.state==='play' && G.revealed >= G.safeTotal){
       for (const u of forcedClues()){
         if (giveUp(u.clue)) continue;
         if (!lineToNum(u.clue)){
@@ -447,6 +466,26 @@ function playGame(diff, mode, label){
         const m0=G.marked;
         startThink(); endThink();
         if (G.marked>m0){ moves++; acted=true; stats.numFlags += G.marked-m0; audit(label+' numflag'); }
+        else refuse(u.clue);
+        break;
+      }
+    }
+
+    /* AND OPEN FROM THE NUMBER — the same move on the safe side. A number
+       whose mines are all flagged will open everything else it touches, which
+       reaches blocks no shot can: buried with every face covered, provable but
+       unhittable. That was the whole of the last stall — four blocks already
+       proven safe and simply out of reach. */
+    if (!acted && G.state==='play'){
+      for (const u of satisfiedClues()){
+        if (giveUp(u.clue)) continue;
+        if (!lineToNum(u.clue)){
+          moved=true;
+          if (!closeOn(u.clue) || !lineToNum(u.clue)){ refuse(u.clue); continue; }
+        }
+        const r0=G.revealed;
+        startThink(); endThink();
+        if (G.revealed>r0){ moves++; acted=true; stats.numOpens += G.revealed-r0; audit(label+' spread'); }
         else refuse(u.clue);
         break;
       }
@@ -585,7 +624,39 @@ function playGame(diff, mode, label){
   let left=0;
   for (let i=0;i<G.nx*G.ny*G.nz;i++) if (G.st[i]===SOLID && !G.mine[i]) left++;
   return {moves, peak, state:G.state, won:won(), why, steps:step,
-          opened:G.revealed, of:G.safeTotal, flags:G.marked, mines:G.mines, left};
+          opened:G.revealed, of:G.safeTotal, flags:G.marked, mines:G.mines, left,
+          autopsy: won() ? '' : autopsy()};
+}
+
+/* Why did it stop? Two answers are possible and they need opposite fixes.
+   Either the board still contains a deduction it did not make — a reasoning
+   hole — or it made them all and simply could not get to the blocks, which is
+   a reach problem. Guessing between those wasted whole rounds of this project,
+   so it is counted instead. */
+function autopsy(){
+  const N=G.nx*G.ny*G.nz;
+  let shut=0, orphan=0, deducible=0, unclear=0, forced=0, half=0;
+  for (let i=0;i<N;i++){
+    if (G.st[i]!==SOLID) continue;
+    shut++;
+    let touched=false, proven=false;
+    for (const c of nbrsOf(i)){
+      if (G.st[c]!==AIR || G.cnt[c]===0) continue;
+      touched=true;
+      let f=0, hid=0;
+      for (const j of nbrsOf(c)){ const st=G.st[j]; if (st===MARKED) f++; else if (st===SOLID) hid++; }
+      const need=G.cnt[c]-f;
+      if (need===0 || need===hid) proven=true;      // all safe, or all mine
+    }
+    if (!touched) orphan++;
+    else if (proven) deducible++;
+    else unclear++;
+  }
+  for (const u of forcedClues()) forced++;
+  for (const u of unfinished()) half++;
+  return `left shut: ${shut} — ${orphan} touch no number at all, ${deducible} are already `+
+         `provable and it just could not get to them, ${unclear} need more digging first. `+
+         `Clues on the board: ${forced} forced (flag now), ${half} half-read.`;
 }
 
 /* ---------------- suite ---------------- */
@@ -604,6 +675,7 @@ for (const [d,mode,label] of plan){
   log(`${label}: ${r.won?'FINISHED':'stopped'} after ${r.steps} steps / ${r.moves} actions — ${r.why}`);
   log(`   opened ${r.opened}/${r.of} (${(100*r.opened/r.of).toFixed(0)}%), `+
       `flags ${r.flags}/${r.mines}, ${r.left} blocks still shut, peakFoes ${r.peak}`);
+  if (r.autopsy) log('   '+r.autopsy);
 }
 
 log(`games=${games} finished=${wins} actions=${totalMoves}`);
@@ -616,7 +688,8 @@ log(`actions: ${stats.shots} shots, ${stats.flags} flags (${stats.misflag} misai
 log(`digging blind: ${stats.guesses} chances, ${stats.guessMines} were mines `+
     `(${stats.guesses?(100*stats.guessMines/stats.guesses).toFixed(1):0}%) — it declines those, `+
     `which is a cheat; the number is the honest risk`);
-log(`flags planted BY a number (blocks it could not reach): ${stats.numFlags}`);
+log(`worked THROUGH a number, reaching blocks it could not hit: `+
+    `${stats.numFlags} flagged, ${stats.numOpens} opened`);
 log(`clue-led digs: ${stats.clueWork} (shots aimed at an unfinished number's own blocks)`);
 log(`solver rules: ${Object.keys(stats.byRule).map(k=>k+' '+stats.byRule[k]).join(', ')||'none'}`);
 log(`combat: killed ${stats.killed}/${stats.shotAt}, ${stats.dodged} dodges`);

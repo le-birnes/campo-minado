@@ -3,40 +3,32 @@ window.addEventListener('error',e=>window.__err.push('ERR '+e.message));
 setTimeout(()=>{ try{
   G.muted=true; try{ snd.setMute(true); }catch(e){}
   const R=[];
-  G.mode=MODE_SWEEP; seed=11; genWorld(0); G.state='play';
-  const n=G.nx*G.ny*G.nz;
-  // open every safe block: now every number's remaining neighbours are mines
-  for(let i=0;i<n;i++) if(!G.mine[i] && G.st[i]!==AIR){ G.st[i]=AIR; G.revealed++; }
-  // a number that still touches unflagged mines
-  let num=-1;
-  for(let i=0;i<n;i++){
-    if(G.st[i]!==AIR || G.cnt[i]===0) continue;
-    let hid=0; for(const j of nbrsOf(i)) if(G.st[j]===SOLID) hid++;
-    if(hid>0){ num=i; break; }
-  }
-  const c=cellXYZ(num);
-  let hidden=0; for(const j of nbrsOf(num)) if(G.st[j]===SOLID) hidden++;
-  const m0=G.marked;
-  const before=G.state;
-  hitNumber(c[0],c[1],c[2]);
-  R.push(`a ${G.cnt[num]} with ${hidden} hidden, all of them mines: right click flagged `+
-         `${G.marked-m0} (want ${hidden}), state ${before}->${G.state}`);
-  let wrong=0;
-  for(let i=0;i<n;i++) if(G.st[i]===MARKED && !G.mine[i]) wrong++;
-  R.push(`wrongly flagged: ${wrong} (want 0)`);
+  const pick=()=>{ // a number that hides only mines
+    for(let i=0;i<G.nx*G.ny*G.nz;i++){
+      if(G.st[i]!==AIR || G.cnt[i]===0) continue;
+      let f=0,hid=0; for(const j of nbrsOf(i)){ const s=G.st[j]; if(s===MARKED)f++; else if(s===SOLID)hid++; }
+      if(hid>0 && G.cnt[i]-f===hid) return [i,hid];
+    }
+    return [-1,0];
+  };
+  G.mode=MODE_SWEEP;
 
-  // and it must NOT fire when a safe block is still hidden among them
+  /* mid-game: a number whose neighbours are all mines must NOT flag them */
   seed=11; genWorld(0); G.state='play';
-  let num2=-1, safeNb=-1;
-  for(let i=0;i<n && num2<0;i++){
-    if(G.st[i]!==AIR || G.cnt[i]===0) continue;
-    let mines=0, safes=0, sn=-1;
-    for(const j of nbrsOf(i)){ if(G.st[j]!==SOLID) continue; if(G.mine[j]) mines++; else { safes++; sn=j; } }
-    if(mines>0 && safes>0){ num2=i; safeNb=sn; }
-  }
-  const c2=cellXYZ(num2), mk=G.marked;
-  hitNumber(c2[0],c2[1],c2[2]);
-  R.push(`a number that still hides a SAFE block: flags +${G.marked-mk} (want 0), `+
-         `safe neighbour still shut: ${G.st[safeNb]===SOLID}`);
+  const n=G.nx*G.ny*G.nz;
+  let opened=0;
+  for(let i=0;i<n && opened<120;i++) if(!G.mine[i] && G.st[i]!==AIR){ G.st[i]=AIR; G.revealed++; opened++; }
+  let [num,hid]=pick(), mk=G.marked;
+  if(num>=0){ const c=cellXYZ(num); hitNumber(c[0],c[1],c[2]); }
+  R.push(`mid-game (${G.revealed}/${G.safeTotal} dug), a number hiding ${hid} mines and nothing else: `+
+         `flags +${G.marked-mk} (want 0)`);
+
+  /* board fully dug: now it must */
+  for(let i=0;i<n;i++) if(!G.mine[i] && G.st[i]!==AIR){ G.st[i]=AIR; G.revealed++; }
+  [num,hid]=pick(); mk=G.marked;
+  const c2=cellXYZ(num); hitNumber(c2[0],c2[1],c2[2]);
+  let wrong=0; for(let i=0;i<n;i++) if(G.st[i]===MARKED && !G.mine[i]) wrong++;
+  R.push(`board fully dug (${G.revealed}/${G.safeTotal}), same move: flags +${G.marked-mk} `+
+         `(want ${hid}), wrongly flagged ${wrong} (want 0), state ${G.state}`);
   document.body.dataset.r=R.join(' | ')+' || errors: '+(window.__err.join(';')||'NONE');
 }catch(e){ document.body.dataset.r='THROW '+e.message+' @ '+(e.stack||'').split('\n')[1]; } }, 700);
