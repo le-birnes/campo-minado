@@ -5048,13 +5048,24 @@ function frame(now){
               put(cx,cy,cz, 1.6,1.6, T_RUNE, [0.92,0.10,0.09], clamp(1.30-dcam/34,0.40,1), 0);
               continue;
             }
-            const fx=camX-cx, fy=camY-cy, fz=camZ-cz;
-            const ax=Math.abs(fx), ay=Math.abs(fy), az=Math.abs(fz);
-            const off = BLOCK*0.5 + 0.55;
-            const px = (ax>=ay&&ax>=az) ? cx+Math.sign(fx)*off : cx;
-            const py = (ay>ax&&ay>=az)  ? cy+Math.sign(fy)*off : cy;
-            const pz = (az>ax&&az>ay)   ? cz+Math.sign(fz)*off : cz;
-            put(px,py,pz, 1.25,1.25, T_RUNE, [0.92,0.10,0.09], clamp(1.30-dcam/34,0.40,1), 0);
+            /* Painted ON the stone, exactly like the fracture. It used to be a
+               camera-facing billboard nudged out past whichever face was
+               nearest, so it swung as you walked and slid off the block —
+               "not persistent" is precisely what that looks like. Now it locks
+               flat to an OPEN face: open matters, because a flag drawn on a
+               face buried against its neighbour is invisible, and picking a
+               buried one is how it ended up appearing to drift. */
+            const FACES=[[1,0,0,1],[-1,0,0,2],[0,1,0,3],[0,-1,0,4],[0,0,1,5],[0,0,-1,6]];
+            const off = BLOCK*0.5 + 0.06;
+            let bestD=-1e9, bx=0,by=0,bz=0,bf=0;
+            for(const [ox,oy,oz,code] of FACES){
+              const X=x+ox, Y=y+oy, Z=z+oz;
+              if(inside(X,Y,Z) && G.st[idx(X,Y,Z)]!==AIR) continue;   // buried
+              const d = ox*(camX-cx) + oy*(camY-cy) + oz*(camZ-cz);
+              if(d>bestD){ bestD=d; bx=ox; by=oy; bz=oz; bf=code; }
+            }
+            if(bf) put(cx+bx*off, cy+by*off, cz+bz*off, 2.2,2.2, T_RUNE,
+                       [0.92,0.10,0.09], clamp(1.30-dcam/34,0.40,1), 0, bf);
           }
           continue;
         }

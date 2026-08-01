@@ -42,6 +42,11 @@ import subprocess, sys, os, re, shutil, time, html as H
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GAME = os.path.join(os.path.dirname(HERE), "index.html")
+# 300 seconds is the ceiling, everywhere, no exceptions. If a run cannot finish
+# inside it, the answer is never "give it longer" — something is wrong: a loop
+# that cannot terminate, a scan that grew with the world, or a harness that
+# never ran. Shrink the case and find out.
+CAP_MAX     = 300
 CAP_DEFAULT = 120          # seconds of wall clock. Small on purpose.
 
 CHROME = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
@@ -112,6 +117,7 @@ def build(harness_path, out_path, render=False):
 
 def run(html_path, budget=8000, shot=None, size=None, cap=CAP_DEFAULT, profile=None):
     """Returns (result, seconds, timed_out)."""
+    cap = min(cap, CAP_MAX)
     # ABSOLUTE, always: a relative --user-data-dir makes Chrome pop a GUI error
     # dialog on the user's own screen. It has done that twice.
     prof = os.path.abspath(profile or os.path.join(HERE, "cdata_run"))
@@ -164,6 +170,26 @@ def run(html_path, budget=8000, shot=None, size=None, cap=CAP_DEFAULT, profile=N
         return (H.unescape(m.group(1)), secs, False)
     return ("NO data-r (dom %d bytes) — the harness threw before reporting, or "
             "blocked before its first write" % len(out or ""), secs, False)
+
+
+def escalate(html_path, budget=8000, start=30, profile=None, shot=None, size=None):
+    """Start impatient and grow. Most runs either answer in a second or are
+    broken; waiting five minutes to learn that is wasted time. So try 30 s, and
+    on a timeout give it half as long again — 30, 45, 67, 101, 152, 228, 300 —
+    stopping at the ceiling. A run that survives the whole ladder is not slow,
+    it is wrong.
+
+    Returns (result, seconds, timed_out, attempts)."""
+    cap, n = float(start), 0
+    while True:
+        n += 1
+        res, secs, bad = run(html_path, budget=budget, shot=shot, size=size,
+                             cap=int(cap), profile=profile)
+        if not bad:
+            return res, secs, False, n
+        if cap >= CAP_MAX:
+            return res, secs, True, n
+        cap = min(CAP_MAX, cap * 1.5)
 
 
 def main():

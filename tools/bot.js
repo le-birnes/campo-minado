@@ -162,7 +162,12 @@ function standable(x,y,z){ return passable(x,y,z) && supported(x,y,z); }
    would report no path back out of a hole it could trivially jump. That is
    what "nothing it could reach" was, on a board where 95% of frontier blocks
    have a standing spot with a sightline one cell away. */
-const CLIMB = 2;
+/* Four, not two. Twenty jumps of six metres means four blocks is a comfortable
+   climb. Two was far too mean for the dungeon: a minefield is a mass two to
+   five blocks tall standing on a chamber floor, and a player walks up ONTO it
+   to work the top. Stuck on the floor the bot opened 33 of 265 blocks and could
+   then see exactly one of the remaining 232 from anywhere it could stand. */
+const CLIMB = 4;
 function stepTarget(x, z, fromY){
   if (!inside(x,0,z)) return -1;
   for (let up=CLIMB; up>=1; up--){
@@ -196,7 +201,12 @@ function floodReach(fromCell){
   if (_cap < N) { _prev=new Int32Array(N); _seen=new Uint8Array(N); _cap=N; }
   _prev.fill(-1); _seen.fill(0);
   const q=[fromCell]; _seen[fromCell]=1;
-  for (let qi=0; qi<q.length; qi++) {
+  /* Bounded. The flood is distance-ordered, so the first thousand cells are
+     everywhere worth walking to; beyond that it is the far side of the level.
+     Raising CLIMB to 4 let the bot reach onto the masses and up the shafts, so
+     an unbounded flood went from tens of cells to thousands — and it re-floods
+     every time it moves. Sixty dungeon steps went from 1 s to over 30. */
+  for (let qi=0; qi<q.length && q.length<1200; qi++) {
     const i=q[qi];
     const [x,y,z]=cellXYZ(i);
     for (const [dx,dz] of NB4) {
@@ -309,9 +319,13 @@ function approach(cell) {
   const from=standCell();
   if (from<0) return false;
   if (from!==reachFrom || !reachList.length) floodReach(from);
-  let rays=0;
+  let rays=0, looked=0;
   for (const goal of reachList) {
     if (goal===from) continue;
+    /* reachList is distance-ordered, so the head of it is everywhere nearby.
+       Scanning all of it when nothing can see the target costs one ray per
+       reachable cell, on every failed approach. */
+    if (++looked > 150) break;
     const [gx,gy,gz]=cellXYZ(goal);
     if (!seesFrom(gx,gy,gz, cell)) continue;
     if (++rays > 3) break;                 // three attempts, then it is not worth it
@@ -367,13 +381,18 @@ function approachOld(cell) {
    `explore` picks somewhere worth being: the reachable spot that can see the
    most unopened blocks it cannot see from here. That is "map the area by
    moving" — the bot goes where there is something new to look at. */
-const STANDOFF = 3*BLOCK, RANGE_MAX = 12*BLOCK;
-/* Keeping three blocks back is the default and it is the right default. But a
-   block in a tight pocket can only be shot from close, and refusing to step in
-   left one Apprentice board at 283 of 284 opened with every mine flagged and
-   the last block invisible from anywhere legal. A player backs off by habit and
-   walks in when they must, so the standoff drops when nothing else is left. */
-let closeUp = false;
+/* Three blocks is a REACH, not a standoff — I had this backwards. The bot only
+   works on what is close enough to be looked at properly. Left free to snipe
+   across the room it picks targets at the edge of vision, clips numbers
+   floating in between, and burns whole steps failing to path to something on
+   the far side of a wall.
+
+   So: shoot what is within three blocks. If nothing there can be acted on, the
+   reach opens to twelve — the shot does carry that far — but only as a way out
+   of being stuck, never as the default.
+   The tiny minimum just stops it standing inside the block it is shooting. */
+const REACH_NEAR = 3*BLOCK, REACH_FAR = 12*BLOCK, TOO_CLOSE = 0.9*BLOCK;
+let farReach = false;
 function seesFrom(x,y,z, cell){
   stats.sightRays++;
   const [tx,ty,tz]=cellXYZ(cell);
@@ -382,8 +401,8 @@ function seesFrom(x,y,z, cell){
   let vx=ax-ex, vy=ay-ey, vz=az-ez;
   const d=Math.hypot(vx,vy,vz)||1;
   if (d>13*BLOCK) return false;
-  if(d < (closeUp ? BLOCK*0.9 : STANDOFF) || d > RANGE_MAX) return false;
-  const h=raycast(ex,ey,ez, vx/d,vy/d,vz/d, RANGE_MAX, false);
+  if(d < TOO_CLOSE || d > (farReach ? REACH_FAR : REACH_NEAR)) return false;
+  const h=raycast(ex,ey,ez, vx/d,vy/d,vz/d, REACH_FAR, false);
   return !!(h.hit && h.x===tx && h.y===ty && h.z===tz);
 }
 
@@ -396,17 +415,24 @@ function explore(){
   if(from<0) return false;
   if(from!==reachFrom || !reachList.length) floodReach(from);
   if(reachList.length<2) return false;
-  const seenNow = visibleFrontier(from);
+  const here = vantage(from);
   let best=null;
   // sample rather than score all of them; the flood is distance-ordered, so
   // taking every fourth still spreads across the whole reachable area
-  for(let i=1;i<reachList.length;i+=4){
+  /* Sample a fixed number of candidates however big the cave is. Every fourth
+     cell is fine in a room and ruinous in a dungeon, where the reachable set
+     runs to thousands and each candidate costs forty-eight rays. */
+  const stride = Math.max(4, Math.floor(reachList.length/40));
+  for(let i=1;i<reachList.length;i+=stride){
     const g=reachList[i];
-    const gain=visibleFrontier(g) - seenNow;
+    const v=vantage(g);
+    const gain=v.work - here.work;
     const path=pathFrom(g);
     if(!path || !path.length) continue;
-    const score = gain - path.length*0.15;      // near and revealing beats far
-    if(!best || score>best.score) best={g, score, path, gain};
+    // work first, depth of vision as the tiebreak, distance as a small cost
+    const score = gain*3 + (v.deepest-here.deepest)/BLOCK*0.4 - path.length*0.15;
+    const worth = gain>0 || v.deepest > here.deepest + BLOCK;
+    if(worth && (!best || score>best.score)) best={g, score, path, gain:1};
   }
   if(!best || best.gain<=0) return false;
   stats.explored++;
@@ -416,28 +442,46 @@ function explore(){
 }
 /* How many unopened blocks are in view from a standing cell. Sampled on a
    coarse ring rather than every cell: this runs for a lot of candidates. */
-function visibleFrontier(cell){
+/* What a spot is worth standing in, scored the way a player reads a cave.
+   Two things matter and they are not the same:
+
+     WORK  — unopened blocks close enough to actually shoot. What you came for.
+     DEPTH — how far the longest clear line of sight runs. A cave of corridors
+             is not a labyrinth: one direction being much deeper than the rest
+             IS the way on. Counting visible blocks alone sends the bot to
+             stare at a wall, because a wall is where the blocks are.
+
+   Depth is weighted low, so it only decides between spots offering similar
+   work — it breaks ties toward the opening, never toward abandoning a face
+   that still has something to shoot. */
+function vantage(cell){
   const [x,y,z]=cellXYZ(cell);
   const ex=(x+0.5)*BLOCK, ey=y*BLOCK+EYE, ez=(z+0.5)*BLOCK;
-  let n=0;
+  let work=0, deepest=0;
   for(let a=0;a<12;a++){
     const th=a/12*6.283;
-    for(const pitch of [-0.35, 0, 0.35]){
+    for(const pitch of [-0.5, -0.15, 0.15, 0.5]){
       const dx=Math.cos(th)*Math.cos(pitch), dy=Math.sin(pitch), dz=Math.sin(th)*Math.cos(pitch);
-      const h=raycast(ex,ey,ez, dx,dy,dz, RANGE_MAX, false);
-      if(h.hit && h.kind==='block' && G.st[idx(h.x,h.y,h.z)]===SOLID && h.t>=STANDOFF) n++;
+      const h=raycast(ex,ey,ez, dx,dy,dz, REACH_FAR, false);
+      const run = h.hit ? h.t : REACH_FAR;
+      if(run > deepest) deepest = run;
+      if(h.hit && h.kind==='block' && G.st[idx(h.x,h.y,h.z)]===SOLID && h.t<=REACH_NEAR) work++;
     }
   }
-  return n;
+  return {work, deepest};
 }
 function approachNum(cell) {
   if (lineToNum(cell)) return true;
   const from=standCell();
   if (from<0) return false;
   if (from!==reachFrom || !reachList.length) floodReach(from);
-  let rays=0;
+  let rays=0, looked=0;
   for (const goal of reachList) {
     if (goal===from) continue;
+    /* reachList is distance-ordered, so the head of it is everywhere nearby.
+       Scanning all of it when nothing can see the target costs one ray per
+       reachable cell, on every failed approach. */
+    if (++looked > 150) break;
     const [gx,gy,gz]=cellXYZ(goal);
     if (!seesFrom(gx,gy,gz, cell)) continue;
     if (++rays > 3) break;
@@ -689,7 +733,14 @@ function playGame(diff, mode, label) {
        it every step ran a dungeon past seven minutes. The one-clue deductions
        below cost a single pass, so try those first and only reach for the
        stacked-logic solver when they come up empty. */
-    if (!A.mines.length && !A.chords.length && !A.safes.length) {
+    /* Cheap-first was not enough. In a dungeon the one-clue rules find nothing
+       most steps, so the full solver ran nearly every step anyway — and its
+       subset rule compares every clue against every other across 7776 cells.
+       Sixty steps took a second before it existed; a hundred could not finish
+       in five minutes after. On a big world it runs on a fixed cadence, and
+       the cheap rules and the frontier guess carry the steps in between. */
+    const heavy = G.nx*G.ny*G.nz > 2000 ? 6 : 1;
+    if (!A.mines.length && !A.chords.length && !A.safes.length && (step % heavy)===0) {
       const mv = solverMove();
       if(mv && !giveUp(mv.cell) && approach(mv.cell)){
       const before = G.revealed + G.marked;
@@ -778,20 +829,20 @@ function playGame(diff, mode, label) {
     /* Last resort: step right up to it. Only after everything at a safe
        distance has been tried and failed. */
     if (!acted){
-      closeUp = true;
+      farReach = true;
       const mv = solverMove();
       if(mv && approach(mv.cell)){
         const before=G.revealed+G.marked;
         if(mv.mine) thinkAct(); else shoot();
-        if(G.revealed+G.marked!==before){ acted=true; moves++; stats.closeUp++; audit(label+' close'); }
+        if(G.revealed+G.marked!==before){ acted=true; moves++; stats.closeUp++; audit(label+' far'); }
       }
       if(!acted) for(const m2 of nearestFirst(A.mines).concat(A.safes).slice(0,4)){
         if(giveUp(m2.cell) || !approach(m2.cell)) continue;
         const before=G.revealed+G.marked;
         shoot();
-        if(G.revealed+G.marked!==before){ acted=true; moves++; stats.closeUp++; audit(label+' close'); break; }
+        if(G.revealed+G.marked!==before){ acted=true; moves++; stats.closeUp++; audit(label+' far'); break; }
       }
-      closeUp = false;
+      farReach = false;
       reachFrom = -1;
     }
 
@@ -860,7 +911,7 @@ log(`games=${games} finished=${wins} actions=${totalMoves}`);
 for (const k in per) log(`  ${k}: ${per[k].n} games, ${per[k].w} finished, ${per[k].m} actions, peakFoes=${per[k].p} — ended: ${per[k].why}`);
 log(`solver moves by rule: ${Object.keys(stats.byRule).map(k=>k+' '+stats.byRule[k]).join(', ')||'none'}`);
 log(`exploring: ${stats.explored} moves to a better vantage, ${stats.dodged} dodges, `+
-    `${stats.closeUp} times it had to step inside the standoff`);
+    `${stats.closeUp} times it had to reach past three blocks`);
 log(`on foot: ${stats.walked.toFixed(0)} m walked, ${stats.jumps} jumps `+
     `(${stats.climbed} off the ground to climb, ${stats.airJump} in mid-air)`);
 log(`navigation: stuck=${stats.stuck} noRoute=${stats.noRoute} boxedIn=${stats.dugOut} fellOutOfWorld=${stats.fell} insideRock=${stats.insideRock}`);

@@ -10,7 +10,7 @@ import run_harness as R
 
 def main():
     quick = "--quick" in sys.argv
-    cap = int(sys.argv[sys.argv.index("--cap")+1]) if "--cap" in sys.argv else (120 if quick else 900)
+    cap = int(sys.argv[sys.argv.index("--cap")+1]) if "--cap" in sys.argv else (120 if quick else 300)
     R.reap()
     subprocess.run([sys.executable, os.path.join(R.HERE, "mkbot.py"), "index.html"],
                    capture_output=True)
