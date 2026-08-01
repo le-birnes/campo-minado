@@ -15,6 +15,7 @@ window.__T = {
   MODE_SWEEP, MODE_DUNGEON, DUNGEON,
   findHint, gatherClues, hover: null,
   chests, rayChest, correctFlags, canJump, startJump,
+  rayEnemy, ETYPES, corpses,
   startThink, endThink, snd,
   genWorld, revealAt, idx, inside, isSolidCell, raycast, checkWin,
   shoot, mark, rebuildWorld, worldB, glyphB, setScreen, startGame,

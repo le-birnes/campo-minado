@@ -46,7 +46,7 @@ const {G, P, IN, enemies, EN_MAX, BLOCK, EYE, P_H, SPD_RUN,
        shoot, physics, tickGround, updateJump, rebuildWorld, worldB,
        updateEnemies, MARKED, SOLID, AIR, ROCK, aimAt, adv, DIFFS,
        chests, correctFlags, MAX_JUMPS, startThink, endThink, snd,
-       findHint, MODE_SWEEP, MODE_DUNGEON} = T;
+       findHint, MODE_SWEEP, MODE_DUNGEON, rayEnemy} = T;
 try{ G.muted=true; snd.setMute(true); }catch(e){}
 
 let errCount = 0; const seen = new Set();
@@ -64,7 +64,8 @@ const stats = { walked:0, jumps:0, shots:0, flags:0, noEffect:0,
                 killed:0, shotAt:0, chests:0, dodged:0, scans:0, rays:0,
                 ticks:0, follows:0, blocked:0, misflag:0, guesses:0, sidesteps:0, surveys:0, clueWork:0,
                 guessMines:0, byRule:{}, insideRock:0, fell:0, numFlags:0, numOpens:0,
-                lastAct:'nothing yet', foesAtDeath:0, hpAtDeath:0, deaths:{} };
+                lastAct:'nothing yet', foesAtDeath:0, hpAtDeath:0, deaths:{},
+                aimFixes:0, bursts:0, nudges:0, chases:0, climbs:0 };
 
 /* ---------------- audit ---------------- */
 let baseAir = 0, baseRock = 0;
@@ -370,23 +371,106 @@ function dodge(){
   IN.f=0; IN.sprint=false;
   return true;
 }
-function fightBack(){
-  let best=null;
+/* COMBAT, as a state machine rather than a chase.
+
+     visible, line clear     ->  empty into it, committed to one target
+     visible, line blocked   ->  two paces sideways and a hop; half these walls
+                                 are low and the shot exists from above
+     nothing visible, alive  ->  walk at where you last saw it, still facing
+                                 that way so it returns to view mid-stride
+     walking into a wall     ->  climb it. Twenty jumps and a router that goes
+                                 up two blocks means high ground is nearly
+                                 always available, and high ground has the shot
+
+   Nothing here pathfinds. Every branch is a fixed, small amount of work, so it
+   costs the same in a corridor as in a cathedral — which is the point: the
+   version that DID pathfind to the enemy every step turned a 100-second run
+   into one that never finished. */
+let lastSeen=null, chasing=0;
+
+function seeEnemy(e){
   const [ex,ey,ez]=eye();
-  for (const e of enemies){
-    let vx=e.x-ex, vy=e.y-ey, vz=e.z-ez;
-    const d=Math.hypot(vx,vy,vz)||1;
-    if (d>FAR) continue;
-    const h=raycast(ex,ey,ez, vx/d,vy/d,vz/d, d, false);
-    if (h.hit && h.t < d-1.2) continue;
-    if (!best || d<best.d) best={e,d};
+  const vx=e.x-ex, vy=e.y-ey, vz=e.z-ez;
+  const d=Math.hypot(vx,vy,vz)||1;
+  if (d>FAR) return false;
+  const h=raycast(ex,ey,ez, vx/d,vy/d,vz/d, d, false);
+  return !(h.hit && h.t < d-1.2);
+}
+/* Will the shot land on THAT thing? shoot() casts its own ray and takes
+   whatever it meets, so aiming near something is not the same as hitting it.
+   Ask before pulling the trigger: a shot into a wall is one the thing shooting
+   back does not have to survive. */
+function aimTrue(e){
+  for (const [ox,oy] of [[0,0],[0,0.45],[0,-0.35],[0.35,0.2],[-0.35,0.2]]){
+    aimAt(e.x+ox, e.y+oy, e.z);
+    const r=aimRay();
+    const hit=rayEnemy(r.ox,r.oy,r.oz, r.dx,r.dy,r.dz, FAR);
+    if (hit && hit.e===e) return true;
+    stats.aimFixes++;
   }
-  if (!best) return false;
-  aimAt(best.e.x, best.e.y, best.e.z);
-  const before=enemies.length;
-  stats.shotAt++; shoot();
-  if (enemies.length<before) stats.killed++;
+  return false;
+}
+function nudge(e){
+  const ax=P.x-e.x, az=P.z-e.z, len=Math.hypot(ax,az)||1;
+  const dir=(stats.nudges&1)?1:-1;
+  P.yaw=Math.atan2(-(-az/len)*dir, -(ax/len)*dir);
+  IN.f=1; if (P.ground) jumpNow();
+  for (let k=0;k<Math.ceil(0.24/DT);k++){
+    if(!tick()){ IN.f=0; return false; }
+    if (seeEnemy(e) && aimTrue(e)){            // it opened up mid-hop
+      IN.f=0; stats.shotAt++; shoot(); stats.bursts++; stats.nudges++; return true;
+    }
+  }
+  IN.f=0; stats.nudges++; return true;
+}
+function advance(m){
+  const dx=m.x-P.x, dz=m.z-P.z, flat=Math.hypot(dx,dz);
+  if (flat < BLOCK*0.8){ lastSeen=null; return false; }
+  P.yaw=Math.atan2(-dx,-dz);
+  P.pitch=Math.atan2(m.y-(P.y+EYE), flat);
+  const x0=P.x, z0=P.z;
+  IN.f=1; IN.sprint=true;
+  const frames=Math.ceil(0.30/DT);
+  for (let k=0;k<frames;k++){
+    if(!tick()){ IN.f=0; IN.sprint=false; return false; }
+    // stuck against something: go up it rather than into it
+    if (k===(frames>>1) && Math.hypot(P.x-x0,P.z-z0)<BLOCK*0.15 && P.ground){
+      jumpNow(); stats.climbs++;
+    }
+  }
+  IN.f=0; IN.sprint=false; stats.chases++;
+  // went nowhere at all: the wall beats a jump, so let the memory go
+  if (Math.hypot(P.x-x0,P.z-z0) < BLOCK*0.2) chasing += 3;
   return true;
+}
+function fightBack(){
+  if (!enemies.length){ lastSeen=null; chasing=0; return false; }
+  let best=null;
+  for (const e of enemies){
+    if (!seeEnemy(e)) continue;
+    const d=Math.hypot(e.x-P.x, e.y-P.y, e.z-P.z);
+    const threat=(e.aim && e.lock>0)?0:1;      // whatever is about to fire, first
+    if (!best || threat<best.threat || (threat===best.threat && d<best.d))
+      best={e,d,threat};
+  }
+  if (best){
+    const e=best.e;
+    lastSeen={x:e.x,y:e.y,z:e.z}; chasing=0;
+    /* Commit. Picking "nearest" afresh between shots is how a thing with three
+       hit points survives nine of them. */
+    const hp0 = e.hp!==undefined ? e.hp : (e.dhp!==undefined ? e.dhp : 1);
+    const budget = Math.min(14, Math.max(2, hp0+2));
+    let fired=0;
+    while (fired<budget && enemies.indexOf(e)>=0 && G.state==='play'){
+      if (!aimTrue(e)) break;
+      stats.shotAt++; shoot(); fired++;
+      if (!tick()) break;
+    }
+    if (fired){ stats.bursts++; if (enemies.indexOf(e)<0) stats.killed++; return true; }
+    return nudge(e);
+  }
+  if (lastSeen && chasing<8){ chasing++; return advance(lastSeen); }
+  return false;
 }
 function grabChest(){
   const [ex,ey,ez]=eye();
@@ -714,7 +798,10 @@ log(`worked THROUGH a number, reaching blocks it could not hit: `+
     `${stats.numFlags} flagged, ${stats.numOpens} opened`);
 log(`clue-led digs: ${stats.clueWork} (shots aimed at an unfinished number's own blocks)`);
 log(`solver rules: ${Object.keys(stats.byRule).map(k=>k+' '+stats.byRule[k]).join(', ')||'none'}`);
-log(`combat: killed ${stats.killed}/${stats.shotAt}, ${stats.dodged} dodges`);
+log(`combat: killed ${stats.killed} in ${stats.bursts} engagements, ${stats.shotAt} shots `+
+    `(${stats.killed?(stats.shotAt/stats.killed).toFixed(1):'-'} per kill), ${stats.dodged} dodges, `+
+    `${stats.nudges} nudges, ${stats.chases} chases, ${stats.climbs} climbs, `+
+    `${stats.aimFixes} aim corrections`);
 log(errCount ? `FAULTS: ${errCount} (${seen.size} distinct)` : 'FAULTS: none');
 for (const e of errs) log('  ! '+e);
 
