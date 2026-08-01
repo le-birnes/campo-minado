@@ -1207,6 +1207,26 @@ const MATS = [
 const BEDROCK   = [0.26,0.26,0.29];
 const BEDCRYST  = [0.62,0.66,0.78];
 
+/* WHEN THE LAST FLAG GOES IN, the cave becomes a furnace: cold dark grey rock
+   with fire in the seams of it. Not everything orange — a wall that is all
+   lava reads as flat colour, while grey with a scatter of lit blocks reads as
+   stone with something burning behind it. So one block in eight runs hot, one
+   in eight smoulders, and the rest go nearly black.
+
+   The choice is a hash of the coordinates, not a random draw: the veins have
+   to land in the same place every time the world is rebuilt, or the walls
+   crawl whenever anything else on the board changes. */
+const HELL_ROCK = [0.115,0.112,0.128];
+const HELL_HOT  = [1.00,0.34,0.05];
+const HELL_DIM  = [0.52,0.13,0.03];
+function hellStone(x,y,z){
+  const h = ((x*374761393 ^ y*668265263 ^ z*2246822519)>>>0) % 1000;
+  if(h < 90)  return [HELL_HOT, 0.95];
+  if(h < 210) return [HELL_DIM, 0.30];
+  return [HELL_ROCK, 0];
+}
+const FOG_HELL = [0.105,0.035,0.030];
+
 /* ==========================================================================
    4b. ENEMY TYPES  (Boss Master)
    ==========================================================================
@@ -2313,8 +2333,29 @@ const snd = (function(){
       {kick:P16('xx.xx.xxx.xx.xx.'), prog:[ 3,-4, 0,-1], fig:[3,6]},
       {kick:P16('x.x.xxx.x.xxx.x.'), prog:[-4, 0,-1, 3], fig:[10,13]},
       {kick:P16('xxx.x.xxx.x.xxxx'), prog:[-1, 3,-4, 0], fig:[8,3]}
+    ]},
+    /* THE FINALE. A tribute, not a transcription — the notes are written from
+       scratch and none of it is a recording of anything. What makes that music
+       recognisable is not the melody anyway, it is the mechanics: a low pedal
+       hammered in straight sixteenths, palm-muted so every note is a short
+       hard chug rather than a ringing chord, the flat-five leaning on it, and
+       a snare on two and four that never varies. Build those and it lands in
+       the right decade on its own.
+
+       Low E, an octave under where a guitar sits, because the point is that
+       the floor drops out when the last flag goes in. */
+    {bpm:152, root:41.20, hat:0.34, lead:0.30, saw:0.0, pad:0.030, hell:true, vars:[
+      {kick:P16('x.x.x.x.x.x.x.x.'), prog:[0,0,0,0], fig:[15,18],
+       riff:[0,0,0,3,0,0,3,0,0,0,5,0,0,6,0,0]},
+      {kick:P16('x.x.x.x.x.x.xx.x'), prog:[0,0,-2,0], fig:[18,15],
+       riff:[0,0,6,0,0,0,5,0,0,3,0,0,0,0,1,0]},
+      {kick:P16('x..x..x.x..x..x.'), prog:[0,0,0,3], fig:[10,15],
+       riff:[0,0,0,0,7,0,0,6,0,0,0,5,0,3,0,0]},
+      {kick:P16('x.x.xx.x.x.xx.x.'), prog:[0,-4,0,-2], fig:[15,22],
+       riff:[0,3,0,0,0,6,0,0,7,0,0,6,0,0,5,3]}
     ]}
   ];
+  const HELL_THEME = THEMES.length-1;
   let mBus=null, mTimer=0, mStep=0, mNext=0, mTheme=null, mVol=0.16, mMuted=false;
   const SECTION_BARS = 32;
   let mVar=0, mSection=-1;
@@ -2323,6 +2364,51 @@ const snd = (function(){
     if(!ensure()) return false;
     if(!mBus){ mBus = ac.createGain(); mBus.gain.value = mMuted?0:mVol; mBus.connect(ac.destination); }
     return true;
+  }
+  /* A guitar, near enough. A sawtooth is all harmonics and no bite; what makes
+     a distorted guitar is CLIPPING — drive it hard into a limit and the wave
+     squares off, and that is the crunch. Then a lowpass takes the fizz off the
+     top the way a speaker cabinet does, and a very short envelope is the palm
+     resting on the strings. */
+  let driveC=null;
+  function drive(){
+    if(driveC) return driveC;
+    const n=1024; driveC=new Float32Array(n);
+    for(let i=0;i<n;i++){ const v=(i/(n-1))*2-1; driveC[i]=Math.tanh(v*7)*0.85; }
+    return driveC;
+  }
+  function chug(hz, t0, dur, peak){
+    const sh=ac.createWaveShaper(); sh.curve=drive(); sh.oversample='2x';
+    const f=ac.createBiquadFilter(); f.type='lowpass'; f.frequency.value=2300; f.Q.value=0.8;
+    const g=ac.createGain();
+    g.gain.setValueAtTime(0.0001,t0);
+    g.gain.exponentialRampToValueAtTime(peak, t0+0.004);
+    g.gain.setValueAtTime(peak, t0+dur*0.45);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+    /* Two oscillators a hair apart is what makes it a band rather than a
+       synth: the beating between them is the width. */
+    for(const det of [-6, 6]){
+      const o=ac.createOscillator(); o.type='sawtooth';
+      o.frequency.setValueAtTime(hz,t0); o.detune.setValueAtTime(det,t0);
+      o.connect(sh); o.start(t0); o.stop(t0+dur+0.03);
+    }
+    const o2=ac.createOscillator(); o2.type='square';   // the octave, quietly
+    o2.frequency.setValueAtTime(hz*2,t0);
+    const g2=ac.createGain(); g2.gain.value=0.35;
+    o2.connect(g2); g2.connect(sh); o2.start(t0); o2.stop(t0+dur+0.03);
+    sh.connect(f); f.connect(g); g.connect(mBus);
+  }
+  function snare(t0){
+    const n=noise(0.18);
+    const f=ac.createBiquadFilter(); f.type='bandpass'; f.frequency.value=1900; f.Q.value=0.7;
+    const g=ac.createGain();
+    g.gain.setValueAtTime(0.34,t0); g.gain.exponentialRampToValueAtTime(0.0001,t0+0.16);
+    n.connect(f); f.connect(g); g.connect(mBus); n.start(t0); n.stop(t0+0.2);
+    const o=ac.createOscillator(); o.type='triangle';
+    o.frequency.setValueAtTime(210,t0); o.frequency.exponentialRampToValueAtTime(120,t0+0.09);
+    const g3=ac.createGain();
+    g3.gain.setValueAtTime(0.18,t0); g3.gain.exponentialRampToValueAtTime(0.0001,t0+0.10);
+    o.connect(g3); g3.connect(mBus); o.start(t0); o.stop(t0+0.12);
   }
   function blip(type, hz, t0, dur, peak, filt, q){
     const o=ac.createOscillator(); o.type=type; o.frequency.setValueAtTime(hz, t0);
@@ -2362,6 +2448,11 @@ const snd = (function(){
         g.gain.exponentialRampToValueAtTime(0.0001,t+0.16);
         o.connect(g); g.connect(mBus); o.start(t); o.stop(t+0.2);
       }
+      if(T.hell){
+        const off = V.riff[s];                       // the pedal, every sixteenth
+        if(off!==null && off!==undefined) chug(chord*SEMI(off), t, sixteenth*0.94, 0.30);
+        if(s===4 || s===12) snare(t);
+      }
       if(s%2===1 && Math.random()<T.hat){             // offbeat tick
         const n=noise(0.03);
         const f=ac.createBiquadFilter(); f.type='highpass'; f.frequency.value=6500;
@@ -2369,7 +2460,7 @@ const snd = (function(){
         g.gain.setValueAtTime(0.10,t); g.gain.exponentialRampToValueAtTime(0.0001,t+0.035);
         n.connect(f); f.connect(g); g.connect(mBus); n.start(t); n.stop(t+0.05);
       }
-      if(s===0||s===3||s===6||s===8||s===11||s===14)  // bass, syncopated
+      if(!T.hell && (s===0||s===3||s===6||s===8||s===11||s===14))  // bass, syncopated
         blip('sawtooth', chord, t, 0.20, T.saw, 420, 4);
       if(s===0){                                      // pad: the harmony that moves
         blip('triangle', chord*2,        t, spb*3.6, T.pad, 900);
@@ -2396,6 +2487,7 @@ const snd = (function(){
       clearInterval(mTimer); mTimer=setInterval(mTick, 25);
     },
     musicStop(){ clearInterval(mTimer); mTimer=0; mTheme=null; },
+    musicHell(){ this.music(HELL_THEME); },
     musicVol(v){ mVol=v; if(mBus) mBus.gain.value = mMuted?0:v; },
     musicMute(m){ mMuted=m; if(mBus) mBus.gain.value = m?0:mVol; },
     musicIsMuted(){ return mMuted; },
@@ -2576,8 +2668,10 @@ function rebuildWorld(){
     if(inside(x,y,z)) continue;
     const s=(x*73856093 ^ y*19349663 ^ z*83492791)>>>0;
     const cryst = (s%37)===0;
+    const hs = G.lava ? hellStone(x,y,z) : null;
     put((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, BLOCK,
-        cryst?BEDCRYST:BEDROCK, (s%1000)/1000, cryst?1:0, 0, 0);
+        hs ? hs[0] : cryst?BEDCRYST:BEDROCK, (s%1000)/1000,
+        hs ? hs[1] : cryst?1:0, 0, 0);
   }
   // puzzle blocks
   for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
@@ -2589,8 +2683,10 @@ function rebuildWorld(){
     if(G.st[i]===ROCK){
       const s=(x*73856093 ^ y*19349663 ^ z*83492791)>>>0;
       const cryst=(s%37)===0;
+      const hs = G.lava ? hellStone(x,y,z) : null;
       put((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, BLOCK,
-          cryst?BEDCRYST:BEDROCK, (s%1000)/1000, cryst?1:0, 0, 0);
+          hs ? hs[0] : cryst?BEDCRYST:BEDROCK, (s%1000)/1000,
+          hs ? hs[1] : cryst?1:0, 0, 0);
       continue;
     }
     if(G.fuse>0 && G.boomCell && x===G.boomCell[0] && y===G.boomCell[1] && z===G.boomCell[2]){
@@ -2600,20 +2696,20 @@ function rebuildWorld(){
           [1.0, 0.42-0.34*k, 0.16-0.10*k], 0.5, 1, 0, 0);
       continue;
     }
-    let m=MATS[G.mat[i]];
+    let m=MATS[G.mat[i]], emis=0;
     /* The finale recolours the whole cave. Done here rather than in the shader
        because it is a one-off state change, and rebuildWorld already runs only
        when the board is dirty. */
     if(G.lava){
-      const c0=m.c;
-      m = {c:[Math.min(1,c0[0]*0.55+0.62), c0[1]*0.30+0.20, c0[2]*0.16+0.03], gold:m.gold};
+      const hs = hellStone(x,y,z);
+      m = {c:hs[0], gold:false}; emis = hs[1];
     }
     /* Full strength for the first two thirds, then fade: the light has to
        hold long enough to walk around the block and look at it. */
     const left = G.echoT[i] - tGlobal;
     const echo = left > 0 ? Math.min(1, left/(G.echoD[i]*0.34 || 1)) : 0;
     put((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, BLOCK,
-        m.c, ((i*2654435761)>>>0 %1000)/1000, m.gold?0.16:0,
+        m.c, ((i*2654435761)>>>0 %1000)/1000, G.lava?emis:(m.gold?0.16:0),
         G.st[i]===MARKED?1:0, echo, echo>0 ? echoColOf(i) : null);
   }
   worldB.count=n;
@@ -3930,16 +4026,17 @@ function checkWin(){
      as we go, and having as many flags out as there are mines is a necessary
      condition for having flagged them all, so it gates the scan down to the
      handful of moments it could possibly succeed. */
+  /* THE LAST FLAG, and nothing else. Digging the place out used to count too,
+     on the reasoning that by then only mines are left standing — but that
+     fired the finale the moment the last safe block fell, with mines still
+     unflagged, which is the wrong beat entirely. The dungeon ends when the
+     place is made safe, so: every mine under a flag, and then the thing that
+     comes for you dead. A board dug out but not flagged is not finished; the
+     flags are still there to plant, and a number will plant the last of them
+     for you if the blocks are out of reach. */
   const done = G.dungeon
     ? (G.mines>0 && G.marked===G.mines && correctFlags()===G.mines)
-      || G.revealed >= G.safeTotal
     : G.revealed >= G.safeTotal;
-  /* In the dungeon the last flag opens the door rather than closing it. Once
-     the thing that came through is dead, the run is won. */
-  if(done && G.dungeon && !G.finale){ startFinale(); return; }
-  if(done && G.dungeon && G.finale && enemies.some(e=>e.hell)) return;
-  /* In the dungeon the last flag opens a door rather than closing one. The run
-     is won when what came through it is dead. */
   if(done && G.dungeon && !G.finale){ startFinale(); return; }
   if(done && G.dungeon && enemies.some(e=>e.hell)) return;
   if(done){
@@ -4655,6 +4752,7 @@ function blinkMine(e){
    things arrives. Nothing else spawns while it is alive. */
 function startFinale(){
   G.finale = true; G.lava = 1; G.dirty = true;
+  snd.musicHell();
   enemies.length = 0; eshots.length = 0;
   const pick = HELL[(wrnd()*HELL.length)|0];
   const px=Math.floor(P.x/BLOCK), py=Math.floor(P.y/BLOCK), pz=Math.floor(P.z/BLOCK);
@@ -4840,7 +4938,8 @@ function frame(now){
 
   // ------- draw -------
   gl.viewport(0,0,W,H);
-  gl.clearColor(FOG[0],FOG[1],FOG[2],1);
+  const FOGNOW = G.lava ? FOG_HELL : FOG;
+  gl.clearColor(FOGNOW[0],FOGNOW[1],FOGNOW[2],1);
   gl.enable(gl.DEPTH_TEST); gl.depthMask(true);
   gl.enable(gl.CULL_FACE); gl.cullFace(gl.BACK);
   gl.disable(gl.BLEND);
@@ -4851,7 +4950,7 @@ function frame(now){
   gl.uniformMatrix4fv(uC.view,false,viewM);
   gl.uniform3f(uC.cam, camX,camY,camZ);
   gl.uniform3fv(uC.sun, SUN);
-  gl.uniform3fv(uC.fog, FOG);
+  gl.uniform3fv(uC.fog, FOGNOW);
   gl.uniform1f(uC.time, tGlobal);
   gl.uniform1f(uC.outline, 1.0);
   gl.uniform1f(uC.alpha, 1.0);
