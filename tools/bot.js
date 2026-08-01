@@ -48,7 +48,7 @@ const {G, P, IN, enemies, EN_MAX, BLOCK, EYE, P_H, SPD_RUN,
        updateEnemies, MARKED, SOLID, AIR, ROCK, aimAt, adv, DIFFS,
        chests, correctFlags, MAX_JUMPS, startThink, endThink, snd,
        findHint, MODE_SWEEP, MODE_DUNGEON, rayEnemy, setDungeonLevels,
-       aimRay} = T;
+       aimRay, ETYPES} = T;
 try{ G.muted=true; snd.setMute(true); }catch(e){}
 
 let errCount = 0; const seen = new Set();
@@ -68,8 +68,14 @@ function WD(){
   if (performance.now()-T0 > 45000) throw new Error('watchdog stuck in: '+phase);
 }
 const PH = p => { phase = p; };
+/* Two different distances, and they were being muddled.
+   WORK is how close it needs to be to dig or flag: three blocks, no closer.
+   GUN is how far the weapon actually carries, and anything it can SEE inside
+   that gets shot from where it stands — walking at something you could already
+   have shot is how you arrive somewhere with less health and no advantage. */
 const REACH = 3*BLOCK;          // close enough to work on
-const FAR   = 13*BLOCK;         // how far a scan ray carries
+const GUN   = 13*BLOCK;         // the weapon's reach, same as the game's REACH
+const FAR   = GUN;              // scans carry as far as the gun does
 let auditN = 0;
 const stats = { walked:0, jumps:0, shots:0, flags:0, noEffect:0,
                 killed:0, shotAt:0, chests:0, dodged:0, scans:0, rays:0,
@@ -416,19 +422,27 @@ function seeEnemy(e){
   const [ex,ey,ez]=eye();
   const vx=e.x-ex, vy=e.y-ey, vz=e.z-ez;
   const d=Math.hypot(vx,vy,vz)||1;
-  if (d>FAR) return false;
+  if (d>GUN) return false;
   const h=raycast(ex,ey,ez, vx/d,vy/d,vz/d, d, false);
-  return !(h.hit && h.t < d-1.2);
+  const T=ETYPES[e.t] || {r:1};
+  const slack = Math.max(0.6, (T.r||1)*(e.mScale||1));
+  return !(h.hit && h.t < d-slack);
 }
 /* Will the shot land on THAT thing? shoot() casts its own ray and takes
    whatever it meets, so aiming near something is not the same as hitting it.
    Ask before pulling the trigger: a shot into a wall is one the thing shooting
    back does not have to survive. */
 function aimTrue(e){
-  for (const [ox,oy] of [[0,0],[0,0.45],[0,-0.35],[0.35,0.2],[-0.35,0.2]]){
+  /* Offsets scale with the thing being shot at. They were fixed numbers tuned
+     when a finale creature had a 2.30 m radius; it is 1.15 now and half the
+     roster is barely wider than the player, so a fixed 0.45 m offset aims at
+     empty air beside a small target. */
+  const T = ETYPES[e.t] || {r:1};
+  const rr = (T.r||1) * (e.mScale||1) * 0.45;
+  for (const [ox,oy] of [[0,0],[0,rr],[0,-rr*0.8],[rr*0.8,rr*0.4],[-rr*0.8,rr*0.4]]){
     aimAt(e.x+ox, e.y+oy, e.z);
     const r=aimRay();
-    const hit=rayEnemy(r.ox,r.oy,r.oz, r.dx,r.dy,r.dz, FAR);
+    const hit=rayEnemy(r.ox,r.oy,r.oz, r.dx,r.dy,r.dz, GUN);
     if (hit && hit.e===e) return true;
     stats.aimFixes++;
   }
@@ -484,7 +498,11 @@ function fightBack(){
     /* Commit. Picking "nearest" afresh between shots is how a thing with three
        hit points survives nine of them. */
     const hp0 = e.hp!==undefined ? e.hp : (e.dhp!==undefined ? e.dhp : 1);
-    const budget = Math.min(14, Math.max(2, hp0+2));
+/* An ordinary enemy dies in a handful. A fourteen-shot burst on something
+       with three hit points is nine shots during which everything ELSE on the
+       board is lining up on you — and standing still is what these kill you
+       for. The finale is the exception and gets a longer look. */
+    const budget = e.hell ? 12 : Math.min(6, Math.max(2, hp0+1));
     let fired=0;
     while (fired<budget && enemies.indexOf(e)>=0 && G.state==='play'){
       if (!aimTrue(e)) break;
@@ -495,6 +513,20 @@ function fightBack(){
     return nudge(e);
   }
   if (lastSeen && chasing<8){ chasing++; return advance(lastSeen); }
+  /* Nothing seen and nothing remembered, but something is alive: hell range is
+     64 m and the bot only engages to 52, so a thing can shoot it from outside
+     the distance at which it will even look. Walk at the nearest one. */
+  if (enemies.length){
+    let near=null;
+    for (const e of enemies){
+      const d=Math.hypot(e.x-P.x, e.y-P.y, e.z-P.z);
+      if (!near || d<near.d) near={e,d};
+    }
+    if (near && near.d > GUN*0.9){
+      lastSeen={x:near.e.x, y:near.e.y, z:near.e.z}; chasing=1;
+      return advance(lastSeen);
+    }
+  }
   return false;
 }
 function grabChest(){
