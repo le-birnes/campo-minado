@@ -4230,7 +4230,14 @@ function killEnemy(e, i){
   G.gold += 8 + ((rnd()*18)|0);
   G.kills++;
   snd.ekill();
+  const wasFinale = !!e.hell;
   enemies.splice(i,1);
+  /* Killing the thing that came for you IS the ending. checkWin() deliberately
+     refuses to finish the dungeon while a finale creature is alive, and nothing
+     re-asked once it died — so the run stayed open until the player happened to
+     do something else that called checkWin, like shooting a spare block. The
+     last shot of the fight should be the last shot of the run. */
+  if(wasFinale) checkWin();
 }
 
 /* Enemy shots do half damage. Four of them kill, which is the same two hearts

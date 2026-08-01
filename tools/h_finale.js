@@ -1,46 +1,50 @@
-window.__err=[];
-window.addEventListener('error',e=>window.__err.push('ERR '+e.message));
+/* Two claims to settle, neither of which needs a frame loop:
+   1. the finale must NOT come for you on flags that are merely the right COUNT
+   2. killing it must end the run then and there */
 setTimeout(()=>{ try{
-  G.muted=true; try{ snd.setMute(true); }catch(e){}
   const R=[];
-  G.mode=MODE_DUNGEON; seed=606; genWorld(0); G.state='play';
-  const n=G.nx*G.ny*G.nz;
+  G.muted=true; try{ snd.setMute(true); }catch(e){}
+  const N=()=>G.nx*G.ny*G.nz;
+  const setup=()=>{ G.mode=MODE_DUNGEON; seed=606; genWorld(0); G.state='play'; };
 
-  /* dig out EVERY safe block and leave the mines standing: the old trigger */
-  for(let i=0;i<n;i++) if(G.st[i]===SOLID && !G.mine[i]){ G.st[i]=AIR; G.revealed++; }
-  checkWin();
-  R.push('every safe block gone, no flags: finale='+G.finale+' (want false), state '+
-         G.state+' (want play), hell enemies '+enemies.filter(e=>e.hell).length+' (want 0)');
-
-  /* now flag them */
-  let flagged=0;
-  for(let i=0;i<n;i++) if(G.mine[i] && G.st[i]!==MARKED){ G.st[i]=MARKED; G.marked++; flagged++; }
-  checkWin();
-  const hell=enemies.filter(e=>e.hell);
-  R.push(flagged+' mines flagged: finale='+G.finale+' (want true), hell enemies '+
-         hell.length+' (want 1)'+(hell[0]?' = '+hell[0].hell.name+' '+hell[0].dhp+' hp':'')+
-         ', state '+G.state+' (want play, the run is not won until it dies)');
-
-  /* the cave has to have changed colour */
-  G.dirty=true; rebuildWorld();
-  const d=worldB.data; let hot=0, dim=0, cold=0, sand=0;
-  for(let k=0;k<worldB.count;k++){
-    const o=k*CUBE_STRIDE, r=d[o+16], g=d[o+17], e=d[o+20];
-    if(e>0.5) hot++; else if(e>0.1) dim++; else if(r<0.2 && g<0.2) cold++;
-    if(r>0.5 && g>0.35) sand++;                 // the old sandstone
+  /* ---- 1. right number of flags, wrong blocks ---- */
+  setup();
+  {
+    const n=N();
+    for(let i=0;i<n;i++) if(G.st[i]===SOLID && !G.mine[i]){ G.st[i]=AIR; G.revealed++; }
+    // flag every mine but ONE, and put that last flag on a safe block instead
+    let skipped=-1, decoy=-1;
+    for(let i=0;i<n;i++) if(G.mine[i] && G.st[i]!==MARKED){
+      if(skipped<0){ skipped=i; continue; }
+      G.st[i]=MARKED; G.marked++;
+    }
+    for(let i=0;i<n;i++) if(G.st[i]===AIR && !G.mine[i]){ decoy=i; break; }
+    if(decoy>=0){ G.st[decoy]=MARKED; G.marked++; }
+    const cnt=G.marked, ok=correctFlags();
+    checkWin();
+    R.push(`flags out ${cnt} of ${G.mines} mines but only ${ok} on real mines: `+
+           `finale=${G.finale} state=${G.state} — must be false/play`);
   }
-  R.push('cave after the change: '+worldB.count+' cubes, '+cold+' cold grey, '+
-         dim+' smouldering, '+hot+' running hot, '+sand+' still sandstone (want 0)');
 
-  /* and killing it wins the run */
-  for(const e of hell) killEnemy(e);
-  checkWin();
-  R.push('boss dead: state '+G.state+' (want over), win='+G.win+' (want true)');
+  /* ---- 2. now flag it properly ---- */
+  setup();
+  {
+    const n=N();
+    for(let i=0;i<n;i++) if(G.st[i]===SOLID && !G.mine[i]){ G.st[i]=AIR; G.revealed++; }
+    for(let i=0;i<n;i++) if(G.mine[i] && G.st[i]!==MARKED){ G.st[i]=MARKED; G.marked++; }
+    checkWin();
+    const boss = enemies.find(e=>e.hell);
+    R.push(`every mine correctly flagged (${correctFlags()}/${G.mines}): finale=${G.finale} `+
+           `boss=${boss?boss.hell.name:'NONE'} state=${G.state} — must still be play, it is not over yet`);
 
-  /* the plain arena must be untouched by any of this */
-  G.mode=MODE_SWEEP; seed=5; genWorld(0); G.state='play'; G.finale=false;
-  for(let i=0;i<G.nx*G.ny*G.nz;i++) if(G.st[i]===SOLID && !G.mine[i]){ G.st[i]=AIR; G.revealed++; }
-  checkWin();
-  R.push('3D Minesweeper dug out: state '+G.state+' (want over), finale='+G.finale+' (want false)');
-  document.body.dataset.r=R.join(' | ')+' || errors: '+(window.__err.join(';')||'NONE');
-}catch(e){ document.body.dataset.r='THROW '+e.message+' @ '+(e.stack||'').split('\n')[1]; } }, 700);
+    /* ---- 3. killing it ends the run, with no other action ---- */
+    if(boss){
+      const i = enemies.indexOf(boss);
+      killEnemy(boss, i);
+      R.push(`killed it and did nothing else: state=${G.state} win=${G.win} `+
+             `foes left ${enemies.length} — must be over/true`);
+    } else R.push('no finale creature to kill');
+  }
+  window.__st=R.join(' | ');
+}catch(e){ window.__st='THROW '+e.message+' @'+((e.stack||'').split('\n')[1]||''); } }, 600);
+setTimeout(()=>{ document.body.dataset.r=window.__st||'DID NOT RUN'; }, 4000);
