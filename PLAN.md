@@ -141,3 +141,32 @@ The dungeon is shared by all three difficulties for now. Marcelo will configure
 per-difficulty dungeons later; `DUNGEON` in index.html is the single place that
 changes.
 
+---
+
+## Harness limitation — do not re-derive this
+
+`run_harness.py` **cannot photograph animated in-game state** in a scenario it
+sets up itself. Under `--virtual-time-budget` the rAF chain fires once and then
+freezes: `tGlobal` sticks at exactly 0.05 (one clamped frame), `worldB` keeps
+whatever count it had before, and every per-frame counter reads its pre-first-
+frame value. Measured across five probes at 300 ms to 5 s: identical every time.
+
+Consequences, learned the expensive way:
+
+* Reading `sprB.count` / `worldB.count` from a harness measures nothing.
+* A black screenshot of a scene the harness built by hand is the frozen loop,
+  not the game being dark.
+* Harnesses that DO render (the wall and chest shots) call `startGame()` and let
+  the game drive; ones that set `G.state='play'` by hand do not.
+* `--dump-dom` never ticks rAF at all.
+
+So: verify **logic** in the harness, and verify **appearance** by hand in a real
+browser, or by a harness that goes through `startGame()` and changes nothing the
+game would not change itself.
+
+### Still unverified
+
+The hell sprites have never been seen at game scale. The sheet is correct — 16
+tiles, nothing clipped, nothing empty, palette swaps reading right — but the
+size of the quad in the world is exactly the thing the sheet cannot show. Reach
+it by flagging every mine in Dungeon Mode.
