@@ -1252,6 +1252,13 @@ const FOG_HELL = [0.105,0.035,0.030];
    unless you are already moving when it fires. Variant I holds for 3 s, so it
    only ever catches someone who has stopped to think. */
 const FAM_FLAG=0, FAM_ORB=1, FAM_SLUG=2, FAM_FINAL=3, FAM_MINE=4, FAM_HELL=5;
+/* Everything in the roster is measured against the player, who is 2 m. The
+   smallest thing is about your height and the biggest is just under three of
+   you — a Spider Mastermind used to stand 10 m and read as architecture rather
+   than as a monster: it filled the ceiling and you could not see its shape at
+   all. Doom's biggest sprite is a couple of player-heights, not a building. */
+const HELL_UNIT = P_H * 1.45;      // s=1.0 stands 2.9 m; s=1.9 stands 5.5 m
+const HELL_MAXH = P_H * 3;         // and nothing is allowed past three of you
 const EN_MAX   = 22;    // live enemies at once
 const EN_PARTS = 120;   // most cubes any one body is built from; the mine's
                         // voxel sphere alone is 110 of them
@@ -1289,7 +1296,7 @@ const FAMS = [
   // the thing that was in the block all along
   {fam:FAM_MINE,  name:'Mine',      col:[0.10,0.10,0.12], r:1.20, speed:2.8, range:50},
   // what is waiting when the last flag goes down
-  {fam:FAM_HELL,  name:'Hell',      col:[0.72,0.16,0.12], r:2.30, speed:3.0, range:64}
+  {fam:FAM_HELL,  name:'Hell',      col:[0.72,0.16,0.12], r:1.15, speed:6.4, range:64}
 ];
 /* saturation pulls the family hue toward gray for the lesser variants, so you
    can read what is about to shoot you from across the cave */
@@ -4466,14 +4473,16 @@ function moveHell(e, dt, T){
   const sil = e.hell ? e.hell.sil : SIL_FLOAT;
   if(sil===SIL_FLOAT){ moveFinal(e, dt, T); e.gait=(e.gait||0)+dt*2.0; return; }
   const legs = (sil===SIL_LEGS);
-  const half = 1.6*(e.mScale||1);          // half its height, for the feet
+  const half = Math.min(HELL_MAXH, HELL_UNIT*(e.mScale||1))*0.5;   // matches what is drawn
   let dx=P.x-e.x, dz=P.z-e.z;
   const d=Math.hypot(dx,dz)||1;
   /* close to a working distance and hold it: walking into your face is a worse
      fight than standing off and shooting */
   const want = legs ? 8.0 : 7.0;
   const drive = d>want*1.15 ? 1 : (d<want*0.65 ? -1 : 0);
-  const spd = T.speed*(legs?1.3:0.95);
+  /* a small thing that moves like a small thing: the spider outruns you,
+     the heavy ones are about your pace */
+  const spd = T.speed*(legs?1.45:1.0)/Math.max(0.75, (e.mScale||1)*0.72);
   e.vx += ((dx/d)*drive*spd - e.vx)*Math.min(1, dt*4);
   e.vz += ((dz/d)*drive*spd - e.vz)*Math.min(1, dt*4);
   e.vy = (e.vy||0) - 22*dt;                                  // it has weight now
@@ -5428,7 +5437,7 @@ function startFinale(){
   e.hell = pick;
   e.dhp = e.dmax = pick.hp;
   e.hp = 9999;                       // its life is counted in Doom damage now
-  e.mScale = pick.s * 1.7;
+  e.mScale = pick.s;
   e.mFirst = 1.6; e.mRate = 1.1; e.first = true;
   const r = aimRay();
   for(let k=0;k<40;k++){
@@ -5717,7 +5726,7 @@ function frame(now){
       if(!V.vox || !V.vox.length) continue;
       const grow = (e.state==='emerge' ? 0.25+0.75*e.emerge : 1) * (e.mScale||1);
       /* height in metres / pixels tall = the size of one voxel */
-      const unit = (3.2*grow)/V.H;
+      const unit = Math.min(HELL_MAXH, HELL_UNIT*grow)/V.H;
       const flash = e.flash>0 ? e.flash/0.25 : 0;
       const aimK = e.aim ? 1 - e.lock/Math.max(0.05,e.lockMax) : 0;
       const pal = hellPalette(e.hell.col);
@@ -5735,7 +5744,13 @@ function frame(now){
       const bob = (spider ? 0.10 : 0.22)*Math.abs(sw2)*unit;
       for(const v of V.vox){
         if(n>=hellB.max) break;
-        const col = pal[v.ch] || pal.m;
+        const base = pal[v.ch] || pal.m;
+        /* Shade across the form. The distance transform already knows how far
+           inside the silhouette each pixel sits, so use it as light: the rim
+           falls away dark, the belly catches it. Flat fields of one colour per
+           palette letter is what made these read as cardboard. */
+        const lit = 0.72 + 0.055*v.depth + 0.06*Math.sin(v.x*1.7) * 0.5;
+        const col = [Math.min(1,base[0]*lit), Math.min(1,base[1]*lit), Math.min(1,base[2]*lit)];
         let lx = v.x*unit, ly = v.y*unit;
         const dz = v.depth*unit;
         if(v.part===3){            // legs
@@ -5775,7 +5790,7 @@ function frame(now){
       const V=hellVoxels(c.hell);
       if(!V.vox) continue;
       const k=c.t/POP_T;
-      const unit=(3.2*(c.mScale||1)*(1+1.35*k*k))/V.H;
+      const unit=Math.min(HELL_MAXH*1.6, HELL_UNIT*(c.mScale||1)*(1+1.35*k*k))/V.H;
       const pal=hellPalette(c.hell.col);
       const yaw=Math.atan2(P.x-c.x, P.z-c.z);
       const cy=Math.cos(yaw), sy=Math.sin(yaw);
