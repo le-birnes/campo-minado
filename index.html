@@ -2098,7 +2098,7 @@ function genWorld(d){
   G.boss = dung; G.flagsPlaced=0; G.kills=0; G.deathBy='mine'; G.lockOn=null;
   G.finale=false; G.lava=0;
   armDigFuse();
-  enemies.length=0; eshots.length=0;
+  enemies.length=0; eshots.length=0; corpses.length=0;
   P.hp = 4; P.hurtT = 0;   // counted in halves
 
   P.x=L.spawn[0]; P.y=L.spawn[1]; P.z=L.spawn[2];
@@ -2658,13 +2658,15 @@ const ghostB  = makeCubeBatch(64);
 const chestB  = makeCubeBatch(4*12);
 const debris  = makeCubeBatch(MAXP);
 const viewB   = makeCubeBatch(48);
-const enemyB  = makeCubeBatch(EN_MAX*EN_PARTS);
+/* live bodies plus a few still bursting */
+const enemyB  = makeCubeBatch((EN_MAX+8)*EN_PARTS);
 const glyphB  = makeBBBatch(6800);
 const glowB   = makeBBBatch(MAXS + 500);
 const boomB   = makeBBBatch(4);   // the hit mine, drawn over everything
 const sprB    = makeBBBatch(8);   // kept for the death flash only
 /* One finale creature at a time, a few hundred voxels each. */
-const hellB   = makeCubeBatch(900);
+/* one alive and one bursting, at the roster's worst case of 485 voxels */
+const hellB   = makeCubeBatch(1400);
 
 function rebuildWorld(){
   const d = worldB.data; let n=0;
@@ -4218,6 +4220,36 @@ function enemyFire(e){
   e.aim=null; e.lock=0;
 }
 
+/* A killed thing swells and then bursts, the way a struck mine does. It is
+   kept in its own list rather than left in `enemies` with a flag, so nothing
+   that hunts, aims, targets or counts enemies has to learn about a body that
+   is technically still on screen. */
+const corpses = [];
+const POP_T = 0.30;
+function updateCorpses(dt){
+  for(let i=corpses.length-1;i>=0;i--){
+    const c=corpses[i];
+    c.t += dt;
+    if(c.t < POP_T) continue;
+    // the burst
+    const col = c.col;
+    for(let k=0;k<34;k++){
+      const a=rnd()*6.283, b=Math.acos(2*rnd()-1), sp=7+rnd()*16;
+      addP(c.x,c.y,c.z, Math.sin(b)*Math.cos(a)*sp, Math.cos(b)*sp+4, Math.sin(b)*Math.sin(a)*sp,
+           0.26+rnd()*0.6, 0.8+rnd()*0.9, col, 0.55);
+    }
+    for(let k=0;k<18;k++){
+      const a=rnd()*6.283, b=Math.acos(2*rnd()-1), sp=5+rnd()*13;
+      addS(c.x,c.y,c.z, Math.sin(b)*Math.cos(a)*sp, Math.cos(b)*sp+3, Math.sin(b)*Math.sin(a)*sp,
+           0.7+rnd()*0.9, 0.45+rnd()*0.35, [1.0,0.62,0.24], T_SPARK, 0.9);
+    }
+    addS(c.x,c.y,c.z, 0,0,0, 5.2*(c.mScale||1), 0.30, [1.0,0.80,0.42], T_GLOW, 1.0);
+    snd.boom ? snd.boom() : snd.ekill();
+    G.shake = Math.max(G.shake, c.hell ? 0.20 : 0.09);
+    corpses.splice(i,1);
+  }
+}
+
 function killEnemy(e, i){
   if(e.charge){ e.charge(); e.charge=null; }   // nothing is charging any more
   const T=ETYPES[e.t];
@@ -4231,6 +4263,11 @@ function killEnemy(e, i){
   G.kills++;
   snd.ekill();
   const wasFinale = !!e.hell;
+  /* Swell first, burst after: the same beat a struck mine gets. */
+  corpses.push({x:e.x, y:e.y, z:e.z, t:0, hell:e.hell||null, et:e.t,
+                fx:e.fx, fy:e.fy, fz:e.fz, ux:e.ux, uy:e.uy, uz:e.uz,
+                mScale:e.mScale||1, banner:e.banner,
+                col:(e.hell ? e.hell.col : T.col)});
   enemies.splice(i,1);
   /* Killing the thing that came for you IS the ending. checkWin() deliberately
      refuses to finish the dungeon while a finale creature is alive, and nothing
@@ -4376,6 +4413,7 @@ function moveFinal(e, dt, T){
 
 function updateEnemies(dt){
   updateEShots(dt);
+  updateCorpses(dt);
   if(!G.boss) return;
   for(let i=enemies.length-1;i>=0;i--){
     const e=enemies[i], T=ETYPES[e.t];
@@ -5548,6 +5586,25 @@ function frame(now){
         n++;
       }
     }
+    /* and the ones already dying: same body, swelling and whitening out */
+    for(const c of corpses){
+      if(c.hell) continue;
+      const k = c.t/POP_T;
+      const parts=EBODY[c.et];
+      frameM(_E, c.x,c.y,c.z, c.fx,c.fy,c.fz, c.ux,c.uy,c.uz, (c.mScale||1)*(1+1.25*k*k));
+      for(let p=0;p<parts.length && n<enemyB.max;p++){
+        const sp=parts[p];
+        if(sp[11] && !c.banner) continue;
+        compose(_EL,0, sp[0],sp[1],sp[2], sp[3],sp[4],sp[5], sp[6],sp[7],sp[8]);
+        mulM(_E,_EL,d,n*CUBE_STRIDE);
+        const o=n*CUBE_STRIDE, col=sp[9];
+        d[o+16]=Math.min(1,col[0]+k*0.9); d[o+17]=Math.min(1,col[1]+k*0.55);
+        d[o+18]=Math.min(1,col[2]+k*0.30);
+        d[o+19]=0.5; d[o+20]=Math.min(1, sp[10]+k); d[o+21]=0; d[o+22]=0;
+        d[o+23]=d[o+24]=d[o+25]=0;
+        n++;
+      }
+    }
     enemyB.count=n;
     gl.uniform1f(uC.outline, 1.25);
     drawCubes(enemyB);
@@ -5594,6 +5651,30 @@ function frame(now){
         n++;
       }
       if(ghost) break;   // the Spectre is drawn faint, below
+    }
+    /* a finale creature on its way out: it inflates, whitens, and goes */
+    for(const c of corpses){
+      if(!c.hell) continue;
+      const V=hellVoxels(c.hell);
+      if(!V.vox) continue;
+      const k=c.t/POP_T;
+      const unit=(3.2*(c.mScale||1)*(1+1.35*k*k))/V.H;
+      const pal=hellPalette(c.hell.col);
+      const yaw=Math.atan2(P.x-c.x, P.z-c.z);
+      const cy=Math.cos(yaw), sy=Math.sin(yaw);
+      for(const v of V.vox){
+        if(n>=hellB.max) break;
+        const col=pal[v.ch]||pal.m;
+        const lx=v.x*unit, ly=v.y*unit;
+        const o=n*CUBE_STRIDE;
+        compose(d,o, c.x+cy*lx, c.y+ly, c.z-sy*lx, 0, yaw, 0,
+                unit*1.02, unit*1.02, v.depth*unit);
+        d[o+16]=Math.min(1,col[0]+k*0.95); d[o+17]=Math.min(1,col[1]+k*0.55);
+        d[o+18]=Math.min(1,col[2]+k*0.30);
+        d[o+19]=0.5; d[o+20]=k; d[o+21]=0; d[o+22]=0;
+        d[o+23]=d[o+24]=d[o+25]=0;
+        n++;
+      }
     }
     hellB.count=n;
     if(n){
