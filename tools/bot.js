@@ -127,7 +127,7 @@ const YAWS = 16, PITCHES = [-0.55, -0.22, 0.0, 0.22, 0.55];
 function scan(){
   stats.scans++;
   const [ex,ey,ez]=eye();
-  const work=[], open=[];
+  const work=[], open=[], seenFar=[];
   for (let a=0;a<YAWS;a++){
     const th = a/YAWS*Math.PI*2;
     for (const pit of PITCHES){
@@ -137,13 +137,17 @@ function scan(){
       open.push({dx,dy,dz, run: h.hit ? h.t : FAR});
       if (h.hit && h.kind==='block'){
         const c = idx(h.x,h.y,h.z);
-        if (G.st[c]===SOLID && h.t<=REACH) work.push({cell:c, d:h.t});
+        /* Every puzzle block the eye lands on, at any distance. The ones in
+           reach are work for right now; the rest are where to go next, and
+           they beat walking down a corridor for its own sake. */
+        if (G.st[c]===SOLID){ (h.t<=REACH ? work : seenFar).push({cell:c, d:h.t}); }
       }
     }
   }
   work.sort((p,q)=>p.d-q.d);
+  seenFar.sort((p,q)=>p.d-q.d);
   open.sort((p,q)=>q.run-p.run);
-  return {work, open};
+  return {work, open, seenFar};
 }
 /* Is this exact cell visible from here, close enough to work on? Aims at it. */
 function inView(cell){
@@ -309,7 +313,7 @@ function playGame(diff, mode, label){
   const giveUp = c => (refused.get(c)||0) >= 2;
   const refuse = c => refused.set(c, (refused.get(c)||0)+1);
 
-  let moves=0, peak=0, dry=0, why='ran out of steps', step=0;
+  let moves=0, peak=0, dry=0, wander=0, retried=false, why='ran out of steps', step=0;
   const qs = /[?&]steps=(\d+)/.exec(location.search);
   const cap = qs ? +qs[1] : Math.min(1200, G.safeTotal*3 + 300);
 
@@ -329,7 +333,7 @@ function playGame(diff, mode, label){
     if (chests.length && grabChest()){ moves++; continue; }
 
     const s = scan();
-    let acted = false;
+    let acted = false, walked = false;
 
     /* MARK FIRST — the dungeon charges for digging beside a mine you have not
        marked yet, so a proven mine is always the next move. */
@@ -387,17 +391,44 @@ function playGame(diff, mode, label){
       }
     }
 
-    /* FOLLOW — the only movement decision it makes. */
+    /* GO TO WORK YOU CAN SEE. Nothing in reach, but the scan found stone
+       further off: walk at THAT, not down a corridor. Approaching a known face
+       is playing the board; following an opening is only looking for one. */
+    if (!acted && G.state==='play'){
+      for (const w of s.seenFar){
+        if (giveUp(w.cell) || G.st[w.cell]!==SOLID) continue;
+        if (closeOn(w.cell)){ acted=true; walked=true; }
+        else refuse(w.cell);
+        break;
+      }
+    }
+
+    /* FOLLOW — last resort, and it is not progress. Walking down an opening is
+       how you FIND something to do, so it does not end the step satisfied: the
+       next pass scans from the new spot and tries to work again. Without that
+       the bot walked 33.9 km to fire 23 shots, because a successful walk
+       counted as having done something. */
     if (!acted && G.state==='play'){
       for (let k=0;k<3 && !acted;k++){
         const o = s.open[k];
         if (!o || o.run < BLOCK*1.5) break;
-        if (followLine(o)){ acted=true; moves++; }
+        if (followLine(o)){ acted=true; walked=true; }
       }
     }
 
     if (!acted){ if (++dry >= 10){ why='nothing it could reach'; break; } }
-    else dry=0;
+    else if (walked){
+      /* Wandering without finding anything. Before giving up, forget what it
+         gave up on: a target refused from one side of a wall is often trivial
+         from the other, and it has moved a long way since. One fresh look,
+         then it is genuinely done. */
+      if (++wander >= 40){
+        if (retried){ why='walking without finding work'; break; }
+        retried = true; wander = 0; refused.clear();
+      }
+      dry=0;
+    }
+    else { dry=0; wander=0; }
   }
 
   let left=0;

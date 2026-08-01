@@ -2477,7 +2477,11 @@ const snd = (function(){
     /* Not a tick — a charge. It climbs for exactly as long as the thing is
        holding its aim, so the sound IS the telegraph: when it stops rising,
        the shot is already on its way. */
-    elock(dur){ if(!on())return;
+    /* Returns a stop handle. A charge is a promise that a shot is coming, so
+       it has to be cancellable: kill the thing mid-wind-up and the sound must
+       go with it, or the cave keeps charging at you from something that is no
+       longer there. */
+    elock(dur){ if(!on())return null;
       const t=ac.currentTime, d=Math.max(0.12, Math.min(3.0, dur||0.6));
       const o=ac.createOscillator(); o.type='sawtooth';
       o.frequency.setValueAtTime(180, t);
@@ -2492,6 +2496,13 @@ const snd = (function(){
       g.gain.exponentialRampToValueAtTime(0.0001, t+d);
       o.connect(f); f.connect(g); g.connect(master);
       o.start(t); o.stop(t+d+0.02);
+      return ()=>{ try{
+        const n=ac.currentTime;
+        g.gain.cancelScheduledValues(n);
+        g.gain.setValueAtTime(Math.max(0.0001, g.gain.value), n);
+        g.gain.exponentialRampToValueAtTime(0.0001, n+0.05);
+        o.stop(n+0.06);
+      }catch(e){} };
     },
     efire(hz){ if(!on())return;
       const o=ac.createOscillator(); o.type='sawtooth';
@@ -3536,6 +3547,7 @@ function canSee(e){
 
 function enemyFire(e){
   const _hell = !!e.hell;
+  if(e.charge){ e.charge(); e.charge=null; }   // the wind-up is over
   const T=ETYPES[e.t];
   muzzleOf(e, _mz);
   let dx=e.aim[0]-_mz[0], dy=e.aim[1]-_mz[1], dz=e.aim[2]-_mz[2];
@@ -3552,6 +3564,7 @@ function enemyFire(e){
 }
 
 function killEnemy(e, i){
+  if(e.charge){ e.charge(); e.charge=null; }   // nothing is charging any more
   const T=ETYPES[e.t];
   for(let k=0;k<22;k++){
     const a=rnd()*6.283, b=Math.acos(2*rnd()-1), sp=5+rnd()*11;
@@ -3765,7 +3778,7 @@ function updateEnemies(dt){
         const lead = e.lockMax + flight;
         e.aim = [P.x + P.vx*lead, P.y+EYE*0.62 + P.vy*lead*0.5, P.z + P.vz*lead];
         e.ant = !e.ant;
-        snd.elock(e.lockMax);
+        e.charge = snd.elock(e.lockMax);
       }
     }
   }
