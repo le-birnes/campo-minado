@@ -13,6 +13,7 @@ HOOK = """requestAnimationFrame(frame);
 window.__T = {
   G, P, BLOCK, EYE, P_H, DIFFS, MARKED, SOLID, AIR, ROCK, MAX_JUMPS,
   MODE_SWEEP, MODE_DUNGEON, DUNGEON,
+  findHint, gatherClues, hover: null,
   chests, rayChest, correctFlags, canJump, startJump,
   startThink, endThink, snd,
   genWorld, revealAt, idx, inside, isSolidCell, raycast, checkWin,

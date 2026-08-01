@@ -20,7 +20,7 @@ const {G, P, IN, enemies, eshots, EN_MAX, BLOCK, EYE, P_H, P_R, SPD_RUN,
        shoot, mark, physics, tickGround, updateJump, rebuildWorld, worldB,
        updateEnemies, MARKED, SOLID, AIR, ROCK, aimAt, adv, DIFFS,
        chests, rayChest, correctFlags, MAX_JUMPS, startThink, endThink, snd,
-       canJump} = T;
+       canJump, findHint} = T;
 /* thousands of WebAudio nodes is most of the runtime and none of the value */
 try{ G.muted=true; snd.setMute(true); }catch(e){}
 
@@ -37,7 +37,7 @@ const stats = { walked:0, jumps:0, stuck:0, noRoute:0, dugOut:0, insideRock:0,
                 fell:0, shots:0, flags:0, noEffect:0, killed:0, shotAt:0,
                 chords:0, chordDud:0, opened:0, chests:0, climbed:0, misflag:0,
                 chordOffered:0, chordNoAim:0, gaveUp:0, airJump:0, explored:0, dodged:0,
-                mineOffered:0, safeOffered:0, chordSteps:0,
+                mineOffered:0, safeOffered:0, chordSteps:0, byRule:{}, closeUp:0,
                 ticks:0, routes:0, routeCells:0, approaches:0, sightRays:0, steps:0,
                 guesses:0, guessMines:0 };
 
@@ -368,6 +368,12 @@ function approachOld(cell) {
    most unopened blocks it cannot see from here. That is "map the area by
    moving" — the bot goes where there is something new to look at. */
 const STANDOFF = 3*BLOCK, RANGE_MAX = 12*BLOCK;
+/* Keeping three blocks back is the default and it is the right default. But a
+   block in a tight pocket can only be shot from close, and refusing to step in
+   left one Apprentice board at 283 of 284 opened with every mine flagged and
+   the last block invisible from anywhere legal. A player backs off by habit and
+   walks in when they must, so the standoff drops when nothing else is left. */
+let closeUp = false;
 function seesFrom(x,y,z, cell){
   stats.sightRays++;
   const [tx,ty,tz]=cellXYZ(cell);
@@ -376,7 +382,7 @@ function seesFrom(x,y,z, cell){
   let vx=ax-ex, vy=ay-ey, vz=az-ez;
   const d=Math.hypot(vx,vy,vz)||1;
   if (d>13*BLOCK) return false;
-  if(d < STANDOFF || d > RANGE_MAX) return false;
+  if(d < (closeUp ? BLOCK*0.9 : STANDOFF) || d > RANGE_MAX) return false;
   const h=raycast(ex,ey,ez, vx/d,vy/d,vz/d, RANGE_MAX, false);
   return !!(h.hit && h.x===tx && h.y===ty && h.z===tz);
 }
@@ -565,6 +571,21 @@ function grabChests() {
    One pass over the board produces all three move kinds. The old bot walked
    every cell three separate times per step, which on a 7776-cell dungeon is
    most of the runtime. */
+/* The game ships a solver — arrows, single-clue counts, and the two-clue
+   subset rule — and the player can call it with H. The bot was using its own,
+   which knows two of those five rules, and it showed: on an Apprentice board
+   the game's solver proves every cell with no guessing at all, while the bot
+   saw 27 provable mines, ZERO provable safes, and guessed 51 times.
+
+   So it plays with the same solver the player has. What it may not do is look
+   at G.mine, and findHint never does — it reads only what is on the board. */
+function solverMove(){
+  try{ T.hover = {hit:false}; }catch(e){}
+  const h = findHint();
+  if(!h) return null;
+  return {cell:h.target, mine:!!h.mine, rule:h.rule||'?'};
+}
+
 function analyse() {
   const N=G.nx*G.ny*G.nz;
   const mines=[], chords=[], safes=[], taken=new Set();
@@ -656,10 +677,37 @@ function playGame(diff, mode, label) {
     try{ document.body.dataset.r = 'step '+stats.steps+' of '+label; }catch(e){}
     let acted=false, tries=0;
     const TRIES=4;
+
     const A=analyse();
     stats.mineOffered += A.mines.length;
     stats.safeOffered += A.safes.length;
     if (A.chords.length) stats.chordSteps++;
+
+    /* The full solver is the last cheap resort, not the first. Its subset rule
+       compares every clue against every other, which on a 7776-cell dungeon
+       with hundreds of clues is the most expensive thing in the loop — calling
+       it every step ran a dungeon past seven minutes. The one-clue deductions
+       below cost a single pass, so try those first and only reach for the
+       stacked-logic solver when they come up empty. */
+    if (!A.mines.length && !A.chords.length && !A.safes.length) {
+      const mv = solverMove();
+      if(mv && !giveUp(mv.cell) && approach(mv.cell)){
+      const before = G.revealed + G.marked;
+      if(mv.mine){
+        thinkAct(); stats.flags++;
+        if(G.st[mv.cell]!==MARKED){ stats.misflag++; refuse(mv.cell); }
+        else { refused.delete(mv.cell); stats.byRule[mv.rule]=(stats.byRule[mv.rule]||0)+1; }
+      } else {
+        shoot(); stats.shots++;
+        if(G.mine[mv.cell]) err(`${label}: the solver called ${mv.cell} safe and it is a mine`);
+        stats.byRule[mv.rule]=(stats.byRule[mv.rule]||0)+1;
+      }
+      moves++; acted=true;
+      audit(label+' solve '+moves);
+      if(G.revealed+G.marked===before){ stats.noEffect++; refuse(mv.cell); acted=false; }
+      } else if(mv) refuse(mv.cell);
+    }
+    if(G.state!=='play') break;
 
     /* 1. Flag every mine the board proves. That is what wins it. */
     for (const mv of nearestFirst(A.mines).filter(m=>!giveUp(m.cell)).slice(0,6)) {
@@ -727,6 +775,26 @@ function playGame(diff, mode, label) {
        board is over. */
     if (!acted && explore()) { acted=true; moves++; audit(label+' explore'); }
 
+    /* Last resort: step right up to it. Only after everything at a safe
+       distance has been tried and failed. */
+    if (!acted){
+      closeUp = true;
+      const mv = solverMove();
+      if(mv && approach(mv.cell)){
+        const before=G.revealed+G.marked;
+        if(mv.mine) thinkAct(); else shoot();
+        if(G.revealed+G.marked!==before){ acted=true; moves++; stats.closeUp++; audit(label+' close'); }
+      }
+      if(!acted) for(const m2 of nearestFirst(A.mines).concat(A.safes).slice(0,4)){
+        if(giveUp(m2.cell) || !approach(m2.cell)) continue;
+        const before=G.revealed+G.marked;
+        shoot();
+        if(G.revealed+G.marked!==before){ acted=true; moves++; stats.closeUp++; audit(label+' close'); break; }
+      }
+      closeUp = false;
+      reachFrom = -1;
+    }
+
     /* A step that achieved nothing means every target it tried was
        unreachable AND there was nowhere better to stand. They are refused, so
        the next step tries different ones. Only give up after a run of steps
@@ -735,7 +803,22 @@ function playGame(diff, mode, label) {
       if (++dry >= 12) { stats.dugOut++; endWhy='nothing it could reach'; break; }
     } else dry=0;
   }
-  return {moves, peak, state:G.state, won:won(), why:endWhy};
+  /* How close did it get, and what was left? "nothing it could reach" is only
+     a finding if there was something worth reaching. */
+  let left=0, leftSeen=0;
+  const from=standCell();
+  if(from>=0){ if(from!==reachFrom||!reachList.length) floodReach(from); }
+  for(let i=0;i<G.nx*G.ny*G.nz;i++){
+    if(G.st[i]!==SOLID || G.mine[i]) continue;
+    left++;
+    for(const g of reachList){
+      const [gx,gy,gz]=cellXYZ(g);
+      if(seesFrom(gx,gy,gz,i)){ leftSeen++; break; }
+    }
+  }
+  return {moves, peak, state:G.state, won:won(), why:endWhy,
+          opened:G.revealed, of:G.safeTotal, flags:G.marked, mines:G.mines,
+          left, leftSeen};
 }
 
 /* ---------------- suite ---------------- */
@@ -768,11 +851,16 @@ for (const [d,mode,label] of plan) {
   per[label].n++; per[label].m+=r.moves; per[label].w+=r.won?1:0;
   per[label].p=Math.max(per[label].p,r.peak);
   per[label].why=r.why;
+  log(`  ${label} ended: opened ${r.opened}/${r.of} (${(100*r.opened/r.of).toFixed(0)}%), `+
+      `flags ${r.flags}/${r.mines}, ${r.left} safe blocks still shut of which `+
+      `${r.leftSeen} could be SEEN from somewhere it can walk to`);
 }
 
 log(`games=${games} finished=${wins} actions=${totalMoves}`);
 for (const k in per) log(`  ${k}: ${per[k].n} games, ${per[k].w} finished, ${per[k].m} actions, peakFoes=${per[k].p} — ended: ${per[k].why}`);
-log(`exploring: ${stats.explored} moves to a better vantage, ${stats.dodged} dodges`);
+log(`solver moves by rule: ${Object.keys(stats.byRule).map(k=>k+' '+stats.byRule[k]).join(', ')||'none'}`);
+log(`exploring: ${stats.explored} moves to a better vantage, ${stats.dodged} dodges, `+
+    `${stats.closeUp} times it had to step inside the standoff`);
 log(`on foot: ${stats.walked.toFixed(0)} m walked, ${stats.jumps} jumps `+
     `(${stats.climbed} off the ground to climb, ${stats.airJump} in mid-air)`);
 log(`navigation: stuck=${stats.stuck} noRoute=${stats.noRoute} boxedIn=${stats.dugOut} fellOutOfWorld=${stats.fell} insideRock=${stats.insideRock}`);
