@@ -1462,11 +1462,7 @@ function idx(x,y,z){ return (y*G.nz + z)*G.nx + x; }
 function inside(x,y,z){ return x>=0&&y>=0&&z>=0&&x<G.nx&&y<G.ny&&z<G.nz; }
 function isSolidCell(x,y,z){
   if(!inside(x,y,z)) return true;             // outside = bedrock
-  const i=idx(x,y,z);
-  /* A mine that has hatched left an empty socket. The cell stays MARKED so the
-     count and the win condition are untouched, but the block itself is gone. */
-  if(G.hatch && G.hatch[i]) return false;
-  return G.st[i] !== AIR;
+  return G.st[idx(x,y,z)] !== AIR;
 }
 
 /* ---------- world shape -------------------------------------------------
@@ -2546,8 +2542,6 @@ const worldB  = makeCubeBatch(20*26*20 + 64);
 const ghostB  = makeCubeBatch(64);
 /* four cubes a chest, and a minefield drops at most two */
 const chestB  = makeCubeBatch(4*12);
-/* the sockets left behind by mines that have hatched */
-const huskB   = makeCubeBatch(96);
 const debris  = makeCubeBatch(MAXP);
 const viewB   = makeCubeBatch(48);
 const enemyB  = makeCubeBatch(EN_MAX*EN_PARTS);
@@ -2555,9 +2549,7 @@ const glyphB  = makeBBBatch(6800);
 const glowB   = makeBBBatch(MAXS + 500);
 const boomB   = makeBBBatch(4);   // the hit mine, drawn over everything
 
-const husks=[];
 function rebuildWorld(){
-  husks.length=0;
   const d = worldB.data; let n=0;
   const put=(px,py,pz,s,col,seedv,emis,mark,echo,hi)=>{
     const o=n*CUBE_STRIDE;
@@ -2580,10 +2572,6 @@ function rebuildWorld(){
   for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
     const i=idx(x,y,z);
     if(G.st[i]===AIR) continue;
-    /* The mine came out of this one. The block is gone, but the SPACE it
-       occupied still matters — it is a flagged mine, and you need to see where
-       it was. Drawn separately as a see-through socket with a solid frame. */
-    if(G.hatch && G.hatch[i]){ husks.push(i); continue; }
     /* Structure reads as the same stone as the shell, so a wall inside the
        cave and the wall at its edge are visibly the same promise: this does
        not open, do not waste a shot on it. */
@@ -2618,21 +2606,6 @@ function rebuildWorld(){
         G.st[i]===MARKED?1:0, echo, echo>0 ? echoColOf(i) : null);
   }
   worldB.count=n;
-  /* the sockets, in their own batch so they can be drawn transparent */
-  {
-    const hd=huskB.data; let hn=0;
-    for(const i of husks){
-      if(hn>=huskB.max) break;
-      const [x,y,z]=cellXYZ(i);
-      const o=hn*CUBE_STRIDE;
-      composeAA(hd,o, (x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, BLOCK,BLOCK,BLOCK);
-      hd[o+16]=0.62; hd[o+17]=0.60; hd[o+18]=0.66;
-      hd[o+19]=0.5; hd[o+20]=0; hd[o+21]=0; hd[o+22]=0;
-      hd[o+23]=hd[o+24]=hd[o+25]=0;
-      hn++;
-    }
-    huskB.count=hn;
-  }
   G.dirty=false;
 }
 
@@ -3505,7 +3478,10 @@ function hatchMine(cell, x,y,z){
   if(T.hp<=0) return false;                 // found without disturbing it
   const e = spawnEnemy(FAM_MINE, 0, cell);
   if(!e) return false;
-  G.hatch[cell]=1; G.dirty=true;
+  /* The block STAYS. Emptying it to a see-through socket looked clever and
+     played badly: what comes out of a flagged mine should arrive the same way
+     everything else does, out of a block that is still there. */
+  G.dirty=true;
   e.hp = e.maxhp = T.hp;
   e.first = true;
   e.mFirst = T.first; e.mRate = T.rate;
@@ -4771,12 +4747,18 @@ function frame(now){
   }
 
   // ------- camera -------
+  /* Shake shoves the camera, and it used to shove it 2.2 m in a random
+     direction every frame while also jittering the ANGLES — and the angles are
+     the problem, because aimRay() uses the unshaken P.yaw. During a shake the
+     view and the aim disagreed, so the picture lurched around independently of
+     the mouse. That is the camera "jumping" with nobody touching it.
+     Position only now, and a fifth of the throw: it still reads as an impact
+     without the world coming off its hinges. */
   const shk = G.shake*G.shake;
-  const camX = P.x + (Math.random()-0.5)*shk*2.2;
-  const camY = P.y + EYE + Math.sin(P.bob*2)*0.035 + (Math.random()-0.5)*shk*2.2;
-  const camZ = P.z + (Math.random()-0.5)*shk*2.2;
-  const yaw = P.yaw + (Math.random()-0.5)*shk*0.05;
-  const pit = P.pitch + (Math.random()-0.5)*shk*0.05;
+  const camX = P.x + (Math.random()-0.5)*shk*0.42;
+  const camY = P.y + EYE + Math.sin(P.bob*2)*0.035 + (Math.random()-0.5)*shk*0.42;
+  const camZ = P.z + (Math.random()-0.5)*shk*0.42;
+  const yaw = P.yaw, pit = P.pitch;
   const basis = viewFrom(camX, camY, camZ, yaw, pit, viewM);
   const aspect = W/H;
   const projMain = m4.persp(70*Math.PI/180, aspect, 0.08, 400);
@@ -4824,20 +4806,6 @@ function frame(now){
   drawCubes(worldB);
   gl.uniform1f(uC.wallGrey, 0.0);
 
-  /* The sockets: face almost gone, frame solid, so an emptied mine still reads
-     as a place on the board rather than a hole in the air. */
-  if(huskB.count){
-    gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    gl.depthMask(false); gl.disable(gl.CULL_FACE);
-    gl.uniform1f(uC.alpha, 0.10);
-    gl.uniform1f(uC.edgeSolid, 1.0);
-    gl.uniform1f(uC.outline, 2.2);
-    drawCubes(huskB);
-    gl.uniform1f(uC.outline, 1.0);
-    gl.uniform1f(uC.edgeSolid, 0.0);
-    gl.uniform1f(uC.alpha, 1.0);
-    gl.depthMask(true); gl.enable(gl.CULL_FACE); gl.disable(gl.BLEND);
-  }
 
   // escombros
   {
@@ -5040,14 +5008,6 @@ function frame(now){
           if(G.st[i]===MARKED && G.state==='play'){
             const dcam=Math.hypot(cx-camX, cy-camY, cz-camZ);
             if(dcam>40) continue;
-            /* On a socket the flag hangs in the middle of the empty space. On a
-               real block it has to sit just outside the nearest face, or it is
-               buried inside solid rock — which is why it looked like it was
-               floating off to one side once the block was gone. */
-            if(G.hatch && G.hatch[i]){
-              put(cx,cy,cz, 1.6,1.6, T_RUNE, [0.92,0.10,0.09], clamp(1.30-dcam/34,0.40,1), 0);
-              continue;
-            }
             /* Painted ON the stone, exactly like the fracture. It used to be a
                camera-facing billboard nudged out past whichever face was
                nearest, so it swung as you walked and slid off the block —
