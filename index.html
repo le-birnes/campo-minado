@@ -2869,6 +2869,30 @@ function hitNumber(x,y,z){
 
   /* The count does not add up yet, so all the number can do is show you what
      it is counting. */
+  /* Every block it still hides must be a mine — because everything safe it
+     touched has already been opened. Then the number can plant the flags
+     itself, and you never have to reach the blocks at all.
+
+     This is the flagging counterpart of the spread, and it exists because a
+     block can end up impossible to see: buried in a corner, or walled in by
+     what you dug around it. Without this a run could be one unreachable mine
+     short of finished forever. */
+  if(abrir.length && (need - marcadas) === abrir.length){
+    for(const [j,X,Y,Z] of abrir){
+      G.st[j]=MARKED; G.marked++;
+      hatchMine(j, X, Y, Z);
+      maybeSpawn(j, X, Y, Z);
+      setEcho(j, 1.2, [1.0,0.16,0.12]);
+    }
+    G.numHit[idx(x,y,z)] = tGlobal;
+    G.dirty=true; snd.mark();
+    addS((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, 0,0,0, 2.0, 0.5, [1.0,0.25,0.18], T_GLOW, 0.7);
+    toast(abrir.length===1 ? 'Nothing else it could be. Flagged.'
+                           : `Nothing else they could be. ${abrir.length} flagged.`, 2600);
+    checkWin();
+    return abrir.length;
+  }
+
   if(marcadas !== need || !abrir.length){
     /* The eye: for one second the number stops being a riddle and just tells
        you. Only worth spending on a number you have not finished. */

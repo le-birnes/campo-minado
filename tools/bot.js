@@ -63,7 +63,7 @@ let auditN = 0;
 const stats = { walked:0, jumps:0, shots:0, flags:0, noEffect:0,
                 killed:0, shotAt:0, chests:0, dodged:0, scans:0, rays:0,
                 ticks:0, follows:0, blocked:0, misflag:0, guesses:0, sidesteps:0, surveys:0, clueWork:0,
-                guessMines:0, byRule:{}, insideRock:0, fell:0 };
+                guessMines:0, byRule:{}, insideRock:0, fell:0, numFlags:0 };
 
 /* ---------------- audit ---------------- */
 let baseAir = 0, baseRock = 0;
@@ -271,6 +271,38 @@ function provenSafe(){
    it walked away. Now an unfinished number is a place to work, and its
    neighbours are the work — sorted by how nearly settled the clue is, because
    a 1 with two blocks left tells you far more per shot than a 4 with eight. */
+/* Numbers whose remaining hidden blocks must ALL be mines. Right-clicking one
+   of these flags them where they stand. */
+function forcedClues(){
+  const N=G.nx*G.ny*G.nz, out=[];
+  const [ex,ey,ez]=eye();
+  for (let i=0;i<N;i++){
+    if (G.st[i]!==AIR || G.cnt[i]===0) continue;
+    let f=0, hid=0;
+    for (const j of nbrsOf(i)){ const s=G.st[j]; if (s===MARKED) f++; else if (s===SOLID) hid++; }
+    if (!hid || G.cnt[i]-f !== hid) continue;
+    const [x,y,z]=cellXYZ(i);
+    out.push({clue:i, d:Math.hypot((x+0.5)*BLOCK-ex,(y+0.5)*BLOCK-ey,(z+0.5)*BLOCK-ez)});
+  }
+  out.sort((p,q)=>p.d-q.d);
+  return out;
+}
+
+/* Aiming at the DIGIT rather than the block: the ray has to come back as a
+   number on that exact cell. */
+function lineToNum(cell){
+  const [tx,ty,tz]=cellXYZ(cell);
+  const [ex,ey,ez]=eye();
+  const cx=(tx+0.5)*BLOCK, cy=(ty+0.5)*BLOCK, cz=(tz+0.5)*BLOCK;
+  let vx=cx-ex, vy=cy-ey, vz=cz-ez;
+  const d=Math.hypot(vx,vy,vz)||1;
+  if (d>REACH) return false;
+  const h=raycast(ex,ey,ez, vx/d,vy/d,vz/d, REACH, true);
+  stats.rays++;
+  if (h.hit && h.kind==='num' && h.x===tx && h.y===ty && h.z===tz){ aimAt(cx,cy,cz); return true; }
+  return false;
+}
+
 function unfinished(){
   const N=G.nx*G.ny*G.nz, out=[];
   const [ex,ey,ez]=eye();
@@ -399,6 +431,26 @@ function playGame(diff, mode, label){
     if (!surveyed){ scan(); scan(); surveyed = true; stats.surveys++; }
     const s = scan();
     let acted = false, walked = false;
+
+    /* FLAG FROM THE NUMBER. When every block a number still hides must be a
+       mine, the number will plant the flags itself — so aim at the DIGIT, not
+       at the blocks. That reaches mines you cannot: buried in a corner, or
+       walled in by what you dug around them, which is how a run ends one
+       unreachable mine short of finished. */
+    if (!acted && G.state==='play'){
+      for (const u of forcedClues()){
+        if (giveUp(u.clue)) continue;
+        if (!lineToNum(u.clue)){
+          moved=true;
+          if (!closeOn(u.clue) || !lineToNum(u.clue)){ refuse(u.clue); continue; }
+        }
+        const m0=G.marked;
+        startThink(); endThink();
+        if (G.marked>m0){ moves++; acted=true; stats.numFlags += G.marked-m0; audit(label+' numflag'); }
+        else refuse(u.clue);
+        break;
+      }
+    }
 
     /* MARK FIRST — the dungeon charges for digging beside a mine you have not
        marked yet, so a proven mine is always the next move. */
@@ -564,6 +616,7 @@ log(`actions: ${stats.shots} shots, ${stats.flags} flags (${stats.misflag} misai
 log(`digging blind: ${stats.guesses} chances, ${stats.guessMines} were mines `+
     `(${stats.guesses?(100*stats.guessMines/stats.guesses).toFixed(1):0}%) — it declines those, `+
     `which is a cheat; the number is the honest risk`);
+log(`flags planted BY a number (blocks it could not reach): ${stats.numFlags}`);
 log(`clue-led digs: ${stats.clueWork} (shots aimed at an unfinished number's own blocks)`);
 log(`solver rules: ${Object.keys(stats.byRule).map(k=>k+' '+stats.byRule[k]).join(', ')||'none'}`);
 log(`combat: killed ${stats.killed}/${stats.shotAt}, ${stats.dodged} dodges`);
