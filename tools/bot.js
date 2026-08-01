@@ -34,8 +34,7 @@
 window.addEventListener('error', e=>{
   try{ document.body.dataset.r = 'UNCAUGHT '+e.message+' @ line '+e.lineno; }catch(_){}
 });
-const YIELD = () => new Promise(r => setTimeout(r, 0));
-window.addEventListener('load', () => setTimeout(async () => {
+window.addEventListener('load', () => setTimeout(() => {
 try{
 const T = window.__T;
 const out = [], errs = [];
@@ -64,8 +63,15 @@ const DT = 1/30;
    it fires wherever the run is stuck. */
 let phase='start';
 const T0 = performance.now();
+/* COUNT, do not time. Under Chrome's virtual clock performance.now() does not
+   advance — every duration measured this session came back 0 ms — so a
+   time-based watchdog can never fire, which is exactly why it never did and
+   why I wrongly concluded the stuck loop "does not tick". A call budget works
+   whatever the clock is doing. Apprentice finishes on about 9,000 of these. */
+let wdN = 0;
 function WD(){
-  if (performance.now()-T0 > 45000) throw new Error('watchdog stuck in: '+phase);
+  if (++wdN > 400000)
+    throw new Error('watchdog: '+wdN+' checks without finishing, last phase: '+phase);
 }
 const PH = p => { phase = p; };
 /* Two different distances, and they were being muddled.
@@ -564,7 +570,7 @@ function diedHow(){
 }
 
 const NOFOES = /[?&]nofoes/.test(location.search);
-async function playGame(diff, mode, label){
+function playGame(diff, mode, label){
   G.mode = mode;
   /* ?zones=N builds a smaller dungeon: one mine area, then two, then the
      lot. If a fault only appears at four, it scales with the level; if it
@@ -588,7 +594,6 @@ async function playGame(diff, mode, label){
   const cap = qs ? +qs[1] : Math.min(1200, G.safeTotal*3 + 300);
 
   for (; step<cap; step++){
-    if ((step & 3) === 0) await YIELD();   // let the page breathe and repaint
     if (won()){ why='finished'; break; }
     if (G.state!=='play'){ why=diedHow(); break; }
     if (!idle(0.1)){ why='physics fault'; break; }
@@ -839,7 +844,7 @@ else {
 
 let games=0, wins=0, totalMoves=0;
 for (const [d,mode,label] of plan){
-  const r=await playGame(d,mode,label);
+  const r=playGame(d,mode,label);
   games++; totalMoves+=r.moves; if (r.won) wins++;
   log(`${label}: ${r.won?'FINISHED':'stopped'} after ${r.steps} steps / ${r.moves} actions — ${r.why}`);
   log(`   opened ${r.opened}/${r.of} (${(100*r.opened/r.of).toFixed(0)}%), `+
