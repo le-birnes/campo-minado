@@ -43,6 +43,15 @@ window.__T = {
 
 })();"""
 s = s.replace(OLD, HOOK)
+# Refuse to build a bot whose names do not line up with the hook. Twice this
+# session a symbol was exported here and never bound in bot.js, and both times
+# it sailed past `node --check` (syntax only) and past the fast Apprentice test
+# (which cannot reach combat code), then threw minutes into a dungeon run where
+# a page that never yields could not even report it.
+import lint_bot
+if lint_bot.main() != 0:
+    raise SystemExit('mkbot: refusing to build, the hook and bot.js disagree')
+
 bot = open(os.path.join(HERE, 'bot.js'), encoding='utf-8').read()
 s = s + '\n<script>\n' + bot + '\n</script>\n'
 open(os.path.join(HERE, 'bot_' + src), 'w', encoding='utf-8').write(s)
