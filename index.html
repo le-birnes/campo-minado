@@ -4068,13 +4068,25 @@ function hellVoxels(h){
     }
     dist[y*W+x]=r;
   }
+  /* Which limb is this pixel part of? A drawing is a front elevation, so the
+     answer is just where it sits: the bottom quarter is legs, the top quarter
+     is head, the outer columns of the middle are arms, the rest is body. That
+     is enough to make it walk — a rigid slab sliding along the floor is what
+     made these read as dummies. */
+  const P_BODY=0, P_HEAD=1, P_ARM=2, P_LEG=3;
   const out=[];
   for(let y=0;y<H;y++) for(let x=0;x<W;x++){
     const ch=rows[y][x];
     if(ch==='.') continue;
     const d=dist[y*W+x];
     const depth = Math.max(1, Math.min(9, d*2-1));      // 1, 3, 5, 7, 9
-    out.push({x: x-(W-1)/2, y: (H-1)/2-y, ch, depth});
+    const lx = x-(W-1)/2, ly = (H-1)/2-y;
+    const ny = 1 - (y/(H-1));                            // 0 at the feet, 1 at the crown
+    let part = P_BODY;
+    if(ny < 0.26)                            part = P_LEG;
+    else if(ny > 0.74)                       part = P_HEAD;
+    else if(Math.abs(lx) > W*0.26)           part = P_ARM;
+    out.push({x: lx, y: ly, ch, depth, part, side: lx<0?-1:1});
   }
   HELL_VOX[key]={vox:out, W, H};
   return HELL_VOX[key];
@@ -4446,6 +4458,48 @@ function moveFinal(e, dt, T){
   if(solidAtWorld(e.x,e.y,nz)) e.vz=-e.vz*0.6; else e.z=nz;
 }
 
+/* The roster already says which of these things fly: SIL_FLOAT is a Lost Soul,
+   a Cacodemon, a Pain Elemental — they SHOULD hang in the air. Everything else
+   was hanging there too, because moveFinal circles at a fixed distance and
+   never lands. A Baron of Hell should walk at you. */
+function moveHell(e, dt, T){
+  const sil = e.hell ? e.hell.sil : SIL_FLOAT;
+  if(sil===SIL_FLOAT){ moveFinal(e, dt, T); e.gait=(e.gait||0)+dt*2.0; return; }
+  const legs = (sil===SIL_LEGS);
+  const half = 1.6*(e.mScale||1);          // half its height, for the feet
+  let dx=P.x-e.x, dz=P.z-e.z;
+  const d=Math.hypot(dx,dz)||1;
+  /* close to a working distance and hold it: walking into your face is a worse
+     fight than standing off and shooting */
+  const want = legs ? 8.0 : 7.0;
+  const drive = d>want*1.15 ? 1 : (d<want*0.65 ? -1 : 0);
+  const spd = T.speed*(legs?1.3:0.95);
+  e.vx += ((dx/d)*drive*spd - e.vx)*Math.min(1, dt*4);
+  e.vz += ((dz/d)*drive*spd - e.vz)*Math.min(1, dt*4);
+  e.vy = (e.vy||0) - 22*dt;                                  // it has weight now
+
+  let nx=e.x+e.vx*dt, nz=e.z+e.vz*dt, ny=e.y+e.vy*dt;
+  // walls: shove back, and try to get over them
+  if(solidAtWorld(nx, e.y, e.z)){ nx=e.x; e.vx*=-0.2; if(e.onGround) e.vy=12; }
+  if(solidAtWorld(e.x, e.y, nz)){ nz=e.z; e.vz*=-0.2; if(e.onGround) e.vy=12; }
+  // floor and ceiling
+  e.onGround=false;
+  if(e.vy<=0 && solidAtWorld(nx, ny-half-0.15, nz)){
+    e.vy=0; e.onGround=true;
+    ny = (Math.floor((ny-half-0.15)/BLOCK)+1)*BLOCK + half;
+  } else if(e.vy>0 && solidAtWorld(nx, ny+half+0.1, nz)){ e.vy=0; ny=e.y; }
+  if(ny < -40){ ny = e.y; e.vy = 0; }                        // never fall out
+  e.x=nx; e.y=ny; e.z=nz;
+
+  /* a hop now and then, so it closes ground the way a thing with legs does */
+  /* A hop to close ground or clear a lip, not a pogo stick. At the first rate
+     a walker spent 176 frames of 240 in the air, which is a thing bouncing,
+     not a thing walking. */
+  if(e.onGround && rnd() < (legs?0.30:0.22)*dt) e.vy = legs ? 7 : 9;
+  // the gait runs off actual speed, so it does not march on the spot
+  e.gait = (e.gait||0) + (Math.hypot(e.vx,e.vz)*dt*1.9) + (e.onGround?0:dt*0.6);
+}
+
 function updateEnemies(dt){
   updateEShots(dt);
   updateCorpses(dt);
@@ -4470,7 +4524,7 @@ function updateEnemies(dt){
     else if(T.fam===FAM_ORB)   moveOrb(e, dt, T);
     else if(T.fam===FAM_SLUG)  moveSlug(e, dt, T);
     else if(T.fam===FAM_MINE)  { if(e.mFly) moveFinal(e, dt, T); }
-    else if(T.fam===FAM_HELL)  moveFinal(e, dt, T);
+    else if(T.fam===FAM_HELL)  moveHell(e, dt, T);
     else if(T.fam===FAM_FINAL) moveFinal(e, dt, T);
     // FAM_FLAG stays on the face it came out of, as it should
 
@@ -5671,11 +5725,34 @@ function frame(now){
       // face the player, upright: a creature turns on its feet, not in the air
       const yaw = Math.atan2(P.x-e.x, P.z-e.z);
       const cy=Math.cos(yaw), sy=Math.sin(yaw);
+      /* the gait: legs alternate, arms counter-swing, the whole body rides up
+         and down on the step. Read from the front, a lift and a splay says
+         "walking" more clearly than a true hip rotation does. */
+      const g   = e.gait||0;
+      const sw  = Math.sin(g), sw2 = Math.sin(g*2);
+      const air = (e.hell && e.hell.sil!==SIL_FLOAT && !e.onGround) ? 1 : 0;
+      const spider = e.hell && e.hell.sil===SIL_LEGS;
+      const bob = (spider ? 0.10 : 0.22)*Math.abs(sw2)*unit;
       for(const v of V.vox){
         if(n>=hellB.max) break;
         const col = pal[v.ch] || pal.m;
-        const lx = v.x*unit, ly = v.y*unit;
+        let lx = v.x*unit, ly = v.y*unit;
         const dz = v.depth*unit;
+        if(v.part===3){            // legs
+          /* a spider runs every leg on its own phase, off its position, so the
+             whole underside ripples instead of marching in step */
+          const ph = spider ? Math.sin(g*1.8 + v.x*0.9) : (v.side>0 ? sw : -sw);
+          ly += ph*0.9*unit*(air?0.3:1);
+          lx += ph*0.35*unit;
+        } else if(v.part===2){     // arms
+          const ph = v.side>0 ? -sw : sw;
+          ly += ph*0.55*unit;
+          lx += ph*0.25*unit;
+        } else if(v.part===1){     // head
+          ly += bob*1.1;
+        } else {                   // body
+          ly += bob;
+        }
         // local (lx, ly, 0) rotated about Y, then placed on the creature
         const wx = e.x + cy*lx, wz = e.z - sy*lx;
         const o = n*CUBE_STRIDE;
