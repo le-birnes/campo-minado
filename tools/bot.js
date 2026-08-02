@@ -260,13 +260,21 @@ function closeOn(cell){
   PH('closeOn'); WD();
   const [cx,cy,cz]=cellXYZ(cell);
   const tx=(cx+0.5)*BLOCK, tz=(cz+0.5)*BLOCK, ty=(cy+0.5)*BLOCK;
-  for (let k=0;k<2.0/DT;k++){
+  const climb = ty > P.y + BLOCK*1.5;      // needs height: give it longer
+  for (let k=0;k<(climb?4.0:2.0)/DT;k++){
     const dx=tx-P.x, dz=tz-P.z;
     const flat=Math.hypot(dx,dz);
     if (Math.hypot(dx, ty-(P.y+EYE), dz) <= REACH*0.85){ IN.f=0; IN.jumpHeld=false; return true; }
     P.yaw = Math.atan2(-dx,-dz);
     IN.f = flat>1.0 ? 1 : 0;
-    if (ty > P.y + BLOCK*0.6 && P.ground) jumpNow(); else IN.jumpHeld=false;
+    /* The player has twenty jumps and does not need the ground for any of
+       them. Gating this on P.ground meant the bot could only ever climb one
+       block, so anything ABOVE it was unreachable — it fell into a lower
+       chamber, and every job on the floor it came from became "can't get
+       there". Jump toward height whether or not it is standing on anything. */
+    if (ty > P.y + BLOCK*0.6 && (P.ground || (P.vy < 1.0 && P.jumps < MAX_JUMPS)))
+      jumpNow();
+    else IN.jumpHeld=false;
     if (!tick()){ IN.f=0; IN.jumpHeld=false; return false; }
     stats.walked += SPD_RUN*DT;
   }
@@ -1082,6 +1090,39 @@ if (/[?&]watch/.test(location.search)){
         if (!clearLine(w.cell)) continue;
         shoot(); stats.shots++; acted++; note = 'dug a frontier block';
         say(step + ' ' + note); draw(); return;
+      }
+      /* WORK ALL OF IT BEFORE LOOKING FOR MORE. s.work is only what stands
+         within three blocks; the scan also returns everything else the eye
+         landed on, and the watch driver was throwing that away. So it opened
+         the few faces at its feet, saw "nothing in reach", and left — with a
+         wall of unopened blocks in plain sight, often just above it.
+         The gun reaches thirteen blocks: anything visible inside that is work
+         to do right now, from here. Past that, walk at it. Either way, this
+         area is finished before it goes looking for another. */
+      for (const w of s.seenFar){
+        if (G.st[w.cell] !== SOLID || giveUp(w.cell)) continue;
+        if (!counted.has(w.cell)){
+          counted.add(w.cell); stats.guesses++;
+          if (G.mine[w.cell]) stats.guessMines++;
+        }
+        if (G.mine[w.cell]) continue;
+        if (w.d <= GUN && clearLine(w.cell)){
+          const before = G.revealed;
+          shoot(); stats.shots++;
+          if (G.revealed > before){
+            acted++; wander=0; stuck=0; refused.delete(w.cell);
+            note = 'dug visible work ' + w.d.toFixed(0) + ' m off';
+            say(step + ' ' + note); draw(); return;
+          }
+          refuse(w.cell); continue;
+        }
+        const px=P.x, py=P.y, pz=P.z;
+        if (closeOn(w.cell) || Math.hypot(P.x-px,P.y-py,P.z-pz) > BLOCK*0.5){
+          acted++; wander=0; stuck=0;
+          note = 'going to visible work ' + w.d.toFixed(0) + ' m off';
+          say(step + ' ' + note); draw(); return;
+        }
+        refuse(w.cell);
       }
       /* THE LAST FEW. The game only lets a NUMBER plant flags once every safe
          block is out, so one safe block it cannot reach keeps the endgame shut
