@@ -515,15 +515,19 @@ function wallFollow(){
   if (!right)     P.yaw -= HALF;          // opening on the right: take it
   else if (ahead) P.yaw += HALF;          // boxed in: turn away
   // else wall on the right and road ahead: carry straight on
-  const x0=P.x, z0=P.z;
+  const x0=P.x, y0=P.y, z0=P.z;
   IN.f=1;
-  for (let k=0;k<Math.ceil(0.34/DT);k++){
+  /* Jump as it goes, always. A chamber's way out is often UP — the lip of a
+     shaft, a step onto the mass — and a perimeter walk at floor level can
+     trace a room forever without ever finding it. */
+  for (let k=0;k<Math.ceil(0.5/DT);k++){
     if (!tick()){ IN.f=0; return false; }
-    if (k===4 && P.ground && Math.hypot(P.x-x0,P.z-z0) < BLOCK*0.1) jumpNow();
+    if (P.ground && (k%7)===2) jumpNow();
     stats.walked += SPD_RUN*DT;
   }
   IN.f=0; stats.wallSteps++;
-  return Math.hypot(P.x-x0, P.z-z0) > BLOCK*0.25;      // did it actually move
+  // moved on the flat, or gained height: either counts as getting somewhere
+  return Math.hypot(P.x-x0, P.z-z0) > BLOCK*0.25 || Math.abs(P.y-y0) > BLOCK*0.4;
 }
 
 
@@ -941,7 +945,7 @@ if (/[?&]watch/.test(location.search)){
   try { setScreen('play'); } catch(e) {}
   snapshotWorld();
 
-  let step = 0, acted = 0, dead = false, note = 'starting', wander = 0, stuckLast = 0;
+  let step = 0, acted = 0, dead = false, note = 'starting', wander = 0, stuckLast = 0, stuck = 0;
   /* the headless loop gives up on a target after two failures; without the
      same memory here the watcher retried one block fourteen times and
      counting, which is what Marcelo watched it do */
@@ -1125,9 +1129,18 @@ if (/[?&]watch/.test(location.search)){
               const d=Math.hypot((c[0]+.5)*BLOCK-P.x,(c[1]+.5)*BLOCK-P.y,(c[2]+.5)*BLOCK-P.z);
               if (d<fd){ fd=d; far=i2; }
             }
-            if (far>=0 && closeOn(far)){
-              wander = 0; note = 'travelling to work '+fd.toFixed(0)+' m away';
-            } else if (wallFollow()){
+            const tx0=P.x, tz0=P.z;
+            const moved = far>=0 && closeOn(far) &&
+                          Math.hypot(P.x-tx0, P.z-tz0) > BLOCK*0.5;
+            if (moved){
+              wander = 0; stuck = 0;
+              note = 'travelling to work '+fd.toFixed(0)+' m away';
+            } else if (stuck++ < 14 && wallFollow()){
+              /* closeOn can report success while going nowhere — it "walked",
+                 into a wall. Only actual displacement counts as travel, and
+                 anything else means entangled: hug the wall, for as long as it
+                 takes, not one step. */
+              note = 'following the wall out ('+stuck+')';
               /* Could not walk at it — entangled. Hug the wall instead, which
                  traces the pocket until it reaches the way out. */
               note = 'following the wall out';
