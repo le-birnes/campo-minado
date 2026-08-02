@@ -1107,6 +1107,44 @@ if (/[?&]watch/.test(location.search)){
         }
       }
 
+      /* GO AND DIG SOMETHING. This was a last resort after twelve wasted
+         steps; it should be the default. Marcelo watched it wander past 108
+         unopened safe blocks following sightlines, because "walk the longest
+         clear line" is how you FIND work and it was being treated as work.
+         The nearest block that still touches open space is a known job at a
+         known place — go there and open it. Sightlines are for when there is
+         no such block reachable, which is the only thing they were ever good
+         for. */
+      {
+        const N = G.nx*G.ny*G.nz;
+        let tgt=-1, td=1e9;
+        for (let i2=0;i2<N;i2++){
+          if (G.st[i2]!==SOLID || G.mine[i2] || giveUp(i2)) continue;
+          let touches=false;
+          for (const j of nbrsOf(i2)) if (G.st[j]===AIR){ touches=true; break; }
+          if (!touches) continue;
+          const c=cellXYZ(i2);
+          const d=Math.hypot((c[0]+.5)*BLOCK-P.x,(c[1]+.5)*BLOCK-P.y,(c[2]+.5)*BLOCK-P.z);
+          if (d<td){ td=d; tgt=i2; }
+        }
+        if (tgt>=0){
+          const px=P.x, pz=P.z;
+          if (clearLine(tgt) || (closeOn(tgt) && clearLine(tgt))){
+            const before=G.revealed;
+            shoot(); stats.shots++;
+            if (G.revealed>before){
+              acted++; wander=0; stuck=0; refused.delete(tgt);
+              note='dug toward the work, '+td.toFixed(0)+' m off';
+              say(step+' '+note); draw(); return;
+            }
+            refuse(tgt);
+          } else if (Math.hypot(P.x-px, P.z-pz) > BLOCK*0.5){
+            wander=0; stuck=0; note='closing on work '+td.toFixed(0)+' m away';
+            say(step+' '+note); draw(); return;
+          } else refuse(tgt);
+        }
+      }
+
       for (let k = 0; k < 3; k++){
         const o = s.open[k];
         if (o && o.run >= BLOCK * 1.5 && followLine(o)){
