@@ -2534,6 +2534,23 @@ const snd = (function(){
     musicVol(v){ mVol=v; if(mBus) mBus.gain.value = mMuted?0:v; },
     musicMute(m){ mMuted=m; if(mBus) mBus.gain.value = m?0:mVol; },
     musicIsMuted(){ return mMuted; },
+    shotgun(){ if(!on())return;
+      /* A crack of noise over a low thump, then the shell rattling out. Nothing
+         tonal — the staff's descending sawtooth is what a wand sounds like. */
+      const n1=noise(0.22);
+      const f=ac.createBiquadFilter(); f.type='bandpass';
+      f.frequency.setValueAtTime(2200, ac.currentTime);
+      f.frequency.exponentialRampToValueAtTime(420, ac.currentTime+0.16);
+      f.Q.value=0.8;
+      n1.connect(f); env(f,0.002,0.20,0.55); n1.start(); n1.stop(ac.currentTime+0.26);
+      const o=ac.createOscillator(); o.type='sine';
+      o.frequency.setValueAtTime(120, ac.currentTime);
+      o.frequency.exponentialRampToValueAtTime(42, ac.currentTime+0.13);
+      env(o,0.002,0.16,0.5); o.start(); o.stop(ac.currentTime+0.2);
+      const n2=noise(0.10);
+      const hp=ac.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=3800;
+      n2.connect(hp); env(hp,0.03,0.12,0.10); n2.start(ac.currentTime+0.14); n2.stop(ac.currentTime+0.3);
+    },
     shot(){ if(!on())return;
       const o=ac.createOscillator(); o.type='sawtooth';
       o.frequency.setValueAtTime(760, ac.currentTime);
@@ -2770,6 +2787,19 @@ function rebuildWorld(){
 /* Parts in the staff's LOCAL space: +Y axis, origin at the center of the
    shaft, unit = half the screen height. A single global matrix places the
    whole thing, so the parts have no way to come apart from each other. */
+/* When the finale arrives the staff is not the tool for the job. Same part
+   format, same rig — a pumped shotgun instead of a wizard's stick. */
+const SHOTGUN = [
+  // x, y, z,  rx, ry, rz,  sx, sy, sz,  colour, emissive
+  [0,   0.10, 0,     0,0,0,   0.15,0.15,2.05, [0.17,0.17,0.19], 0],  // barrel
+  [0,  -0.10, 0.15,  0,0,0,   0.13,0.13,1.70, [0.15,0.15,0.17], 0],  // magazine tube
+  [0,  -0.10,-0.30,  0,0,0,   0.26,0.24,0.55, [0.34,0.22,0.13], 0],  // pump
+  [0,   0.02,-0.95,  0,0,0,   0.30,0.34,0.60, [0.19,0.19,0.21], 0],  // receiver
+  [0,  -0.30,-1.30,  0.22,0,0, 0.26,0.30,0.80,[0.36,0.23,0.14], 0],  // stock
+  [0,   0.10, 1.05,  0,0,0,   0.19,0.19,0.12, [0.10,0.10,0.11], 0],  // muzzle ring
+  [0.06,-0.62,-1.05, 0,0,0,   0.34,0.26,0.35, [0.31,0.22,0.20], 0],  // wrist
+  [0.10,-1.00,-1.15, 0,0,0,   0.32,0.60,0.32, [0.23,0.16,0.15], 0]   // forearm
+];
 const STAFF = [
   // x, y, z,  rx, ry, rz,  sx, sy, sz,  cor, emissivo
   [0,    0,    0,     0,0,0,          0.18,1.54,0.18, [0.30,0.19,0.115], 0], // shaft
@@ -2816,15 +2846,16 @@ function buildViewModel(t, speed, aspect){
           STAFF_TILT[2],
           hh, hh, hh);
 
-  for(let i=0;i<STAFF.length;i++){
-    const s=STAFF[i], o=i*CUBE_STRIDE;
+  const VIEW = G.finale ? SHOTGUN : STAFF;
+  for(let i=0;i<VIEW.length;i++){
+    const s=VIEW[i], o=i*CUBE_STRIDE;
     compose(_L,0, s[0],s[1],s[2], s[3],s[4],s[5], s[6],s[7],s[8]);
     mulM(_S,_L,d,o);
     d[o+16]=s[9][0]; d[o+17]=s[9][1]; d[o+18]=s[9][2];
     d[o+19]=i*0.17;  d[o+20]=s[10]?(0.72+0.28*Math.sin(t*3.1)):0;  d[o+21]=0; d[o+22]=0;
     d[o+23]=d[o+24]=d[o+25]=0;
   }
-  viewB.count=STAFF.length;
+  viewB.count=VIEW.length;
 }
 
 /* ==========================================================================
@@ -2905,7 +2936,15 @@ function shoot(){
   if(G.state!=='play') return;
   G.hint = null; G.beacon = null;   // the board is about to change under the deduction
   recoil = 1;
-  snd.shot();
+  if(G.finale){
+    snd.shotgun();
+    /* A shotgun shoves the person holding it. Backwards along your own aim,
+       which also means firing while airborne moves you — worth knowing. */
+    const kb = 5.4;
+    P.vx -= r.dx*kb; P.vz -= r.dz*kb;
+    P.vy += Math.max(0, -r.dy)*kb*0.35 + 1.1;
+    G.shake = Math.max(G.shake, 0.10);
+  } else snd.shot();
   const r=aimRay();
   /* Ray recast at the instant of the shot. Reusing the hover from the last
      drawn frame swallows shots whenever two clicks land in the same frame.
@@ -2947,7 +2986,12 @@ function shoot(){
         if(e.dhp<=0) killEnemy(e, foe.i);
         else toast(e.hell.name + ': ' + Math.max(0,e.dhp) + ' of ' + e.dmax, 900);
       } else {
-        e.hp--; e.flash=0.25;
+        if(G.finale){                       // buckshot moves things
+        const kk = 3.2/Math.max(0.6, (e.mScale||1));
+        e.vx = (e.vx||0) + r.dx*kk; e.vz = (e.vz||0) + r.dz*kk;
+        e.vy = (e.vy||0) + 1.6;
+      }
+      e.hp--; e.flash=0.25;
         if(e.hp>0 && e.mBlinks>0 && ++e.mHitsSince>=2) blinkMine(e);
         if(e.hp<=0) killEnemy(e, foe.i);
         else{
@@ -3463,7 +3507,20 @@ function muzzleOf(e, out){
   else if(T.fam===FAM_SLUG){ lx=(e.ant?0.55:-0.55); ly=1.06; lz=0; }
   else if(T.fam===FAM_FINAL){ ly=0.30; lz=0.62; }
   else if(T.fam===FAM_MINE){ lx=(e.ant?0.86:-0.86); ly=0; lz=0.62; }
-  else if(T.fam===FAM_HELL){ lx=0.9; ly=0.3; lz=0.7; }
+  else if(T.fam===FAM_HELL){
+    /* Out of the gun if the drawing has metal in it, out of the eyes if it does
+       not — a Cacodemon has no arms to hold anything with. Read straight off
+       the art: the mean position of its metal pixels, or of its eye pixels. */
+    const V = e.hell ? hellVoxels(e.hell) : null;
+    if(V && V.vox && V.vox.length){
+      const want = V.vox.some(v=>v.ch==='g'||v.ch==='G') ? 'gG' : 'e';
+      let mx=0,my=0,c=0;
+      for(const v of V.vox) if(want.indexOf(v.ch)>=0){ mx+=v.x; my+=v.y; c++; }
+      const unit = Math.min(HELL_MAXH, HELL_UNIT*(e.mScale||1))/V.H;
+      if(c){ lx = (mx/c)*unit/T.scale; ly = (my/c)*unit/T.scale; lz = 0.55; }
+      else { lx=0; ly=0.25; lz=0.6; }
+    } else { lx=0.9; ly=0.3; lz=0.7; }
+  }
   frameM(_E, e.x,e.y,e.z, e.fx,e.fy,e.fz, e.ux,e.uy,e.uz, 1);
   out[0] = _E[0]*lx*s + _E[4]*ly*s + _E[8]*lz*s  + e.x;
   out[1] = _E[1]*lx*s + _E[5]*ly*s + _E[9]*lz*s  + e.y;
@@ -4091,7 +4148,10 @@ function hellVoxels(h){
     const ch=rows[y][x];
     if(ch==='.') continue;
     const d=dist[y*W+x];
-    const depth = Math.max(1, Math.min(9, d*2-1));      // 1, 3, 5, 7, 9
+    /* Shallower than it was. Depth up to 9 ballooned every body into a cube
+       cloud and destroyed the silhouette the drawing was carrying — a Lost
+       Soul stopped reading as a skull entirely. Relief, not a balloon. */
+    const depth = Math.max(1, Math.min(4, d));            // 1, 2, 3, 4
     const lx = x-(W-1)/2, ly = (H-1)/2-y;
     const ny = 1 - (y/(H-1));                            // 0 at the feet, 1 at the crown
     let part = P_BODY;
