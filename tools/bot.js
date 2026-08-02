@@ -911,6 +911,15 @@ if (/[?&]watch/.test(location.search)){
       'opened   ' + G.revealed + ' / ' + G.safeTotal + '\n' +
       'flags    ' + G.marked + ' / ' + G.mines + '\n' +
       'life     ' + P.hp + '/4      foes ' + foes + '\n' +
+      /* where it is standing, and whether that is anywhere legal — so "it went
+         into a wall" is answerable by looking instead of by argument */
+      'at       ' + P.x.toFixed(1) + ',' + P.y.toFixed(1) + ',' + P.z.toFixed(1) + '  ' +
+      (function(){
+        const x = Math.floor(P.x/BLOCK), y = Math.floor(P.y/BLOCK), z = Math.floor(P.z/BLOCK);
+        if (!inside(x,y,z)) return 'OUTSIDE THE MAP';
+        const h = G.st[idx(x,y,z)];
+        return h===AIR ? 'open air' : (h===ROCK ? 'INSIDE STRUCTURE' : 'INSIDE A BLOCK');
+      })() + '\n' +
       'actions  ' + acted + '\n' +
       'shots    ' + stats.shots + '   flags ' + stats.flags +
       '   kills ' + stats.killed + '\n' +
