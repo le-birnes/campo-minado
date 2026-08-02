@@ -644,6 +644,333 @@ function diedHow(){
 }
 
 const NOFOES = /[?&]nofoes/.test(location.search);
+
+/* ============================================================
+   ONE LADDER
+   ============================================================
+   There used to be two of these: a headless loop and a watch loop, each with
+   its own copy of the priorities. They drifted, and every single time the
+   watch driver was the one missing a rung — refusal memory, the endgame
+   number-flagging, the wander limit, provenMines, then seenFar. Five bugs, one
+   cause, and each one cost a run that was sat and watched failing.
+
+   So there is now one ladder. `newRun()` holds everything a run remembers and
+   `climb()` takes exactly one action, returning WHAT IT DID rather than
+   whether it ran — which is the other lesson: three separate bugs were an
+   action reporting success while the board did not move (travel that did not
+   travel, a flag that did not land, a burst that did no damage). Every rung
+   here compares the board before and after.
+
+   The drivers are now only a clock. Headless calls climb() flat out; the watch
+   page calls it on a timer so the browser gets frames back in between. Neither
+   makes a decision of its own.
+   ============================================================ */
+
+/* R.done is the reason to stop, or null. R.note is for humans. */
+function newRun(){
+  return {
+    refused: new Map(),        // cell -> failures. LOCAL: "not reachable from here"
+    counted: new Set(),        // a cell is counted as a guess once, not once per step
+    wander: 0,                 // steps spent walking without finding work
+    stuck: 0,                  // consecutive failures to travel
+    travelTry: 0,
+    surveyed: false, moved: true,
+    acted: 0, walked: 0, peak: 0, dry: 0, retried: false,
+    note: 'starting', done: null, label: ''
+  };
+}
+
+function climb(R){
+  const giveUp = c => (R.refused.get(c)||0) >= 2;
+  const refuse = c => R.refused.set(c, (R.refused.get(c)||0)+1);
+  const A = (note, tag) => {                      // an action that CHANGED the board
+    R.acted++; R.note = note; R.wander = 0; R.stuck = 0; R.dry = 0;
+    if (R.label) audit(R.label+' '+(tag||'act'));
+    return true;
+  };
+  const W = note => { R.walked++; R.note = note; R.moved = true; R.dry = 0; return true; };
+
+  if (won())             { R.done = 'finished'; return false; }
+  if (G.state !== 'play'){ R.done = diedHow();  return false; }
+  if (!idle(0.1))        { R.done = 'physics fault'; return false; }
+  if (G.state !== 'play'){ R.done = diedHow();  return false; }
+
+  if (NOFOES && enemies.length) enemies.length = 0;
+
+  /* --- 1. STAY ALIVE. Everything else assumes there is a player left. --- */
+  if (G.boss && enemies.length){
+    R.peak = Math.max(R.peak, enemies.length);
+    if (dodge()) R.note = 'dodging';
+    if (G.state !== 'play'){ R.done = diedHow(); return false; }
+    const foes0 = enemies.length, kills0 = stats.killed;
+    if (fightBack()){
+      /* "shot at something" is not a fight. It said that while jumping at a
+         wall. Only a kill or a real change in the field counts as an action. */
+      if (stats.killed > kills0) return A('killed one, '+enemies.length+' left', 'kill');
+      R.note = 'fighting ('+foes0+' up)';
+      return true;
+    }
+  }
+
+  if (chests.length && grabChest()) return A('opened a chest', 'chest');
+
+  /* --- 2. LOOK. A survey is two extra sweeps, and only after moving. --- */
+  if (R.moved){ R.surveyed = false; R.moved = false; }
+  if (!R.surveyed){ scan(); scan(); R.surveyed = true; stats.surveys++; }
+  const s = scan();
+
+  /* --- 3. THE ENDGAME. Once every safe block is out, the mines left over are
+     often walled in by what was dug around them and no shot can touch them. A
+     NUMBER will plant those flags, so aim at the DIGIT. It is the only way the
+     last few ever go down, and the dungeon ends on the last flag. --- */
+  if (G.revealed >= G.safeTotal && G.marked < G.mines){
+    for (const u of forcedClues()){
+      if (giveUp(u.clue)) continue;
+      if (!lineToNum(u.clue)){
+        R.moved = true;
+        if (!closeOn(u.clue) || !lineToNum(u.clue)){ refuse(u.clue); continue; }
+      }
+      stats.lastAct = 'numflag';
+      const m0 = G.marked;
+      startThink(); endThink();
+      if (G.marked > m0){
+        stats.numFlags += G.marked - m0;
+        return A('flagged '+(G.marked-m0)+' through a number', 'numflag');
+      }
+      refuse(u.clue);
+    }
+  }
+
+  /* --- 4. AND OPEN THROUGH A NUMBER — the same move on the safe side. A
+     number whose mines are all flagged opens everything else it touches,
+     including blocks buried with every face covered: provable, unhittable. --- */
+  for (const u of satisfiedClues()){
+    if (giveUp(u.clue)) continue;
+    if (!lineToNum(u.clue)){
+      R.moved = true;
+      if (!closeOn(u.clue) || !lineToNum(u.clue)){ refuse(u.clue); continue; }
+    }
+    const r0 = G.revealed;
+    startThink(); endThink();
+    if (G.revealed > r0){
+      stats.numOpens += G.revealed - r0;
+      return A('opened '+(G.revealed-r0)+' through a number', 'spread');
+    }
+    refuse(u.clue);
+  }
+
+  /* --- 5. MARK FIRST. The dungeon charges for digging beside a mine that is
+     not marked yet, so a proven mine is always the next move. findHint prefers
+     a safe dig and would otherwise never offer a flag: on a four-zone dungeon
+     there is always another dig, so it once flagged NOTHING in 206 steps. --- */
+  for (const cell of provenMines()){
+    if (giveUp(cell) || G.st[cell] !== SOLID) continue;
+    if (!clearLine(cell)){
+      R.moved = true;
+      if (!closeOn(cell) || !clearLine(cell)){ refuse(cell); continue; }
+    }
+    if (flagIt(cell)){ R.refused.delete(cell); return A('flagged a proven mine', 'flag'); }
+    refuse(cell);
+    break;
+  }
+
+  for (const cell of provenSafe()){
+    if (giveUp(cell) || G.st[cell] !== SOLID) continue;
+    if (!clearLine(cell)){
+      R.moved = true;
+      if (!closeOn(cell) || !clearLine(cell)){ refuse(cell); continue; }
+    }
+    const before = G.revealed;
+    stats.lastAct = 'safe';
+    shoot(); stats.shots++;
+    if (G.mine[cell]) err(R.label+': a cell proved safe was a mine');
+    if (G.revealed > before) return A('dug a proven safe block', 'safe');
+    refuse(cell);
+    break;
+  }
+
+  /* --- 6. THE SOLVER. --- */
+  {
+    const mv = solverMove();
+    if (mv && !giveUp(mv.cell)){
+      let ok = clearLine(mv.cell);
+      if (!ok){ R.moved = true; if (closeOn(mv.cell)) ok = clearLine(mv.cell); }
+      if (ok){
+        const before = G.revealed + G.marked;
+        stats.lastAct = 'solve';
+        if (!mv.mine && G.mine[mv.cell]) err(R.label+': the SOLVER called a cell safe and it is a mine');
+        if (mv.mine) flagIt(mv.cell); else { shoot(); stats.shots++; }
+        stats.byRule[mv.rule] = (stats.byRule[mv.rule]||0) + 1;
+        if (G.revealed + G.marked > before){
+          R.refused.delete(mv.cell);
+          return A('solver: '+(mv.mine?'flag':'dig')+' ('+mv.rule+')', 'solve');
+        }
+        stats.noEffect++; refuse(mv.cell);
+      } else refuse(mv.cell);
+    }
+  }
+
+  /* --- 7. DIG BESIDE INFORMATION. Nothing is provable yet, but a number that
+     still wants a mine says where the answer lives. Digging next to a clue
+     beats digging next to nothing: it turns an ambiguous cluster solvable. --- */
+  for (const u of unfinished().slice(0, 6)){
+    for (const cell of u.hidden){
+      if (giveUp(cell) || G.st[cell] !== SOLID) continue;
+      if (!clearLine(cell)){
+        R.moved = true;
+        if (!closeOn(cell) || !clearLine(cell)){ refuse(cell); continue; }
+      }
+      if (!R.counted.has(cell)){
+        R.counted.add(cell); stats.guesses++;
+        if (G.mine[cell]) stats.guessMines++;
+      }
+      /* Peeking to DECLINE is a cheat and it is deliberate: a bot that digs
+         blind dies in the first minute and tests nothing. Peeking to COUNT is
+         not, and that count is the real risk a player carries here. */
+      if (G.mine[cell]){ refuse(cell); continue; }
+      const before = G.revealed;
+      stats.lastAct = 'clue';
+      shoot(); stats.shots++; stats.clueWork++;
+      if (G.revealed > before) return A('dug beside a number', 'clue');
+      refuse(cell);
+    }
+  }
+
+  /* --- 8. WORK ALL OF IT BEFORE LOOKING FOR MORE. s.work is what stands
+     within three blocks; s.seenFar is everything else the eye landed on. The
+     gun reaches thirteen blocks, so anything visible inside that is work to do
+     from here and now. Past that, walk at it. The area is finished before it
+     goes looking for another — the priority asked for after it was watched
+     leaving a wall of unopened blocks behind it. --- */
+  for (const w of s.work.concat(s.seenFar)){
+    if (G.st[w.cell] !== SOLID || giveUp(w.cell)) continue;
+    if (!R.counted.has(w.cell)){
+      R.counted.add(w.cell); stats.guesses++;
+      if (G.mine[w.cell]) stats.guessMines++;
+    }
+    if (G.mine[w.cell]) continue;
+    if (w.d <= GUN && clearLine(w.cell)){
+      const before = G.revealed;
+      stats.lastAct = 'dig';
+      shoot(); stats.shots++;
+      if (G.revealed > before){
+        R.refused.delete(w.cell);
+        return A('dug visible work '+w.d.toFixed(0)+' m off', 'dig');
+      }
+      refuse(w.cell); continue;
+    }
+    const px = P.x, py = P.y, pz = P.z;
+    closeOn(w.cell);
+    if (Math.hypot(P.x-px, P.y-py, P.z-pz) > BLOCK*0.5)
+      return W('going to visible work '+w.d.toFixed(0)+' m off');
+    refuse(w.cell);
+  }
+
+  /* --- 9. THE LAST FEW. The game only lets a number plant flags once every
+     safe block is out, so ONE safe block it cannot reach keeps the endgame
+     shut and it wanders for the rest of the run. When almost nothing is left,
+     go and find those specifically — in every state, not just SOLID: a safe
+     block it FLAGGED by mistake is MARKED, and that is exactly the cell that
+     holds the endgame closed. Take the flag off, then dig it.
+     No giveUp here. These are the only cells that matter now. --- */
+  if (G.safeTotal - G.revealed <= 5){
+    const N = G.nx*G.ny*G.nz;
+    let best = -1, bd = 1e9, wrong = -1;
+    if (R.stuck++ % 8 === 7) R.refused.clear();
+    for (let i=0;i<N;i++){
+      if (G.mine[i]) continue;
+      if (G.st[i] === MARKED){ if (wrong < 0) wrong = i; continue; }
+      if (G.st[i] !== SOLID) continue;
+      const c = cellXYZ(i);
+      const d = Math.hypot((c[0]+.5)*BLOCK-P.x, (c[1]+.5)*BLOCK-P.y, (c[2]+.5)*BLOCK-P.z);
+      if (d < bd){ bd = d; best = i; }
+    }
+    if (wrong >= 0 && (clearLine(wrong) || (closeOn(wrong) && clearLine(wrong)))){
+      startThink(); endThink();                       // release on it: unflags
+      if (G.st[wrong] !== MARKED) return A('took a wrong flag off a safe block', 'unflag');
+      refuse(wrong);
+    }
+    if (best >= 0){
+      if (clearLine(best) || (closeOn(best) && clearLine(best))){
+        const before = G.revealed;
+        stats.lastAct = 'lastfew';
+        shoot(); stats.shots++;
+        if (G.revealed > before) return A('dug one of the last safe blocks', 'lastfew');
+        refuse(best);
+      } else refuse(best);
+      R.note = 'hunting the last safe blocks';
+      R.moved = true;
+      return true;
+    }
+  }
+
+  /* --- 10. TRAVEL. Nothing visible left: pick the nearest block ANYWHERE that
+     still touches open space and go to it. That is what carries it down a
+     shaft into the next zone.
+     Refusals are a local judgement and it has walked kilometres since making
+     most of them, so a board-wide scan must ignore them — applying them here
+     is how it announced "nothing left it can reach anywhere" with 17 safe
+     blocks and 9 mines still on the board. --- */
+  {
+    const N = G.nx*G.ny*G.nz;
+    let tgt = -1, td = 1e9;
+    if (R.travelTry++ % 10 === 9) R.refused.clear();
+    for (let i=0;i<N;i++){
+      if (G.st[i] !== SOLID || G.mine[i]) continue;
+      let touches = false;
+      for (const j of nbrsOf(i)) if (G.st[j] === AIR){ touches = true; break; }
+      if (!touches) continue;
+      const c = cellXYZ(i);
+      const d = Math.hypot((c[0]+.5)*BLOCK-P.x, (c[1]+.5)*BLOCK-P.y, (c[2]+.5)*BLOCK-P.z);
+      if (d < td){ td = d; tgt = i; }
+    }
+    if (tgt >= 0){
+      const px = P.x, py = P.y, pz = P.z;
+      if (clearLine(tgt)){
+        const before = G.revealed;
+        stats.lastAct = 'travel-dig';
+        shoot(); stats.shots++;
+        if (G.revealed > before) return A('dug toward the work, '+td.toFixed(0)+' m off', 'travel');
+        refuse(tgt);
+      }
+      closeOn(tgt);
+      if (Math.hypot(P.x-px, P.y-py, P.z-pz) > BLOCK*0.5)
+        return W('closing on work '+td.toFixed(0)+' m away');
+      /* closeOn can report success while going nowhere — it "walked", into a
+         wall. Only real displacement counts. Anything else means entangled:
+         hug the wall, which traces the pocket until it finds the way out. */
+      refuse(tgt);
+      if (R.stuck++ < 14 && wallFollow()) return W('following the wall out ('+R.stuck+')');
+    }
+  }
+
+  /* --- 11. FOLLOW AN OPENING. Last resort, and it is not progress: walking
+     down a corridor is how you FIND work, not how you do it. --- */
+  for (let k=0;k<3;k++){
+    const o = s.open[k];
+    if (o && o.run >= BLOCK*1.5 && followLine(o)){
+      R.wander++;
+      return W('walking a sightline ('+R.wander+')');
+    }
+  }
+
+  /* --- 12. NOTHING WORKED. Only the board itself may end a run: an exhausted
+     blacklist used to look identical to an exhausted level. --- */
+  let remain = 0;
+  for (let i=0;i<G.nx*G.ny*G.nz;i++) if (G.st[i] === SOLID && !G.mine[i]) remain++;
+  if (remain === 0 && G.marked >= G.mines){ R.done = 'board exhausted'; return false; }
+  if (++R.dry >= 30){
+    if (R.retried){ R.done = 'stuck with '+remain+' safe blocks it never reached'; return false; }
+    /* Before giving up, forget what it gave up on: a target refused from one
+       side of a wall is often trivial from the other. One fresh look, then it
+       is genuinely done. */
+    R.retried = true; R.dry = 0; R.wander = 0; R.stuck = 0; R.refused.clear();
+  }
+  R.note = 'nothing it could reach ('+remain+' still shut)';
+  return true;
+}
+
+/* ---------------- one game, headless: climb() on a tight loop ---------------- */
 function playGame(diff, mode, label){
   G.mode = mode;
   /* ?zones=N builds a smaller dungeon: one mine area, then two, then the
@@ -658,220 +985,20 @@ function playGame(diff, mode, label){
   snapshotWorld();
   audit(label+' fresh');
 
-  const refused = new Map();
-  const giveUp = c => (refused.get(c)||0) >= 2;
-  const refuse = c => refused.set(c, (refused.get(c)||0)+1);
-
-  let moves=0, peak=0, dry=0, wander=0, retried=false, why='ran out of steps', step=0;
-  let surveyed=false, moved=true;
+  const R = newRun(); R.label = label;
+  let step = 0;
   const qs = /[?&]steps=(\d+)/.exec(location.search);
   const cap = qs ? +qs[1] : Math.min(1200, G.safeTotal*3 + 300);
 
   for (; step<cap; step++){
-    if (won()){ why='finished'; break; }
-    if (G.state!=='play'){ why=diedHow(); break; }
-    if (!idle(0.1)){ why='physics fault'; break; }
-    if (G.state!=='play'){ why=diedHow(); break; }
     try{ document.body.dataset.r = label+' step '+step; }catch(e){}
-
-    if (NOFOES && enemies.length) enemies.length=0;
-    if (G.boss && enemies.length){
-      peak=Math.max(peak,enemies.length);
-      if (dodge()) moves++;
-      if (G.state!=='play'){ why=diedHow(); break; }
-      if (fightBack()){ moves++; audit(label+' fight'); continue; }
-    }
-    if (chests.length && grabChest()){ moves++; continue; }
-
-    /* SURVEY BEFORE ACTING. Arriving somewhere new, take the whole room in
-       first — a fine 360 sweep at more angles than the walking scan uses — and
-       only then decide. Shooting on the strength of the first thing you notice
-       is how you spend a shot on a block a clue two paces away had already
-       settled. After that, moving is what invalidates the picture, so the
-       survey is redone whenever it has moved. */
-    if (moved){ surveyed = false; moved = false; }
-    if (!surveyed){ scan(); scan(); surveyed = true; stats.surveys++; }
-    const s = scan();
-    let acted = false, walked = false;
-
-    /* FLAG FROM THE NUMBER. When every block a number still hides must be a
-       mine, the number will plant the flags itself — so aim at the DIGIT, not
-       at the blocks. That reaches mines you cannot: buried in a corner, or
-       walled in by what you dug around them, which is how a run ends one
-       unreachable mine short of finished. The game only allows this once the
-       whole board is dug out, so it is an ending, not a solving method. */
-    if (!acted && G.state==='play' && G.revealed >= G.safeTotal){
-      for (const u of forcedClues()){
-        if (giveUp(u.clue)) continue;
-        if (!lineToNum(u.clue)){
-          moved=true;
-          if (!closeOn(u.clue) || !lineToNum(u.clue)){ refuse(u.clue); continue; }
-        }
-        stats.lastAct='numflag';
-        const m0=G.marked;
-        startThink(); endThink();
-        if (G.marked>m0){ moves++; acted=true; stats.numFlags += G.marked-m0; audit(label+' numflag'); }
-        else refuse(u.clue);
-        break;
-      }
-    }
-
-    /* AND OPEN FROM THE NUMBER — the same move on the safe side. A number
-       whose mines are all flagged will open everything else it touches, which
-       reaches blocks no shot can: buried with every face covered, provable but
-       unhittable. That was the whole of the last stall — four blocks already
-       proven safe and simply out of reach. */
-    if (!acted && G.state==='play'){
-      for (const u of satisfiedClues()){
-        if (giveUp(u.clue)) continue;
-        if (!lineToNum(u.clue)){
-          moved=true;
-          if (!closeOn(u.clue) || !lineToNum(u.clue)){ refuse(u.clue); continue; }
-        }
-        const r0=G.revealed;
-        startThink(); endThink();
-        if (G.revealed>r0){ moves++; acted=true; stats.numOpens += G.revealed-r0; audit(label+' spread'); }
-        else refuse(u.clue);
-        break;
-      }
-    }
-
-    /* MARK FIRST — the dungeon charges for digging beside a mine you have not
-       marked yet, so a proven mine is always the next move. */
-    for (const cell of provenMines()){
-      if (giveUp(cell) || G.st[cell]!==SOLID) continue;
-      if (!clearLine(cell)){
-        moved=true;
-        if (!closeOn(cell) || !clearLine(cell)){ refuse(cell); continue; }
-      }
-      if (flagIt(cell)) refused.delete(cell); else refuse(cell);
-      moves++; acted=true; audit(label+' flag');
-      break;
-    }
-
-    if (!acted) for (const cell of provenSafe()){
-      if (giveUp(cell) || G.st[cell]!==SOLID) continue;
-      if (!clearLine(cell)){ moved=true; if(!closeOn(cell) || !clearLine(cell)){ refuse(cell); continue; } }
-      const before=G.revealed;
-      shoot(); stats.shots++;
-      if (G.mine[cell]) err(`${label}: a cell proved safe was a mine`);
-      if (G.revealed===before) refuse(cell); else { moves++; acted=true; audit(label+' safe'); }
-      break;
-    }
-
-    if (!acted && G.state==='play'){
-      const mv = solverMove();
-      if (mv && !giveUp(mv.cell)){
-        let ok = clearLine(mv.cell);
-        if (!ok){ moved=true; if (closeOn(mv.cell)) ok = clearLine(mv.cell); }
-        if (ok){
-          const before=G.revealed+G.marked;
-        stats.lastAct='solve';
-          if (!mv.mine && G.mine[mv.cell]) err(`${label}: the SOLVER called cell ${mv.cell} safe and it is a mine`);
-          if (mv.mine) flagIt(mv.cell); else { shoot(); stats.shots++; }
-          stats.byRule[mv.rule]=(stats.byRule[mv.rule]||0)+1;
-          if (G.revealed+G.marked===before){ stats.noEffect++; refuse(mv.cell); }
-          else { moves++; acted=true; audit(label+' solve'); }
-        } else refuse(mv.cell);
-      }
-    }
-
-    /* GO TO THE UNFINISHED NUMBERS. Nothing is provable yet, but a number that
-       still wants a mine says exactly where the answer lives. Work ITS hidden
-       neighbours — digging next to information beats digging next to nothing,
-       and it is what turns an ambiguous cluster into a solvable one. */
-    if (!acted && G.state==='play'){
-      const todo = unfinished();
-      for (const u of todo.slice(0, 6)){
-        for (const cell of u.hidden){
-          if (giveUp(cell) || G.st[cell]!==SOLID) continue;
-          if (!clearLine(cell)){
-            moved=true;
-            if (!closeOn(cell) || !clearLine(cell)){ refuse(cell); continue; }
-          }
-          stats.guesses++;
-          /* Peeking to DECLINE is a cheat and it is deliberate: a bot that digs
-             blind dies in the first minute and tests nothing. Peeking to COUNT
-             is not, and that count is the real risk a player carries here. */
-          if (G.mine[cell]){ stats.guessMines++; refuse(cell); continue; }
-          const before=G.revealed;
-          shoot(); stats.shots++; stats.clueWork++;
-          if (G.revealed===before) refuse(cell); else { moves++; acted=true; audit(label+' clue'); }
-          break;
-        }
-        if (acted) break;
-      }
-    }
-
-    /* WORK THE FACE. No clue to serve, but there is stone within reach: open it
-       and the next scan has more to read. */
-    if (!acted && G.state==='play'){
-      for (const w of s.work){
-        if (giveUp(w.cell) || G.st[w.cell]!==SOLID) continue;
-        stats.guesses++;
-        /* Peeking to DECLINE is a cheat and it is deliberate: a bot that digs
-           blind dies in the first minute and tests nothing. Peeking to COUNT
-           is not, and that count is the real risk a player carries here. */
-        if (G.mine[w.cell]){ stats.guessMines++; refuse(w.cell); continue; }
-        if (!clearLine(w.cell)){ refuse(w.cell); continue; }
-        const before=G.revealed;
-        stats.lastAct='dig';
-        shoot(); stats.shots++;
-        if (G.revealed===before) refuse(w.cell); else { moves++; acted=true; audit(label+' dig'); }
-        break;
-      }
-    }
-
-    /* GO TO WORK YOU CAN SEE. Nothing in reach, but the scan found stone
-       further off: walk at THAT, not down a corridor. Approaching a known face
-       is playing the board; following an opening is only looking for one. */
-    if (!acted && G.state==='play'){
-      for (const w of s.seenFar){
-        if (giveUp(w.cell) || G.st[w.cell]!==SOLID) continue;
-        if (closeOn(w.cell)){ acted=true; walked=true; moved=true; }
-        else refuse(w.cell);
-        break;
-      }
-    }
-
-    /* FOLLOW — last resort, and it is not progress. Walking down an opening is
-       how you FIND something to do, so it does not end the step satisfied: the
-       next pass scans from the new spot and tries to work again. Without that
-       the bot walked 33.9 km to fire 23 shots, because a successful walk
-       counted as having done something. */
-    if (!acted && G.state==='play'){
-      for (let k=0;k<3 && !acted;k++){
-        const o = s.open[k];
-        if (!o || o.run < BLOCK*1.5) break;
-        if (followLine(o)){ acted=true; walked=true; moved=true; }
-      }
-    }
-
-    /* And it does not get to walk away while a number is still unanswered.
-       Half-finished clues ARE the work; wandering off with them on the board is
-       the bot deciding the game is over when it plainly is not. */
-    if (!acted && G.state==='play' && unfinished().length===0 && !s.work.length && !s.seenFar.length){
-      why='board exhausted'; break;
-    }
-
-    if (!acted){ if (++dry >= 10){ why='nothing it could reach'; break; } }
-    else if (walked){
-      /* Wandering without finding anything. Before giving up, forget what it
-         gave up on: a target refused from one side of a wall is often trivial
-         from the other, and it has moved a long way since. One fresh look,
-         then it is genuinely done. */
-      if (++wander >= 40){
-        if (retried){ why='walking without finding work'; break; }
-        retried = true; wander = 0; refused.clear();
-      }
-      dry=0;
-    }
-    else { dry=0; wander=0; }
+    if (!climb(R)) break;
   }
+  if (!R.done) R.done = 'ran out of steps';
 
   let left=0;
   for (let i=0;i<G.nx*G.ny*G.nz;i++) if (G.st[i]===SOLID && !G.mine[i]) left++;
-  return {moves, peak, state:G.state, won:won(), why, steps:step,
+  return {moves:R.acted, peak:R.peak, state:G.state, won:won(), why:R.done, steps:step,
           opened:G.revealed, of:G.safeTotal, flags:G.marked, mines:G.mines, left,
           autopsy: won() ? '' : autopsy()};
 }
@@ -971,14 +1098,12 @@ if (/[?&]watch/.test(location.search)){
   try { setScreen('play'); } catch(e) {}
   snapshotWorld();
 
-  let step = 0, acted = 0, dead = false, note = 'starting', wander = 0, stuckLast = 0, stuck = 0, travelTry = 0;
-  /* the headless loop gives up on a target after two failures; without the
-     same memory here the watcher retried one block fourteen times and
-     counting, which is what Marcelo watched it do */
-  const refused = new Map();
-  const counted = new Set();   // a cell is a guess once, not once per step
-  const giveUp = c => (refused.get(c)||0) >= 2;
-  const refuse = c => refused.set(c, (refused.get(c)||0)+1);
+  /* Everything a run remembers lives in R, and R is the SAME object the
+     headless run uses. There is no second copy of the priorities here any
+     more — that duplication cost five bugs, all of them a rung the watch
+     driver had never been given. */
+  const R = newRun();
+  let step = 0, dead = false;
 
   function draw(){
     const foes = enemies.length;
@@ -988,7 +1113,8 @@ if (/[?&]watch/.test(location.search)){
       (qz ? '  zones ' + qz[1] : '') + '   step ' + step + '\n' +
       '--------------------------------\n' +
       'state    ' + G.state + (dead ? '   <-- STOPPED' : '') + '\n' +
-      'note     ' + note + '\n' +
+      'note     ' + R.note + '\n' +
+      (R.done ? 'ENDED    ' + R.done + '\n' : '') +
       'opened   ' + G.revealed + ' / ' + G.safeTotal + '\n' +
       'flags    ' + G.marked + ' / ' + G.mines + '\n' +
       'life     ' + P.hp + '/4      foes ' + foes + '\n' +
@@ -1001,7 +1127,7 @@ if (/[?&]watch/.test(location.search)){
         const h = G.st[idx(x,y,z)];
         return h===AIR ? 'open air' : (h===ROCK ? 'INSIDE STRUCTURE' : 'INSIDE A BLOCK');
       })() + '\n' +
-      'actions  ' + acted + '\n' +
+      'actions  ' + R.acted + '   walks ' + R.walked + '\n' +
       'shots    ' + stats.shots + '   flags ' + stats.flags +
       '   kills ' + stats.killed + '\n' +
       'guesses  ' + stats.guesses + ' (' + stats.guessMines + ' were mines)\n' +
@@ -1010,264 +1136,22 @@ if (/[?&]watch/.test(location.search)){
       '--------------------------------\n' + log.join('\n');
   }
 
-  /* One move, using the very same helpers the headless run uses. */
+  /* THE CLOCK, AND NOTHING ELSE. One rung of the same ladder per tick. */
   function pump(){
-    if (dead) { draw(); return; }
+    if (dead){ draw(); return; }
     try {
-      if (won())            { note = 'FINISHED'; dead = true; draw(); return; }
-      if (G.state !== 'play'){ note = 'died to a ' + G.deathBy; dead = true; draw(); return; }
       step++;
-      if (!idle(0.1))       { note = 'physics fault'; dead = true; draw(); return; }
-
-      if (G.boss && enemies.length){
-        if (dodge()) say(step + ' dodged');
-        if (G.state !== 'play'){ note = 'died to a ' + G.deathBy; dead = true; draw(); return; }
-        if (fightBack()){ acted++; note = 'fighting'; say(step + ' shot at something'); draw(); return; }
+      const alive = climb(R);
+      say(step + ' ' + R.note);
+      if (!alive){
+        dead = true;
+        if (!R.done) R.done = 'stopped';
+        say('== ' + R.done);
       }
-      if (chests.length && grabChest()){ acted++; note='chest'; say(step+' opened a chest'); draw(); return; }
-
-      scan();
-      const s = scan();
-
-      /* THE ENDGAME. Once every safe block is out, the mines that are left are
-         often walled in by what you dug around them — unreachable by aim. The
-         game allows a NUMBER to plant those flags for you, and that is the only
-         way the last few ever go down. Without this the run stalls at 100/100
-         opened with mines still unflagged, which is exactly what happened. */
-      if (G.revealed >= G.safeTotal && G.marked < G.mines){
-        for (const u of forcedClues()){
-          if (giveUp(u.clue)) continue;
-          if (!lineToNum(u.clue)){
-            if (!closeOn(u.clue) || !lineToNum(u.clue)){ refuse(u.clue); continue; }
-          }
-          const m0 = G.marked;
-          startThink(); endThink();
-          if (G.marked > m0){
-            acted++; note = 'flagged ' + (G.marked-m0) + ' through a number';
-            say(step + ' ' + note); draw(); return;
-          }
-          refuse(u.clue);
-        }
-      }
-
-      /* FLAG WHAT THE BOARD PROVES, FIRST. findHint returns ONE move and it
-         prefers a safe dig, so while any dig is provable it never offers a
-         flag. On a small board that is harmless: it runs out of digs and starts
-         flagging. On a four-zone dungeon there is always another dig, so it
-         flagged NOTHING — 206 steps, 173 shots, 0 of 57 mines marked, and a run
-         that cannot end, because the dungeon ends on the last flag.
-         The headless loop always did this first. The watch driver did not. */
-      for (const cell of provenMines()){
-        if (giveUp(cell) || G.st[cell] !== SOLID) continue;
-        if (!clearLine(cell) && !(closeOn(cell) && clearLine(cell))){ refuse(cell); continue; }
-        const m0 = G.marked;
-        flagIt(cell);
-        if (G.marked > m0){
-          acted++; refused.delete(cell); note = 'flagged a proven mine';
-          say(step + ' ' + note); draw(); return;
-        }
-        refuse(cell);
-      }
-
-      const mv = solverMove();
-      if (mv && !giveUp(mv.cell) && (clearLine(mv.cell) || (closeOn(mv.cell) && clearLine(mv.cell)))){
-        const before = G.revealed + G.marked;
-        if (mv.mine) flagIt(mv.cell); else { shoot(); stats.shots++; }
-        note = 'solver: ' + (mv.mine ? 'flag' : 'dig') + ' (' + mv.rule + ')';
-        if (G.revealed + G.marked === before){ refuse(mv.cell); note += ' — DID NOT TAKE'; }
-        else { acted++; refused.delete(mv.cell); }
-        say(step + ' ' + note); draw(); return;
-      }
-      for (const w of s.work){
-        if (G.st[w.cell] !== SOLID || giveUp(w.cell)) continue;
-        /* Count a cell ONCE. Re-counting every candidate every step turned 20
-           mines into "744 guesses, 724 were mines". */
-        if (!counted.has(w.cell)){
-          counted.add(w.cell); stats.guesses++;
-          if (G.mine[w.cell]) stats.guessMines++;
-        }
-        if (G.mine[w.cell]) continue;
-        if (!clearLine(w.cell)) continue;
-        shoot(); stats.shots++; acted++; note = 'dug a frontier block';
-        say(step + ' ' + note); draw(); return;
-      }
-      /* WORK ALL OF IT BEFORE LOOKING FOR MORE. s.work is only what stands
-         within three blocks; the scan also returns everything else the eye
-         landed on, and the watch driver was throwing that away. So it opened
-         the few faces at its feet, saw "nothing in reach", and left — with a
-         wall of unopened blocks in plain sight, often just above it.
-         The gun reaches thirteen blocks: anything visible inside that is work
-         to do right now, from here. Past that, walk at it. Either way, this
-         area is finished before it goes looking for another. */
-      for (const w of s.seenFar){
-        if (G.st[w.cell] !== SOLID || giveUp(w.cell)) continue;
-        if (!counted.has(w.cell)){
-          counted.add(w.cell); stats.guesses++;
-          if (G.mine[w.cell]) stats.guessMines++;
-        }
-        if (G.mine[w.cell]) continue;
-        if (w.d <= GUN && clearLine(w.cell)){
-          const before = G.revealed;
-          shoot(); stats.shots++;
-          if (G.revealed > before){
-            acted++; wander=0; stuck=0; refused.delete(w.cell);
-            note = 'dug visible work ' + w.d.toFixed(0) + ' m off';
-            say(step + ' ' + note); draw(); return;
-          }
-          refuse(w.cell); continue;
-        }
-        const px=P.x, py=P.y, pz=P.z;
-        if (closeOn(w.cell) || Math.hypot(P.x-px,P.y-py,P.z-pz) > BLOCK*0.5){
-          acted++; wander=0; stuck=0;
-          note = 'going to visible work ' + w.d.toFixed(0) + ' m off';
-          say(step + ' ' + note); draw(); return;
-        }
-        refuse(w.cell);
-      }
-      /* THE LAST FEW. The game only lets a NUMBER plant flags once every safe
-         block is out, so one safe block it cannot reach keeps the endgame shut
-         and the bot wanders for the rest of the run. When almost nothing is
-         left, go and find those specifically.
-         And look for them in every state, not just SOLID: a safe block the bot
-         FLAGGED by mistake is MARKED, and that is exactly the cell that holds
-         the endgame closed. Take the flag back off it, then dig it. */
-      if (G.safeTotal - G.revealed <= 5){
-        const N = G.nx*G.ny*G.nz;
-        let best=-1, bd=1e9, wrong=-1;
-        /* No giveUp here. These are the only cells that matter now: refusing
-           them twice and then ignoring them forever is what left a run at
-           98/100 with five mines it could never prove and nothing else to do.
-           Wipe the refusals too — it has moved a long way since it failed. */
-        if (stuckLast++ % 8 === 7) refused.clear();
-        for (let i=0;i<N;i++){
-          if (G.mine[i]) continue;
-          if (G.st[i] === MARKED){ if (wrong<0) wrong=i; continue; }
-          if (G.st[i] !== SOLID) continue;
-          const c = cellXYZ(i);
-          const d = Math.hypot((c[0]+.5)*BLOCK-P.x, (c[1]+.5)*BLOCK-P.y, (c[2]+.5)*BLOCK-P.z);
-          if (d < bd){ bd = d; best = i; }
-        }
-        if (wrong >= 0 && (clearLine(wrong) || (closeOn(wrong) && clearLine(wrong)))){
-          startThink(); endThink();                       // release on it: unflags
-          if (G.st[wrong] !== MARKED){
-            acted++; note = 'took a wrong flag off a safe block';
-            say(step + ' ' + note); draw(); return;
-          }
-          refuse(wrong);
-        }
-        if (best >= 0){
-          if (clearLine(best) || (closeOn(best) && clearLine(best))){
-            const before = G.revealed;
-            shoot(); stats.shots++;
-            if (G.revealed > before){ acted++; note = 'dug one of the last safe blocks'; }
-            else { refuse(best); note = 'the last safe block would not open'; }
-          } else { refuse(best); note = 'hunting the last safe block'; }
-          say(step + ' ' + note); draw(); return;
-        }
-      }
-
-      /* GO AND DIG SOMETHING. This was a last resort after twelve wasted
-         steps; it should be the default. Marcelo watched it wander past 108
-         unopened safe blocks following sightlines, because "walk the longest
-         clear line" is how you FIND work and it was being treated as work.
-         The nearest block that still touches open space is a known job at a
-         known place — go there and open it. Sightlines are for when there is
-         no such block reachable, which is the only thing they were ever good
-         for. */
-      {
-        const N = G.nx*G.ny*G.nz;
-        let tgt=-1, td=1e9;
-        /* Refusals are a local judgement — "I could not reach that FROM HERE"
-           — and the bot has walked kilometres since. Applying them to a
-           board-wide scan meant that after a few hundred steps almost every
-           block was excluded, and it announced "nothing left it can reach
-           anywhere" with 17 safe blocks and 9 mines still on the board. So the
-           scan ignores them, and every 10 tries the slate is wiped. */
-        if (travelTry++ % 10 === 9) refused.clear();
-        for (let i2=0;i2<N;i2++){
-          if (G.st[i2]!==SOLID || G.mine[i2]) continue;
-          let touches=false;
-          for (const j of nbrsOf(i2)) if (G.st[j]===AIR){ touches=true; break; }
-          if (!touches) continue;
-          const c=cellXYZ(i2);
-          const d=Math.hypot((c[0]+.5)*BLOCK-P.x,(c[1]+.5)*BLOCK-P.y,(c[2]+.5)*BLOCK-P.z);
-          if (d<td){ td=d; tgt=i2; }
-        }
-        if (tgt>=0){
-          const px=P.x, pz=P.z;
-          if (clearLine(tgt) || (closeOn(tgt) && clearLine(tgt))){
-            const before=G.revealed;
-            shoot(); stats.shots++;
-            if (G.revealed>before){
-              acted++; wander=0; stuck=0; refused.delete(tgt);
-              note='dug toward the work, '+td.toFixed(0)+' m off';
-              say(step+' '+note); draw(); return;
-            }
-            refuse(tgt);
-          } else if (Math.hypot(P.x-px, P.z-pz) > BLOCK*0.5){
-            wander=0; stuck=0; note='closing on work '+td.toFixed(0)+' m away';
-            say(step+' '+note); draw(); return;
-          } else refuse(tgt);
-        }
-      }
-
-      for (let k = 0; k < 3; k++){
-        const o = s.open[k];
-        if (o && o.run >= BLOCK * 1.5 && followLine(o)){
-          note = 'walking a sightline';
-          if (++wander > 12){
-            /* THE ZONE IS DONE — the level is not. A dungeon is four separate
-               minefields joined by shafts, and following the longest sightline
-               only ever bounces around the chamber it is already in. When there
-               is nothing left HERE, travel: pick the nearest block anywhere on
-               the board that still touches open space and go to it. That is
-               what carries it down a shaft into the next zone. */
-            const N = G.nx*G.ny*G.nz;
-            let far=-1, fd=1e9;
-            for (let i2=0;i2<N;i2++){
-              if (G.st[i2]!==SOLID || G.mine[i2]) continue;
-              let touches=false;
-              for (const j of nbrsOf(i2)) if (G.st[j]===AIR){ touches=true; break; }
-              if (!touches) continue;
-              const c=cellXYZ(i2);
-              const d=Math.hypot((c[0]+.5)*BLOCK-P.x,(c[1]+.5)*BLOCK-P.y,(c[2]+.5)*BLOCK-P.z);
-              if (d<fd){ fd=d; far=i2; }
-            }
-            const tx0=P.x, tz0=P.z;
-            const moved = far>=0 && closeOn(far) &&
-                          Math.hypot(P.x-tx0, P.z-tz0) > BLOCK*0.5;
-            if (moved){
-              wander = 0; stuck = 0;
-              note = 'travelling to work '+fd.toFixed(0)+' m away';
-            } else if (stuck++ < 14 && wallFollow()){
-              /* closeOn can report success while going nowhere — it "walked",
-                 into a wall. Only actual displacement counts as travel, and
-                 anything else means entangled: hug the wall, for as long as it
-                 takes, not one step. */
-              note = 'following the wall out ('+stuck+')';
-              /* Could not walk at it — entangled. Hug the wall instead, which
-                 traces the pocket until it reaches the way out. */
-              note = 'following the wall out';
-            } else if (wander > 40){
-{
-              let remain=0;
-              for (let i3=0;i3<G.nx*G.ny*G.nz;i3++)
-                if (G.st[i3]===SOLID && !G.mine[i3]) remain++;
-              if (remain === 0){ note = 'nothing safe left to open'; dead = true; }
-              else { refused.clear(); wander = 0; stuck = 0;
-                     note = 'stuck with '+remain+' safe blocks left — trying again'; }
-            }
-            }
-          }
-          say(step + ' ' + note); draw(); return;
-        }
-      }
-      wander = 0;
-      note = 'nothing it could reach';
-      say(step + ' ' + note);
     } catch (err) {
       dead = true;
-      note = 'THREW: ' + err.message;
+      R.note = 'THREW: ' + err.message;
+      R.done = 'threw';
       say('!! ' + err.message);
       say('   ' + ((err.stack || '').split('\n')[1] || ''));
     }
