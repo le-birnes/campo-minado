@@ -89,7 +89,7 @@ const stats = { walked:0, jumps:0, shots:0, flags:0, noEffect:0,
                 guessMines:0, byRule:{}, insideRock:0, fell:0, numFlags:0, numOpens:0,
                 lastAct:'nothing yet', foesAtDeath:0, hpAtDeath:0, deaths:{},
                 aimFixes:0, bursts:0, nudges:0, chases:0, climbs:0,
-                flagAim:0, flagBlocked:0, aimBlind:0 };
+                flagAim:0, flagBlocked:0, aimBlind:0, wallSteps:0 };
 
 /* ---------------- audit ---------------- */
 let baseAir = 0, baseRock = 0;
@@ -493,6 +493,40 @@ function advance(m){
   if (Math.hypot(P.x-x0,P.z-z0) < BLOCK*0.2) chasing += 3;
   return true;
 }
+/* WALL FOLLOWING. Marcelo's read, and it is the right one: aiming at a far
+   target works in open ground and breaks the moment the bot is entangled in
+   structure — it walks into the wall between itself and the target, forever.
+   A straight line cannot get out of a maze; a hand on the wall can.
+
+   Right-hand rule, using the game's own collision to decide what a wall is:
+   if the right is open, turn right and go; else if ahead is open, go ahead;
+   else turn left. Repeat and it traces the boundary of whatever pocket it is
+   in, which is how it finds the mouth of a corridor or the lip of a shaft. */
+function wallFollow(){
+  PH('wallFollow'); WD();
+  const probe = (yaw, dist) => {
+    const dx = -Math.sin(yaw), dz = -Math.cos(yaw);
+    const h = raycast(P.x, P.y+EYE*0.5, P.z, dx, 0, dz, dist, false);
+    return h.hit && h.t < dist;
+  };
+  const HALF = Math.PI/2;
+  const ahead = probe(P.yaw, BLOCK*1.1);
+  const right = probe(P.yaw - HALF, BLOCK*1.1);
+  if (!right)     P.yaw -= HALF;          // opening on the right: take it
+  else if (ahead) P.yaw += HALF;          // boxed in: turn away
+  // else wall on the right and road ahead: carry straight on
+  const x0=P.x, z0=P.z;
+  IN.f=1;
+  for (let k=0;k<Math.ceil(0.34/DT);k++){
+    if (!tick()){ IN.f=0; return false; }
+    if (k===4 && P.ground && Math.hypot(P.x-x0,P.z-z0) < BLOCK*0.1) jumpNow();
+    stats.walked += SPD_RUN*DT;
+  }
+  IN.f=0; stats.wallSteps++;
+  return Math.hypot(P.x-x0, P.z-z0) > BLOCK*0.25;      // did it actually move
+}
+
+
 function fightBack(){
   PH('fightBack'); WD();
   if (!enemies.length){ lastSeen=null; chasing=0; return false; }
@@ -1093,6 +1127,10 @@ if (/[?&]watch/.test(location.search)){
             }
             if (far>=0 && closeOn(far)){
               wander = 0; note = 'travelling to work '+fd.toFixed(0)+' m away';
+            } else if (wallFollow()){
+              /* Could not walk at it — entangled. Hug the wall instead, which
+                 traces the pocket until it reaches the way out. */
+              note = 'following the wall out';
             } else if (wander > 40){
               note = 'nothing left it can reach anywhere'; dead = true;
             }
