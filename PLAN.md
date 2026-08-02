@@ -3,8 +3,11 @@
 Live: https://le-birnes.github.io/campo-minado/
 All six open questions were answered on 2026-07-31 and the work is done and live.
 
-Last session ended **mid-way through fixing the playtest bot**. Everything else
-is done, pushed and live.
+The game is done, pushed and live. What is left is the **playtest bot**, and
+the one thing left in ITS way is navigation: see "Tomorrow's first job" below.
+
+    python tools/watch.py --zones 4     # build + print a URL you can watch
+    python tools/runbot.py --quick      # headless Apprentice, ~35 s, the fast check
 
 ---
 
@@ -31,36 +34,65 @@ measurement harnesses: `python tools/run_harness.py my.js`.
 | Audit invariants predated ROCK and pre-carved air (`air === revealed`, `safeTotal === N - mines`) and fired on every Arcane and every dungeon | baseline air/rock snapshot; `revealed + openable === safeTotal` |
 | Guessed blind, died on move two, exercised nothing | `SAFE_GUESS = true` **deliberately**: it may see the mine array only when out of deductions, and it still records what the guess would have cost — 33% of the time the nearest frontier block was a mine |
 
-### Where it stands — 2026-08-01
+### Where it stands — 2026-08-01, end of day
 
-**Apprentice: solved.** 284/284 opened, 16/16 flagged, zero faults, ~35 s.
-Guesses fell from 51 to 4 once it used the game's own solver (findHint) instead
-of its own two-rule one.
+**Apprentice: solved.** 284/284 opened, zero faults, 44 steps / 44 actions.
 
-**Dungeon: never completed a run.** Escalating 30s -> 45 -> 67 -> 101 -> 151 ->
-227 -> 300, every rung timed out. Best partial, from the last run that finished
-at all: 100 steps, opened 33 of 265 blocks, flagged 7 of 54, then stopped with
-"nothing it could reach" — 232 blocks left and exactly ONE of them visible from
-anywhere it could stand, because it was on the chamber floor and could not climb
-onto a mass two to five blocks tall.
+**One-zone dungeon: completed.** 100/100 opened, 20/20 flagged, 19 kills, zero
+faults, "THE SAND LET YOU GO".
 
-**Five performance fixes in a row failed**, which is the signal that the
-architecture is wrong rather than the constants:
+**Four-zone dungeon: not yet.** Best watched run reached 243/260 opened and
+48/57 flagged before stalling. Every stall so far has had a different named
+cause and each one is now fixed — see the commit log for 2026-08-01, which is
+the honest record of the day:
 
-  CLIMB 2 -> 4          fixed the climbing, made the reachable set explode
-  flood capped at 1200  no
-  approach scan at 150  no
-  explore candidates 40 no
-  solver every 6 steps  no
-  paths 70 -> 25, walk budget -40%   no
+| stall | cause | fixed by |
+|---|---|---|
+| flagged nothing in 206 steps | findHint prefers a dig, and a four-zone board always has another dig, so it never offered a flag | `provenMines()` runs first, always |
+| "shot at something" while jumping at a wall | a burst that did no damage counted as a fight | `foeFail`, then: only a kill counts |
+| walked past 108 unopened blocks following sightlines | "walk the longest clear line" was treated as work | go and dig the nearest frontier block instead |
+| "nothing left it can reach anywhere" with 17 blocks and 9 mines left | refusals are local ("not from here") but were applied board-wide, so an exhausted blacklist looked like an exhausted level | travel ignores refusals; only a board count may end a run |
+| stopped with a wall of visible blocks behind it, and more above | `closeOn` jumped only `if (P.ground)` — one block of climb out of twenty jumps — and the watch driver never read `s.seenFar` at all | jump in mid-air toward height; work everything visible before travelling |
 
-### The diagnosis
+**The unification is done.** There is one ladder (`newRun()` / `climb()`) and
+the two drivers are only clocks. Five of the bugs above were a rung the watch
+driver had never been given; that cannot recur now.
 
-The bot decides where to go by SCORING THE REACHABLE SET, so its cost grows with
-the level. Apprentice is 300 cells and fits; the dungeon is 7776 and does not.
-Bounding the scans trades correctness for speed and gets neither.
+### Tomorrow's first job — the one Marcelo diagnosed by playing it
 
-### The fix, in Marcelo's words
+> "I'm seeing it is stuck searching for work and when I assume control the work
+> is either very near or around the corner or going down on the other side of
+> the room."
+
+**`closeOn` only walks in a straight line.** It points at the target and holds
+forward for two seconds (four if it must climb). There is no pathfinding of any
+kind. So:
+
+- work **around a corner** is unreachable — it presses into the corner wall,
+  makes no progress, refuses the target, and moves on
+- work **on the other side of the room, lower down** is unreachable the same way
+  if anything at all stands between
+- and `wallFollow()` is the only escape, a right-hand-rule crawl that was never
+  meant to be the primary router
+
+That is why every remaining stall looks like "stuck at a wall with work just
+past it". The straight line is not a bug in any single rung; it is the whole
+navigation layer, and it is now the only thing left in the way.
+
+**Do not** re-derive this by adding another rung to the ladder. The ladder is
+right. What it needs underneath is a `routeTo(cell)` that can actually get
+there: a BFS over standable cells (`standable` / `stepTarget` already exist from
+the old router, and the old router's real sin was scoring the whole reachable
+set every step — a *targeted* BFS to one known cell is bounded work and is a
+different thing entirely), walked as a sequence of waypoints, with the straight
+line kept as the fast path when the line is already clear.
+
+Measure it the way everything else this session was measured: count the targets
+`closeOn` fails to reach and how many of those a BFS would have found. If that
+number is small, the diagnosis is wrong and the straight line is not the
+problem. It is not expected to be small.
+
+### The earlier architectural fix, in Marcelo's words — still the governing idea
 
 Follow the largest viewable path in a straight line until clues appear. On
 finding them, look at ALL angles before shooting, to collect every visible cue.
@@ -69,18 +101,18 @@ completed straight run triggers a fresh scan of the surroundings, and the paths
 get mapped. Descend or ascend only once every mine in the current cluster is
 marked; if you went down early, come back up.
 
-That is fixed work per step whatever the level size — a scan from where you
-stand, take the longest sightline, walk it, rescan. The performance problem and
-the "does not behave like a player" problem have the same fix.
-
-Keep: the solver (findHint), the dodging, the refusal memory, the invariant
-audit. Replace: the exploration and navigation layer only.
+That is fixed work per step whatever the level size, and it is what the ladder
+now does. The one piece never built is the "go there" underneath it.
 
 ### Out of scope for now
 
-The watchable demo (`bot-demo.html`, `mkdemo.py`) is untouched and still has
-every one of the old bugs — same flying router, same `shoot()`-to-chord that
-cannot work. Marcelo asked to suspend it until the playtest bot is right.
+The old watchable demo (`bot-demo.html`, `mkdemo.py`) is untouched and still has
+every one of the old bugs. It is superseded by `python tools/watch.py` and
+should probably just be deleted.
+
+**Still outstanding, unrelated to the bot:** none of the creatures is drawn
+holding a gun. The 22x26 roster needs redrawing at roughly double resolution.
+Deferred repeatedly and still the outstanding art job.
 
 ---
 
