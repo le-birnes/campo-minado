@@ -88,7 +88,8 @@ const stats = { walked:0, jumps:0, shots:0, flags:0, noEffect:0,
                 ticks:0, follows:0, blocked:0, misflag:0, guesses:0, sidesteps:0, surveys:0, clueWork:0,
                 guessMines:0, byRule:{}, insideRock:0, fell:0, numFlags:0, numOpens:0,
                 lastAct:'nothing yet', foesAtDeath:0, hpAtDeath:0, deaths:{},
-                aimFixes:0, bursts:0, nudges:0, chases:0, climbs:0 };
+                aimFixes:0, bursts:0, nudges:0, chases:0, climbs:0,
+                flagAim:0, flagBlocked:0 };
 
 /* ---------------- audit ---------------- */
 let baseAir = 0, baseRock = 0;
@@ -898,6 +899,12 @@ if (/[?&]watch/.test(location.search)){
   snapshotWorld();
 
   let step = 0, acted = 0, dead = false, note = 'starting';
+  /* the headless loop gives up on a target after two failures; without the
+     same memory here the watcher retried one block fourteen times and
+     counting, which is what Marcelo watched it do */
+  const refused = new Map();
+  const giveUp = c => (refused.get(c)||0) >= 2;
+  const refuse = c => refused.set(c, (refused.get(c)||0)+1);
 
   function draw(){
     const foes = enemies.length;
@@ -948,13 +955,16 @@ if (/[?&]watch/.test(location.search)){
       scan();
       const s = scan();
       const mv = solverMove();
-      if (mv && (clearLine(mv.cell) || (closeOn(mv.cell) && clearLine(mv.cell)))){
+      if (mv && !giveUp(mv.cell) && (clearLine(mv.cell) || (closeOn(mv.cell) && clearLine(mv.cell)))){
+        const before = G.revealed + G.marked;
         if (mv.mine) flagIt(mv.cell); else { shoot(); stats.shots++; }
-        acted++; note = 'solver: ' + (mv.mine ? 'flag' : 'dig') + ' (' + mv.rule + ')';
+        note = 'solver: ' + (mv.mine ? 'flag' : 'dig') + ' (' + mv.rule + ')';
+        if (G.revealed + G.marked === before){ refuse(mv.cell); note += ' — DID NOT TAKE'; }
+        else { acted++; refused.delete(mv.cell); }
         say(step + ' ' + note); draw(); return;
       }
       for (const w of s.work){
-        if (G.st[w.cell] !== SOLID) continue;
+        if (G.st[w.cell] !== SOLID || giveUp(w.cell)) continue;
         stats.guesses++;
         if (G.mine[w.cell]) { stats.guessMines++; continue; }
         if (!clearLine(w.cell)) continue;
@@ -1006,6 +1016,8 @@ log(`cost: ${stats.scans} scans, ${stats.rays} rays, ${stats.ticks} physics tick
     `${stats.follows} straight runs (${stats.blocked} blocked)`);
 log(`on foot: ${stats.walked.toFixed(0)} m, ${stats.jumps} jumps, `+
     `${stats.sidesteps} sidesteps to clear a line, ${stats.surveys} full surveys`);
+log(`flag aiming: ${stats.flagAim} corrections, ${stats.flagBlocked} abandoned because a `+
+    `number sat on every line to the block`);
 log(`actions: ${stats.shots} shots, ${stats.flags} flags (${stats.misflag} misaimed), `+
     `${stats.chests} chests, ${stats.noEffect} with no effect`);
 log(`digging blind: ${stats.guesses} chances, ${stats.guessMines} were mines `+
