@@ -551,9 +551,13 @@ function grabChest(){
   return false;
 }
 
-const won = () => G.dungeon
-  ? (G.mines>0 && G.marked===G.mines && correctFlags()===G.mines) || G.revealed>=G.safeTotal
-  : G.revealed>=G.safeTotal;
+/* Let the GAME decide when the game is over. This used to carry its own
+   opinion — "the dungeon is done once every safe block is dug" — which stopped
+   the run at 100/100 opened with 15 of 20 mines still unflagged and a finale
+   that had not even been summoned. The dungeon ends on the last FLAG and then
+   on the thing that comes for you; digging it out is not finishing it.
+   Mirroring G.win means the bot can never disagree with the board again. */
+const won = () => G.win === true;
 
 /* ---------------- one game ---------------- */
 /* "died to a mine" does not say whose mine. The bot declines to dig one, so a
@@ -954,6 +958,28 @@ if (/[?&]watch/.test(location.search)){
 
       scan();
       const s = scan();
+
+      /* THE ENDGAME. Once every safe block is out, the mines that are left are
+         often walled in by what you dug around them — unreachable by aim. The
+         game allows a NUMBER to plant those flags for you, and that is the only
+         way the last few ever go down. Without this the run stalls at 100/100
+         opened with mines still unflagged, which is exactly what happened. */
+      if (G.revealed >= G.safeTotal && G.marked < G.mines){
+        for (const u of forcedClues()){
+          if (giveUp(u.clue)) continue;
+          if (!lineToNum(u.clue)){
+            if (!closeOn(u.clue) || !lineToNum(u.clue)){ refuse(u.clue); continue; }
+          }
+          const m0 = G.marked;
+          startThink(); endThink();
+          if (G.marked > m0){
+            acted++; note = 'flagged ' + (G.marked-m0) + ' through a number';
+            say(step + ' ' + note); draw(); return;
+          }
+          refuse(u.clue);
+        }
+      }
+
       const mv = solverMove();
       if (mv && !giveUp(mv.cell) && (clearLine(mv.cell) || (closeOn(mv.cell) && clearLine(mv.cell)))){
         const before = G.revealed + G.marked;
