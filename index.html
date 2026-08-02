@@ -1822,19 +1822,24 @@ function shapeDungeon(){
     if(lv===DL_LEVELS-1){
       /* The arena. You come in through the ceiling and land on top of it. */
       const rad=3;
-      const cx=clampX(ex), cz=clampZ(ez);
+      /* When the arena is the ONLY level — a shrunken test dungeon — there is
+         no previous shaft to sit under, and `ex` is still 0. clampX(0) is 2,
+         which jammed the whole arena into the corner of the map AND collapsed
+         the spawn ledge onto the arena's own centre, so the run began inside
+         the minefield. Centre it, and stand outside it. */
+      const only = (lv===0);
+      const cx = only ? (G.nx>>1) : clampX(ex);
+      const cz = only ? (G.nz>>1) : clampZ(ez);
       chamber(cx,cz,rad,yb);
-      /* If the arena is the ONLY level — which a shrunken test dungeon is —
-         nothing upstream ever chose a spawn, and the player is left at the
-         world origin inside solid rock. Put them on the chamber floor at its
-         edge, looking in. */
-      if(lv===0){
-        const sx2=clampX(cx-rad-1), sz2=clampZ(cz);
-        carve(sx2-1, sx2+1, sz2-1, sz2+1, yb, yb+DL_H-2);
+      let mox=-99, moz=-99;
+      if(only){
+        const sx2 = cx-rad-2, sz2 = cz;
+        carve(sx2-1, cx-rad, sz2-1, sz2+1, yb, yb+DL_H-2);   // a landing to stand on
         L.spawn=[(sx2+0.5)*BLOCK, yb*BLOCK, (sz2+0.5)*BLOCK];
-        L.yaw = Math.atan2(-((cx-sx2)), -((cz-sz2)));
+        L.yaw = Math.atan2(-(cx-sx2), 0);
+        mox = cx-rad; moz = cz;            // and the field keeps its mouth clear
       }
-      const cells=mass(cx,cz,rad,yb,-99,-99);
+      const cells=mass(cx,cz,rad,yb,mox,moz);
       L.groups.push({cells, target:0.16, lo:20, hi:24, arena:true});
       break;
     }
