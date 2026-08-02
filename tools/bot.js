@@ -89,7 +89,7 @@ const stats = { walked:0, jumps:0, shots:0, flags:0, noEffect:0,
                 guessMines:0, byRule:{}, insideRock:0, fell:0, numFlags:0, numOpens:0,
                 lastAct:'nothing yet', foesAtDeath:0, hpAtDeath:0, deaths:{},
                 aimFixes:0, bursts:0, nudges:0, chases:0, climbs:0,
-                flagAim:0, flagBlocked:0, aimBlind:0, wallSteps:0 };
+                flagAim:0, flagBlocked:0, aimBlind:0, wallSteps:0, futile:0 };
 
 /* ---------------- audit ---------------- */
 let baseAir = 0, baseRock = 0;
@@ -531,11 +531,19 @@ function wallFollow(){
 }
 
 
+/* Shots that change nothing are not a fight. The blind-fire fallback means
+   aimTrue() never refuses, so a burst always "succeeds" — and against something
+   the shots cannot actually reach, that makes combat win every step forever:
+   fourteen consecutive "shot at something", 47 shots, one enemy still standing,
+   and the board untouched. Count the engagements that did no damage and stop
+   choosing that target after three. */
+const foeFail = new Map();
 function fightBack(){
   PH('fightBack'); WD();
   if (!enemies.length){ lastSeen=null; chasing=0; return false; }
   let best=null;
   for (const e of enemies){
+    if ((foeFail.get(e)||0) >= 3) continue;      // shooting this is not working
     if (!seeEnemy(e)) continue;
     const d=Math.hypot(e.x-P.x, e.y-P.y, e.z-P.z);
     const threat=(e.aim && e.lock>0)?0:1;      // whatever is about to fire, first
@@ -559,7 +567,17 @@ function fightBack(){
       stats.shotAt++; shoot(); fired++;
       if (!tick()) break;
     }
-    if (fired){ stats.bursts++; if (enemies.indexOf(e)<0) stats.killed++; return true; }
+    if (fired){
+      stats.bursts++;
+      if (enemies.indexOf(e) < 0){ stats.killed++; foeFail.delete(e); return true; }
+      const hp1 = e.hp!==undefined ? e.hp : (e.dhp!==undefined ? e.dhp : 1);
+      if (hp1 >= hp0){                            // emptied a burst, did nothing
+        foeFail.set(e, (foeFail.get(e)||0)+1);
+        stats.futile++;
+        if ((foeFail.get(e)||0) >= 3) return false;   // give the board its turn back
+      } else foeFail.delete(e);
+      return true;
+    }
     return nudge(e);
   }
   if (lastSeen && chasing<8){ chasing++; return advance(lastSeen); }
