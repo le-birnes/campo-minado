@@ -963,7 +963,7 @@ if (/[?&]watch/.test(location.search)){
   try { setScreen('play'); } catch(e) {}
   snapshotWorld();
 
-  let step = 0, acted = 0, dead = false, note = 'starting', wander = 0, stuckLast = 0, stuck = 0;
+  let step = 0, acted = 0, dead = false, note = 'starting', wander = 0, stuckLast = 0, stuck = 0, travelTry = 0;
   /* the headless loop gives up on a target after two failures; without the
      same memory here the watcher retried one block fourteen times and
      counting, which is what Marcelo watched it do */
@@ -1136,8 +1136,15 @@ if (/[?&]watch/.test(location.search)){
       {
         const N = G.nx*G.ny*G.nz;
         let tgt=-1, td=1e9;
+        /* Refusals are a local judgement — "I could not reach that FROM HERE"
+           — and the bot has walked kilometres since. Applying them to a
+           board-wide scan meant that after a few hundred steps almost every
+           block was excluded, and it announced "nothing left it can reach
+           anywhere" with 17 safe blocks and 9 mines still on the board. So the
+           scan ignores them, and every 10 tries the slate is wiped. */
+        if (travelTry++ % 10 === 9) refused.clear();
         for (let i2=0;i2<N;i2++){
-          if (G.st[i2]!==SOLID || G.mine[i2] || giveUp(i2)) continue;
+          if (G.st[i2]!==SOLID || G.mine[i2]) continue;
           let touches=false;
           for (const j of nbrsOf(i2)) if (G.st[j]===AIR){ touches=true; break; }
           if (!touches) continue;
@@ -1201,7 +1208,14 @@ if (/[?&]watch/.test(location.search)){
                  traces the pocket until it reaches the way out. */
               note = 'following the wall out';
             } else if (wander > 40){
-              note = 'nothing left it can reach anywhere'; dead = true;
+{
+              let remain=0;
+              for (let i3=0;i3<G.nx*G.ny*G.nz;i3++)
+                if (G.st[i3]===SOLID && !G.mine[i3]) remain++;
+              if (remain === 0){ note = 'nothing safe left to open'; dead = true; }
+              else { refused.clear(); wander = 0; stuck = 0;
+                     note = 'stuck with '+remain+' safe blocks left — trying again'; }
+            }
             }
           }
           say(step + ' ' + note); draw(); return;
