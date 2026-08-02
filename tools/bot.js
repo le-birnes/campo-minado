@@ -47,7 +47,7 @@ const {G, P, IN, enemies, EN_MAX, BLOCK, EYE, P_H, SPD_RUN,
        updateEnemies, MARKED, SOLID, AIR, ROCK, aimAt, adv, DIFFS,
        chests, correctFlags, MAX_JUMPS, startThink, endThink, snd,
        findHint, MODE_SWEEP, MODE_DUNGEON, rayEnemy, setDungeonLevels,
-       aimRay, ETYPES} = T;
+       aimRay, ETYPES, setScreen} = T;
 try{ G.muted=true; snd.setMute(true); }catch(e){}
 
 let errCount = 0; const seen = new Set();
@@ -834,6 +834,146 @@ function autopsy(){
 }
 
 /* ---------------- suite ---------------- */
+/* ============================================================
+   WATCHABLE BOT  —  ?watch
+   ============================================================
+   The headless bot answers one question at the end and is silent until then,
+   which is how a ReferenceError on the first shot went unseen for hours. This
+   mode answers continuously: it plays in a real browser at a pace you can
+   follow, the game renders between its moves, and everything it is thinking
+   goes on screen — step, phase, target, stats, and any error with its stack,
+   printed rather than swallowed.
+
+   It is the SAME bot: the same scan, the same solver, the same combat, the
+   same helpers. What differs is only WHEN steps happen — spaced out by a timer
+   instead of run flat out — so the browser gets the frames back in between.
+   Movement therefore arrives in short hops rather than smoothly; that is the
+   honest cost of not rewriting the bot into a real-time controller, and it
+   does not change any decision it makes.
+   ============================================================ */
+if (/[?&]watch/.test(location.search)){
+  const qmode = /[?&]sweep/.test(location.search) ? MODE_SWEEP : MODE_DUNGEON;
+  const qz = /[?&]zones=(\d+)/.exec(location.search);
+  const qd = /[?&]diff=(\d)/.exec(location.search);
+
+  const box = document.createElement('div');
+  box.style.cssText =
+    'position:fixed;right:8px;top:8px;z-index:99999;width:330px;max-height:94vh;'+
+    'overflow:auto;background:rgba(8,10,16,.86);color:#cfe;font:12px/1.45 monospace;'+
+    'padding:10px;border:1px solid #2b3a4a;white-space:pre-wrap';
+  document.body.appendChild(box);
+
+  const ctl = document.createElement('div');
+  ctl.style.cssText =
+    'position:fixed;right:8px;bottom:8px;z-index:99999;background:rgba(8,10,16,.9);'+
+    'color:#cfe;font:12px monospace;padding:8px;border:1px solid #2b3a4a';
+  ctl.innerHTML =
+    'pace <input id="wSpd" type="range" min="0" max="1200" value="260" style="width:130px">'+
+    '<span id="wSpdV">260ms</span><br>'+
+    '<button id="wPause">pause</button> <button id="wStep">step</button>';
+  document.body.appendChild(ctl);
+
+  let pace = 260, paused = false, timer = 0;
+  document.getElementById('wSpd').addEventListener('input', e => {
+    pace = +e.target.value;
+    document.getElementById('wSpdV').textContent = pace + 'ms';
+    if (!paused) { clearInterval(timer); timer = setInterval(pump, Math.max(16, pace)); }
+  });
+  document.getElementById('wPause').addEventListener('click', e => {
+    paused = !paused; e.target.textContent = paused ? 'resume' : 'pause';
+    clearInterval(timer);
+    if (!paused) timer = setInterval(pump, Math.max(16, pace));
+  });
+  document.getElementById('wStep').addEventListener('click', () => { paused = true;
+    document.getElementById('wPause').textContent = 'resume'; clearInterval(timer); pump(); });
+
+  const log = [];
+  const say = m => { log.unshift(m); if (log.length > 14) log.pop(); };
+
+  G.mode = qmode;
+  if (qz && qmode === MODE_DUNGEON) setDungeonLevels(+qz[1]);
+  genWorld(qd ? +qd[1] : 0);
+  G.state = 'play';
+  try { setScreen('play'); } catch(e) {}
+  snapshotWorld();
+
+  let step = 0, acted = 0, dead = false, note = 'starting';
+
+  function draw(){
+    const foes = enemies.length;
+    box.textContent =
+      'WATCHABLE BOT   ' + (paused ? '[paused]' : '') + '\n' +
+      (qmode === MODE_DUNGEON ? 'Dungeon' : '3D Minesweeper') +
+      (qz ? '  zones ' + qz[1] : '') + '   step ' + step + '\n' +
+      '--------------------------------\n' +
+      'state    ' + G.state + (dead ? '   <-- STOPPED' : '') + '\n' +
+      'note     ' + note + '\n' +
+      'opened   ' + G.revealed + ' / ' + G.safeTotal + '\n' +
+      'flags    ' + G.marked + ' / ' + G.mines + '\n' +
+      'life     ' + P.hp + '/4      foes ' + foes + '\n' +
+      'actions  ' + acted + '\n' +
+      'shots    ' + stats.shots + '   flags ' + stats.flags +
+      '   kills ' + stats.killed + '\n' +
+      'guesses  ' + stats.guesses + ' (' + stats.guessMines + ' were mines)\n' +
+      'walked   ' + stats.walked.toFixed(0) + ' m   jumps ' + stats.jumps + '\n' +
+      'faults   ' + errCount + '\n' +
+      '--------------------------------\n' + log.join('\n');
+  }
+
+  /* One move, using the very same helpers the headless run uses. */
+  function pump(){
+    if (dead) { draw(); return; }
+    try {
+      if (won())            { note = 'FINISHED'; dead = true; draw(); return; }
+      if (G.state !== 'play'){ note = 'died to a ' + G.deathBy; dead = true; draw(); return; }
+      step++;
+      if (!idle(0.1))       { note = 'physics fault'; dead = true; draw(); return; }
+
+      if (G.boss && enemies.length){
+        if (dodge()) say(step + ' dodged');
+        if (G.state !== 'play'){ note = 'died to a ' + G.deathBy; dead = true; draw(); return; }
+        if (fightBack()){ acted++; note = 'fighting'; say(step + ' shot at something'); draw(); return; }
+      }
+      if (chests.length && grabChest()){ acted++; note='chest'; say(step+' opened a chest'); draw(); return; }
+
+      scan();
+      const s = scan();
+      const mv = solverMove();
+      if (mv && (clearLine(mv.cell) || (closeOn(mv.cell) && clearLine(mv.cell)))){
+        if (mv.mine) flagIt(mv.cell); else { shoot(); stats.shots++; }
+        acted++; note = 'solver: ' + (mv.mine ? 'flag' : 'dig') + ' (' + mv.rule + ')';
+        say(step + ' ' + note); draw(); return;
+      }
+      for (const w of s.work){
+        if (G.st[w.cell] !== SOLID) continue;
+        stats.guesses++;
+        if (G.mine[w.cell]) { stats.guessMines++; continue; }
+        if (!clearLine(w.cell)) continue;
+        shoot(); stats.shots++; acted++; note = 'dug a frontier block';
+        say(step + ' ' + note); draw(); return;
+      }
+      for (let k = 0; k < 3; k++){
+        const o = s.open[k];
+        if (o && o.run >= BLOCK * 1.5 && followLine(o)){
+          note = 'walking a sightline'; say(step + ' ' + note); draw(); return;
+        }
+      }
+      note = 'nothing it could reach';
+      say(step + ' ' + note);
+    } catch (err) {
+      dead = true;
+      note = 'THREW: ' + err.message;
+      say('!! ' + err.message);
+      say('   ' + ((err.stack || '').split('\n')[1] || ''));
+    }
+    draw();
+  }
+
+  draw();
+  timer = setInterval(pump, Math.max(16, pace));
+  return;
+}
+
 const plan=[];
 if (/[?&]dungeon/.test(location.search))    plan.push([0,MODE_DUNGEON,'Dungeon']);
 else if (/[?&]quick/.test(location.search)) plan.push([0,MODE_SWEEP,'Apprentice']);
