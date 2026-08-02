@@ -1073,7 +1073,30 @@ if (/[?&]watch/.test(location.search)){
         const o = s.open[k];
         if (o && o.run >= BLOCK * 1.5 && followLine(o)){
           note = 'walking a sightline';
-          if (++wander > 25){ note = 'walking without finding work — stopping'; dead = true; }
+          if (++wander > 12){
+            /* THE ZONE IS DONE — the level is not. A dungeon is four separate
+               minefields joined by shafts, and following the longest sightline
+               only ever bounces around the chamber it is already in. When there
+               is nothing left HERE, travel: pick the nearest block anywhere on
+               the board that still touches open space and go to it. That is
+               what carries it down a shaft into the next zone. */
+            const N = G.nx*G.ny*G.nz;
+            let far=-1, fd=1e9;
+            for (let i2=0;i2<N;i2++){
+              if (G.st[i2]!==SOLID || G.mine[i2]) continue;
+              let touches=false;
+              for (const j of nbrsOf(i2)) if (G.st[j]===AIR){ touches=true; break; }
+              if (!touches) continue;
+              const c=cellXYZ(i2);
+              const d=Math.hypot((c[0]+.5)*BLOCK-P.x,(c[1]+.5)*BLOCK-P.y,(c[2]+.5)*BLOCK-P.z);
+              if (d<fd){ fd=d; far=i2; }
+            }
+            if (far>=0 && closeOn(far)){
+              wander = 0; note = 'travelling to work '+fd.toFixed(0)+' m away';
+            } else if (wander > 40){
+              note = 'nothing left it can reach anywhere'; dead = true;
+            }
+          }
           say(step + ' ' + note); draw(); return;
         }
       }
