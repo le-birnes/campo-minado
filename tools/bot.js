@@ -907,6 +907,7 @@ if (/[?&]watch/.test(location.search)){
      same memory here the watcher retried one block fourteen times and
      counting, which is what Marcelo watched it do */
   const refused = new Map();
+  const counted = new Set();   // a cell is a guess once, not once per step
   const giveUp = c => (refused.get(c)||0) >= 2;
   const refuse = c => refused.set(c, (refused.get(c)||0)+1);
 
