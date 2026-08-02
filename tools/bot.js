@@ -907,7 +907,7 @@ if (/[?&]watch/.test(location.search)){
   try { setScreen('play'); } catch(e) {}
   snapshotWorld();
 
-  let step = 0, acted = 0, dead = false, note = 'starting', wander = 0;
+  let step = 0, acted = 0, dead = false, note = 'starting', wander = 0, stuckLast = 0;
   /* the headless loop gives up on a target after two failures; without the
      same memory here the watcher retried one block fourteen times and
      counting, which is what Marcelo watched it do */
@@ -1018,8 +1018,13 @@ if (/[?&]watch/.test(location.search)){
       if (G.safeTotal - G.revealed <= 5){
         const N = G.nx*G.ny*G.nz;
         let best=-1, bd=1e9, wrong=-1;
+        /* No giveUp here. These are the only cells that matter now: refusing
+           them twice and then ignoring them forever is what left a run at
+           98/100 with five mines it could never prove and nothing else to do.
+           Wipe the refusals too — it has moved a long way since it failed. */
+        if (stuckLast++ % 8 === 7) refused.clear();
         for (let i=0;i<N;i++){
-          if (G.mine[i] || giveUp(i)) continue;
+          if (G.mine[i]) continue;
           if (G.st[i] === MARKED){ if (wrong<0) wrong=i; continue; }
           if (G.st[i] !== SOLID) continue;
           const c = cellXYZ(i);
