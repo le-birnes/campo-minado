@@ -986,6 +986,25 @@ if (/[?&]watch/.test(location.search)){
         }
       }
 
+      /* FLAG WHAT THE BOARD PROVES, FIRST. findHint returns ONE move and it
+         prefers a safe dig, so while any dig is provable it never offers a
+         flag. On a small board that is harmless: it runs out of digs and starts
+         flagging. On a four-zone dungeon there is always another dig, so it
+         flagged NOTHING — 206 steps, 173 shots, 0 of 57 mines marked, and a run
+         that cannot end, because the dungeon ends on the last flag.
+         The headless loop always did this first. The watch driver did not. */
+      for (const cell of provenMines()){
+        if (giveUp(cell) || G.st[cell] !== SOLID) continue;
+        if (!clearLine(cell) && !(closeOn(cell) && clearLine(cell))){ refuse(cell); continue; }
+        const m0 = G.marked;
+        flagIt(cell);
+        if (G.marked > m0){
+          acted++; refused.delete(cell); note = 'flagged a proven mine';
+          say(step + ' ' + note); draw(); return;
+        }
+        refuse(cell);
+      }
+
       const mv = solverMove();
       if (mv && !giveUp(mv.cell) && (clearLine(mv.cell) || (closeOn(mv.cell) && clearLine(mv.cell)))){
         const before = G.revealed + G.marked;
