@@ -2936,16 +2936,18 @@ function shoot(){
   if(G.state!=='play') return;
   G.hint = null; G.beacon = null;   // the board is about to change under the deduction
   recoil = 1;
+  const r=aimRay();
+  /* The knockback needs the aim, and `r` is declared below with const — reading
+     it up here threw ReferenceError on EVERY shot of the finale, after recoil
+     had already been set. So the weapon swung and nothing else happened at all:
+     no sound, no beam, no damage. Order matters. */
   if(G.finale){
     snd.shotgun();
-    /* A shotgun shoves the person holding it. Backwards along your own aim,
-       which also means firing while airborne moves you — worth knowing. */
-    const kb = 5.4;
+    const kb = 5.4;                       // a shotgun shoves the one holding it
     P.vx -= r.dx*kb; P.vz -= r.dz*kb;
     P.vy += Math.max(0, -r.dy)*kb*0.35 + 1.1;
     G.shake = Math.max(G.shake, 0.10);
   } else snd.shot();
-  const r=aimRay();
   /* Ray recast at the instant of the shot. Reusing the hover from the last
      drawn frame swallows shots whenever two clicks land in the same frame.
      wantNum is off: left click is shooting, always. A number floating in the

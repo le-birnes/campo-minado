@@ -89,7 +89,7 @@ const stats = { walked:0, jumps:0, shots:0, flags:0, noEffect:0,
                 guessMines:0, byRule:{}, insideRock:0, fell:0, numFlags:0, numOpens:0,
                 lastAct:'nothing yet', foesAtDeath:0, hpAtDeath:0, deaths:{},
                 aimFixes:0, bursts:0, nudges:0, chases:0, climbs:0,
-                flagAim:0, flagBlocked:0 };
+                flagAim:0, flagBlocked:0, aimBlind:0 };
 
 /* ---------------- audit ---------------- */
 let baseAir = 0, baseRock = 0;
@@ -453,7 +453,12 @@ function aimTrue(e){
     if (hit && hit.e===e) return true;
     stats.aimFixes++;
   }
-  return false;
+  /* Nothing confirmed — but it can SEE the thing, so shoot anyway. A failed
+     confirmation must never mean "stand there": the bot reached the finale
+     once, never fired a shot at it, and died. */
+  aimAt(e.x, e.y, e.z);
+  stats.aimBlind++;
+  return true;
 }
 function nudge(e){
   const ax=P.x-e.x, az=P.z-e.z, len=Math.hypot(ax,az)||1;
@@ -902,7 +907,7 @@ if (/[?&]watch/.test(location.search)){
   try { setScreen('play'); } catch(e) {}
   snapshotWorld();
 
-  let step = 0, acted = 0, dead = false, note = 'starting';
+  let step = 0, acted = 0, dead = false, note = 'starting', wander = 0;
   /* the headless loop gives up on a target after two failures; without the
      same memory here the watcher retried one block fourteen times and
      counting, which is what Marcelo watched it do */
@@ -992,18 +997,63 @@ if (/[?&]watch/.test(location.search)){
       }
       for (const w of s.work){
         if (G.st[w.cell] !== SOLID || giveUp(w.cell)) continue;
-        stats.guesses++;
-        if (G.mine[w.cell]) { stats.guessMines++; continue; }
+        /* Count a cell ONCE. Re-counting every candidate every step turned 20
+           mines into "744 guesses, 724 were mines". */
+        if (!counted.has(w.cell)){
+          counted.add(w.cell); stats.guesses++;
+          if (G.mine[w.cell]) stats.guessMines++;
+        }
+        if (G.mine[w.cell]) continue;
         if (!clearLine(w.cell)) continue;
         shoot(); stats.shots++; acted++; note = 'dug a frontier block';
         say(step + ' ' + note); draw(); return;
       }
+      /* THE LAST FEW. The game only lets a NUMBER plant flags once every safe
+         block is out, so one safe block it cannot reach keeps the endgame shut
+         and the bot wanders for the rest of the run. When almost nothing is
+         left, go and find those specifically.
+         And look for them in every state, not just SOLID: a safe block the bot
+         FLAGGED by mistake is MARKED, and that is exactly the cell that holds
+         the endgame closed. Take the flag back off it, then dig it. */
+      if (G.safeTotal - G.revealed <= 5){
+        const N = G.nx*G.ny*G.nz;
+        let best=-1, bd=1e9, wrong=-1;
+        for (let i=0;i<N;i++){
+          if (G.mine[i] || giveUp(i)) continue;
+          if (G.st[i] === MARKED){ if (wrong<0) wrong=i; continue; }
+          if (G.st[i] !== SOLID) continue;
+          const c = cellXYZ(i);
+          const d = Math.hypot((c[0]+.5)*BLOCK-P.x, (c[1]+.5)*BLOCK-P.y, (c[2]+.5)*BLOCK-P.z);
+          if (d < bd){ bd = d; best = i; }
+        }
+        if (wrong >= 0 && (clearLine(wrong) || (closeOn(wrong) && clearLine(wrong)))){
+          startThink(); endThink();                       // release on it: unflags
+          if (G.st[wrong] !== MARKED){
+            acted++; note = 'took a wrong flag off a safe block';
+            say(step + ' ' + note); draw(); return;
+          }
+          refuse(wrong);
+        }
+        if (best >= 0){
+          if (clearLine(best) || (closeOn(best) && clearLine(best))){
+            const before = G.revealed;
+            shoot(); stats.shots++;
+            if (G.revealed > before){ acted++; note = 'dug one of the last safe blocks'; }
+            else { refuse(best); note = 'the last safe block would not open'; }
+          } else { refuse(best); note = 'hunting the last safe block'; }
+          say(step + ' ' + note); draw(); return;
+        }
+      }
+
       for (let k = 0; k < 3; k++){
         const o = s.open[k];
         if (o && o.run >= BLOCK * 1.5 && followLine(o)){
-          note = 'walking a sightline'; say(step + ' ' + note); draw(); return;
+          note = 'walking a sightline';
+          if (++wander > 25){ note = 'walking without finding work — stopping'; dead = true; }
+          say(step + ' ' + note); draw(); return;
         }
       }
+      wander = 0;
       note = 'nothing it could reach';
       say(step + ' ' + note);
     } catch (err) {
