@@ -1726,8 +1726,19 @@ let CELL_B = true;                // ...and whether it blocks the body
 function setCellScale(dungeon){
   const q = (k,d) => { const m=new RegExp('[?&]'+k+'=([\\d.]+)').exec(location.search);
                        return m ? parseFloat(m[1]) : d; };
-  CELL_S = q('cellSize',  dungeon ? 0.125 : 1.0);
-  CELL_B = q('cellSolid', dungeon ? 0     : 1) > 0.5;
+  /* BOTH MODES ARE BACK TO WHOLE, SOLID BLOCKS. The eighth-size dungeon cell
+     is reverted, not deleted: shrinking what a puzzle cell looks like is easy
+     and shrinking what it MEANS is not, and the second half was never
+     designed. A cell that no longer blocks you changes where the reveal
+     cascade stops, what a corridor is, what the floor of a mine pocket is
+     made of, and how you are meant to hit something two blocks wide at
+     thirteen metres. That wants deciding on purpose.
+
+     The machinery stays because it costs nothing at these defaults and it is
+     the experiment: ?cellSize=0.125&cellSolid=0 reproduces exactly what was
+     reverted, on any board, without touching the file. */
+  CELL_S = q('cellSize',  1.0);
+  CELL_B = q('cellSolid', 1) > 0.5;
 }
 /* What stops you moving. ROCK and the world's shell, always; a puzzle cell
    only if it is still being treated as furniture. */
