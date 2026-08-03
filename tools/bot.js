@@ -50,6 +50,7 @@ const {G, P, IN, enemies, EN_MAX, BLOCK, EYE, P_H, SPD_RUN,
        aimRay, ETYPES, setScreen} = T;
 try{ G.muted=true; snd.setMute(true); }catch(e){}
 
+const trail = [];
 let errCount = 0; const seen = new Set();
 function err(msg){
   errCount++;
@@ -58,6 +59,8 @@ function err(msg){
 }
 
 const DT = 1/30;
+const SKIP_ADV  = /[?&]skip=[^&]*adv/.test(location.search);
+const SKIP_FOES = /[?&]skip=[^&]*foes/.test(location.search);
 /* A hang has to name itself. `phase` is set on entry to everything that loops,
    and the guard is called from BOTH tick() and the big non-ticking loops, so
    it fires wherever the run is stuck. */
@@ -68,11 +71,35 @@ const T0 = performance.now();
    time-based watchdog can never fire, which is exactly why it never did and
    why I wrongly concluded the stuck loop "does not tick". A call budget works
    whatever the clock is doing. Apprentice finishes on about 9,000 of these. */
-let wdN = 0;
+/* TWO budgets, because the old single one could not tell the two failures
+   apart and reported the wrong one. It fired at 400,000 checks saying "without
+   finishing, last phase: inView", which reads as "inView is looping forever"
+   — and inView was fine. What had actually happened was that the whole RUN
+   spent its budget getting nowhere: 483 steps, 76,395 metres walked, 8,125
+   jumps, 70 actions. A hang and a wild goose chase are different bugs and the
+   message has to say which one it is.
+
+   The per-step budget is the real hang detector: no single decision needs
+   sixty thousand checks. The run budget is generous, because a four-zone
+   dungeon legitimately costs hundreds of thousands. */
+let wdN = 0, wdStep = 0, wdStepAt = 0;
+/* ?wd=perStep,run turns a hang into a REPORT. A blocked main thread means
+   Chrome never serialises the DOM, so a hang costs a full wall clock cap and
+   tells you nothing at all; throwing early costs a second and prints the
+   trail that says where it was. */
+const wdQ = /[?&]wd=(\d+)(?:,(\d+))?/.exec(location.search);
+const WD_STEP = wdQ ? +wdQ[1] : 60000;
+const WD_RUN  = (wdQ && wdQ[2]) ? +wdQ[2] : 4000000;
 function WD(){
-  if (++wdN > 400000)
-    throw new Error('watchdog: '+wdN+' checks without finishing, last phase: '+phase);
+  wdN++;
+  if (wdN - wdStepAt > WD_STEP)
+    throw new Error('STUCK inside one decision: '+(wdN-wdStepAt)+
+                    ' checks in step '+wdStep+', phase '+phase);
+  if (wdN > WD_RUN)
+    throw new Error('the run spent its budget: '+wdN+' checks over '+wdStep+
+                    ' steps and it never finished, phase '+phase);
 }
+function wdNewStep(n){ wdStep = n; wdStepAt = wdN; }
 const PH = p => { phase = p; };
 /* Two different distances, and they were being muddled.
    WORK is how close it needs to be to dig or flag: three blocks, no closer.
@@ -89,7 +116,9 @@ const stats = { walked:0, jumps:0, shots:0, flags:0, noEffect:0,
                 guessMines:0, byRule:{}, insideRock:0, fell:0, numFlags:0, numOpens:0,
                 lastAct:'nothing yet', foesAtDeath:0, hpAtDeath:0, deaths:{},
                 aimFixes:0, bursts:0, nudges:0, chases:0, climbs:0,
-                flagAim:0, flagBlocked:0, aimBlind:0, wallSteps:0, futile:0 };
+                flagAim:0, flagBlocked:0, aimBlind:0, wallSteps:0, futile:0,
+                routes:0, routeWon:0, routeStuck:0, routeNone:0, routeSaved:0,
+                bored:0, reroutes:0, kills1:0 };
 
 /* ---------------- audit ---------------- */
 let baseAir = 0, baseRock = 0;
@@ -137,7 +166,14 @@ function tick(){
   WD();
   stats.ticks++;
   updateJump(DT); physics(DT); tickGround(DT);
-  if (G.boss){ adv(DT); updateEnemies(DT); }
+  /* ?skip=adv or ?skip=foes cuts one of the game's own per-frame calls out of
+     the loop. Bisecting a hang that blocks the main thread cannot be done from
+     inside it — nothing can report — so it is done by removing one suspect at
+     a time and seeing which removal makes it stop. */
+  if (G.boss){
+    if (!SKIP_ADV)  adv(DT);
+    if (!SKIP_FOES) updateEnemies(DT);
+  }
   if (P.y < -30){ stats.fell++; return false; }
   if (playerInRock()){ stats.insideRock++;
     err(`inside rock at ${P.x.toFixed(1)},${P.y.toFixed(1)},${P.z.toFixed(1)}`); return false; }
@@ -564,17 +600,30 @@ function fightBack(){
     /* Commit. Picking "nearest" afresh between shots is how a thing with three
        hit points survives nine of them. */
     const hp0 = e.hp!==undefined ? e.hp : (e.dhp!==undefined ? e.dhp : 1);
-/* An ordinary enemy dies in a handful. A fourteen-shot burst on something
-       with three hit points is nine shots during which everything ELSE on the
-       board is lining up on you — and standing still is what these kill you
-       for. The finale is the exception and gets a longer look. */
-    const budget = e.hell ? 12 : Math.min(6, Math.max(2, hp0+1));
-    let fired=0;
+/* FINISH IT. This used to fire a short fixed burst and hand the step back,
+       so meeting something was one shot, then a dodge, then a scan, then one
+       more shot — and it was getting killed doing it. The old reasoning was
+       that a long burst is time spent standing still; the answer is to keep
+       dodging DURING the burst rather than to leave the thing alive.
+
+       Nothing here is a fixed budget any more. It fires until the target is
+       dead or until four shots in a row change nothing, which is the only
+       honest definition of "this is not working". Marcelo's ruling on the
+       fairness of it: the enemies are designed for a human, not for this. */
+    const budget = e.hell ? EX.killHell : EX.kill;
+    let fired=0, hpNow=hp0, stall=0;
     while (fired<budget && enemies.indexOf(e)>=0 && G.state==='play'){
+      /* Break off every few shots to get out of the way of whatever else has
+         lined up meanwhile, then go straight back to the same target. */
+      if (fired && fired % 5 === 0 && beingAimedAt()) dodge();
       if (!aimTrue(e)) break;
       stats.shotAt++; shoot(); fired++;
       if (!tick()) break;
+      const hp = e.hp!==undefined ? e.hp : (e.dhp!==undefined ? e.dhp : 1);
+      if (hp < hpNow){ hpNow = hp; stall = 0; }
+      else if (++stall >= 4) break;
     }
+    if (enemies.indexOf(e) < 0) stats.kills1++;
     if (fired){
       stats.bursts++;
       if (enemies.indexOf(e) < 0){ stats.killed++; foeFail.delete(e); return true; }
@@ -670,6 +719,11 @@ const NOFOES = /[?&]nofoes/.test(location.search);
 function newRun(){
   return {
     refused: new Map(),        // cell -> failures. LOCAL: "not reachable from here"
+    /* Where it has stood, and how often. Walking the same cell EX.loop times
+       is the machine version of pacing a room: the area is worked out and the
+       next objective has to be somewhere else. `bored` is the set of approach
+       cells that judgement has retired. */
+    been: new Map(), bored: new Set(),
     counted: new Set(),        // a cell is counted as a guess once, not once per step
     wander: 0,                 // steps spent walking without finding work
     stuck: 0,                  // consecutive failures to travel
@@ -678,6 +732,275 @@ function newRun(){
     acted: 0, walked: 0, peak: 0, dry: 0, retried: false,
     note: 'starting', done: null, label: ''
   };
+}
+
+/* ==========================================================================
+   THE EXPLORER
+   ==========================================================================
+   Everything above this point moves in straight lines. closeOn() points at a
+   cell and holds forward; followLine() walks the LONGEST clear sightline it
+   can see. Neither can go round a corner, and that is the whole of the bot's
+   navigation.
+
+   The evidence, from a watched four-zone run: it threw at step 483 having
+   walked 76,395 metres and jumped 8,125 times to perform 70 actions — 366
+   walks against 70 things done. Marcelo took the controls and freed it by
+   TURNING SIDEWAYS. The way down was one corner away and invisible to a
+   machine that only ever asks "what is the longest thing I can see from
+   exactly here".
+
+   So: a map, and a route over it.
+
+     mapNow()   floods outward from the player's feet over cells it could
+                really STAND in, using the moves the body really has — walk
+                level, step up, fall, or spend one of its twenty jumps. It
+                comes back with a true walking distance to every reachable
+                cell and the parent chain to get there.
+     routeTo()  walks that chain one cell at a time. Consecutive cells are
+                adjacent, so every single leg IS a clear straight line, which
+                is why this reaches what closeOn cannot.
+     workNow()  every block still worth opening, sorted by WALKING distance
+                rather than by how far away it looks.
+
+   And it moves like something alive while it does it: a leg is walked with a
+   lateral weave and a swept head, so crossing a room sweeps the room instead
+   of drawing a line through it. Marcelo asked for that in as many words —
+   "not by point always toward the target, but to everything around it all
+   times" — and it is not decoration: walking three metres off the centre line
+   changes what has line of sight to you, which is the entire input to this
+   bot.
+   ========================================================================== */
+
+/* Settings, so a run can be tailored to a dungeon instead of recompiled.
+   ?ex=climb:3,loop:4,route:0   — route:0 restores the old straight line, which
+   is how the router gets to prove it earns its place. */
+const EX = {
+  climb:  2,     // cells it believes it can get UP in one move (a jump clears 2.14)
+  fall:  10,     // cells it will drop without thinking about it
+  loop:   3,     // times over one cell before that region is called worked out
+  legs:  14,     // most waypoints walked in one routeTo, so a step stays bounded
+  weave: 0.55,   // lateral wander while travelling, in blocks
+  sweep: 0.85,   // how far the head swings off the direction of travel, radians
+  route:  1,     // 0 = straight lines only, the old behaviour
+  farFirst: 0,   // 1 = always head for the FARTHEST work (pure exploration)
+  kill:  30,     // most shots poured into one enemy before breaking off
+  killHell: 90   // and into a finale creature, which has real hit points
+};
+(function(){
+  const m = /[?&]ex=([^&]+)/.exec(location.search);
+  if (!m) return;
+  for (const part of decodeURIComponent(m[1]).split(',')){
+    const [k,v] = part.split(':');
+    if (k in EX && v !== undefined && isFinite(+v)) EX[k] = +v;
+  }
+})();
+
+/* ---------------- the map ---------------- */
+const MAPN = () => G.nx*G.ny*G.nz;
+let mDist = null, mFrom = null, mStamp = -1, mFrom0 = -1, mReached = 0;
+
+/* Can the body stand here? One air cell is enough headroom — a player is 2 m
+   and a block is 2.8 — and something solid has to be underfoot. Outside the
+   grid counts as bedrock, so the floor of the world is solid by construction. */
+function standAt(x,y,z){
+  if (!inside(x,y,z)) return false;
+  if (isSolidCell(x,y,z)) return false;
+  return isSolidCell(x,y-1,z);
+}
+/* The cell it is standing in right now — or, mid-fall, the one it is about to
+   land in. A map rooted in mid-air reaches nothing. */
+function footCell(){
+  const [x,y,z] = pcell();
+  for (let k=0;k<=EX.fall;k++) if (standAt(x,y-k,z)) return idx(x,y-k,z);
+  for (let k=1;k<=2;k++)       if (standAt(x,y+k,z)) return idx(x,y+k,z);
+  return inside(x,y,z) ? idx(x,y,z) : -1;
+}
+
+/* One flood. Costs about thirty thousand operations on the largest board there
+   is, which is bounded work that does not grow with how lost the bot is — the
+   old router's real sin was scoring the whole reachable set EVERY STEP and
+   then throwing it away. This one is kept and reused for EX.remap steps. */
+function mapNow(force){
+  const N = MAPN();
+  const root = footCell();
+  if (!force && mDist && mFrom0 === root && mStamp === G.revealed + G.marked)
+    return {dist:mDist, from:mFrom, root, reached:mReached};
+  if (!mDist || mDist.length !== N){ mDist = new Int32Array(N); mFrom = new Int32Array(N); }
+  mDist.fill(-1); mFrom.fill(-1);
+  mFrom0 = root; mStamp = G.revealed + G.marked; mReached = 0;
+  if (root < 0) return {dist:mDist, from:mFrom, root, reached:0};
+
+  const q = new Int32Array(N);
+  let head = 0, tail = 0;
+  q[tail++] = root; mDist[root] = 0; mReached = 1;
+  const DIRS = [[1,0],[-1,0],[0,1],[0,-1]];
+  while (head < tail){
+    WD();
+    const cur = q[head++];
+    const [x,y,z] = cellXYZ(cur);
+    const d = mDist[cur];
+    for (const [dx,dz] of DIRS){
+      const nx = x+dx, nz = z+dz;
+      if (!inside(nx,y,nz) && !inside(nx,y,nz)) continue;
+      /* Which floor does this column offer? Take the one nearest to the level
+         it is walking at: stepping up beats climbing, and a small drop beats
+         a long one. Anything within EX.climb above is a jump it really has,
+         anything within EX.fall below is a drop it really survives. */
+      let best = -1, bd = 99;
+      for (let ny = y+EX.climb; ny >= y-EX.fall; ny--){
+        if (!standAt(nx,ny,nz)) continue;
+        const gap = Math.abs(ny-y);
+        if (gap < bd){ bd = gap; best = ny; }
+      }
+      if (best < 0) continue;
+      /* Getting up there means the space above its head has to be free too.
+         Without this it "climbs" through a ceiling and the route is a lie. */
+      if (best > y){
+        let blocked = false;
+        for (let ny=y+1; ny<=best; ny++)
+          if (isSolidCell(x,ny,z)){ blocked = true; break; }
+        if (blocked) continue;
+      }
+      const nb = idx(nx,best,nz);
+      if (mDist[nb] >= 0) continue;
+      mDist[nb] = d+1; mFrom[nb] = cur; mReached++;
+      q[tail++] = nb;
+    }
+  }
+  return {dist:mDist, from:mFrom, root, reached:mReached};
+}
+
+/* Where to stand to work on a block: the reachable cell nearest to it. */
+function approachTo(cell, M){
+  const [tx,ty,tz] = cellXYZ(cell);
+  let best = -1, bd = 1e9;
+  for (let dy=-2; dy<=2; dy++) for (let dz=-3; dz<=3; dz++) for (let dx=-3; dx<=3; dx++){
+    const x=tx+dx, y=ty+dy, z=tz+dz;
+    if (!inside(x,y,z)) continue;
+    const i = idx(x,y,z);
+    if (M.dist[i] < 0) continue;
+    /* Cheap tie-break: near the block, but reached without a detour. */
+    const score = (dx*dx+dy*dy+dz*dz) + M.dist[i]*0.35;
+    if (score < bd){ bd = score; best = i; }
+  }
+  return best;
+}
+
+/* The chain of cells from where it stands to where it wants to be. */
+function pathTo(goal, M){
+  if (goal < 0 || M.dist[goal] < 0) return null;
+  const out = [];
+  let c = goal;
+  while (c >= 0 && c !== M.root){ out.push(c); c = M.from[c]; if (out.length > 4000) return null; }
+  out.reverse();
+  return out;
+}
+
+/* ---------------- walking it ----------------
+   One leg is one cell. The straight line between two adjacent standable cells
+   is always walkable, which is exactly the property closeOn never had. */
+let weavePhase = 0;
+function walkLeg(cell, urgency){
+  const [cx,cy,cz] = cellXYZ(cell);
+  const tx=(cx+0.5)*BLOCK, ty=cy*BLOCK, tz=(cz+0.5)*BLOCK;
+  /* A leg is ONE CELL — 2.8 m at 7.5 m/s is under four tenths of a second.
+     The budget is what it costs when the walk goes wrong, and every tenth of
+     it is thirty ticks of physics, so it is deliberately mean. */
+  const up = ty > P.y + BLOCK*0.55;
+  const budget = up ? 1.0 : 0.6;
+  let stuck = 0, best = 1e9;
+  for (let k=0;k<budget/DT;k++){
+    let dx = tx-P.x, dz = tz-P.z;
+    const flat = Math.hypot(dx,dz);
+    if (flat < BLOCK*0.42 && Math.abs(P.y-ty) < BLOCK*1.2){ IN.f=0; IN.jumpHeld=false; return true; }
+    if (flat < best-0.04){ best = flat; stuck = 0; }
+    else if (++stuck > 0.5/DT){ IN.f=0; IN.jumpHeld=false; return false; }
+    /* THE WEAVE. Push the aim point sideways on a slow sine, so a long leg is
+       walked as an arc across the corridor rather than down its middle. It
+       sees round more and it reads as something alive rather than something on
+       rails. Urgency shrinks it: closing on a target goes straight. */
+    weavePhase += DT*2.4;
+    const amp = EX.weave*BLOCK*(1-urgency);
+    if (amp > 0.01 && flat > BLOCK*1.2){
+      const s = Math.sin(weavePhase)*amp/flat;
+      const px = -dz*s, pz = dx*s;               // perpendicular, on the flat
+      dx += px; dz += pz;
+    }
+    /* THE HEAD. It looks around while it travels instead of staring at where
+       it is going. Sightlines are the bot's only sense, so this is not a
+       flourish — it is what notices the passage it walks past. */
+    const face = Math.atan2(-dx,-dz);
+    P.yaw = face + Math.sin(weavePhase*0.63)*EX.sweep*(1-urgency);
+    P.pitch = Math.sin(weavePhase*0.41)*0.22*(1-urgency);
+    IN.f = 1;
+    if (up && (P.ground || (P.vy < 1.0 && P.jumps < MAX_JUMPS))) jumpNow();
+    else IN.jumpHeld = false;
+    if (!tick()){ IN.f=0; IN.jumpHeld=false; return false; }
+    stats.walked += SPD_RUN*DT;
+  }
+  IN.f=0; IN.jumpHeld=false;
+  return Math.hypot(tx-P.x, tz-P.z) < BLOCK*0.9;
+}
+
+/* Go to a cell by ROUTE. Returns how far it actually moved, so a caller can
+   tell "walked" from "pressed into a wall for two seconds" — the distinction
+   three separate bugs in this file turned on. */
+function routeTo(cell, stopWhen){
+  PH('routeTo'); WD();
+  const x0=P.x, y0=P.y, z0=P.z;
+  const M = mapNow();
+  const goal = approachTo(cell, M);
+  const path = pathTo(goal, M);
+  if (!path){ stats.routeNone++; return 0; }
+  stats.routes++;
+  const legs = Math.min(path.length, EX.legs);
+  for (let k=0;k<legs;k++){
+    /* Urgency ramps as it arrives: it wanders across the room and then walks
+       the last few metres straight at the thing. */
+    const urgency = Math.min(1, (k+1)/Math.max(1,legs-2));
+    if (!walkLeg(path[k], urgency)) { stats.routeStuck++; break; }
+    if (G.state !== 'play') break;
+    if (stopWhen && stopWhen()) break;
+  }
+  IN.f=0; IN.jumpHeld=false;
+  P.pitch = 0;
+  const moved = Math.hypot(P.x-x0, P.y-y0, P.z-z0);
+  if (moved > BLOCK*0.5) stats.routeWon++;
+  return moved;
+}
+
+/* The one call the ladder makes: get near this cell, however you have to.
+   Straight line first because it is free when it works, then the route. The
+   A/B that decided this lives in the counters — routeSaved is how many targets
+   the straight line failed and the map reached. */
+function goTo(cell){
+  const before = clearLine(cell);
+  if (before) return true;
+  const px=P.x, py=P.y, pz=P.z;
+  if (closeOn(cell) && clearLine(cell)) return true;
+  if (!EX.route) return false;
+  const moved = routeTo(cell, ()=>inView(cell));
+  if (moved > BLOCK*0.5 && clearLine(cell)){ stats.routeSaved++; return true; }
+  return Math.hypot(P.x-px,P.y-py,P.z-pz) > BLOCK*0.5 ? false : false;
+}
+
+/* ---------------- what is worth doing, in walking order ----------------
+   Every block still shut that touches somewhere it can stand. Sorted by how
+   far it must WALK, not by how far away it looks — which is the whole
+   difference between "that wall is four metres off" and "that wall is four
+   metres off and forty metres round". */
+function workNow(M, skip){
+  const N = MAPN(), out = [];
+  for (let i=0;i<N;i++){
+    if (G.st[i] !== SOLID || G.mine[i]) continue;
+    let touch = -1;
+    for (const j of nbrsOf(i)) if (M.dist[j] >= 0 && (touch < 0 || M.dist[j] < M.dist[touch])) touch = j;
+    if (touch < 0) continue;
+    if (skip && skip.has(touch)) continue;
+    out.push({cell:i, d:M.dist[touch], via:touch});
+  }
+  out.sort((a,b)=> EX.farFirst ? b.d-a.d : a.d-b.d);
+  return out;
 }
 
 function climb(R){
@@ -696,6 +1019,23 @@ function climb(R){
   if (G.state !== 'play'){ R.done = diedHow();  return false; }
 
   if (NOFOES && enemies.length) enemies.length = 0;
+
+  /* --- 0. AM I GOING IN CIRCLES? Standing on the same cell for the EX.loop-th
+     time means this pocket has been walked out. Retire it as an approach so
+     the next objective is chosen somewhere else, and say so — "walking a
+     sightline (224)" told nobody anything. --- */
+  {
+    const here = footCell();
+    if (here >= 0){
+      const n = (R.been.get(here)||0) + 1;
+      R.been.set(here, n);
+      if (n === EX.loop && !R.bored.has(here)){
+        R.bored.add(here); stats.bored++;
+        /* Boredom has to expire or it eventually retires the whole level. */
+        if (R.bored.size > 90){ R.bored.clear(); R.been.clear(); stats.reroutes++; }
+      }
+    }
+  }
 
   /* --- 1. STAY ALIVE. Everything else assumes there is a player left. --- */
   if (G.boss && enemies.length){
@@ -842,6 +1182,17 @@ function climb(R){
      from here and now. Past that, walk at it. The area is finished before it
      goes looking for another — the priority asked for after it was watched
      leaving a wall of unopened blocks behind it. --- */
+  /* TWO PASSES, and they are not interchangeable. The first only SHOOTS —
+     trying a target that is already in the open costs a few rays, so try them
+     all. The second WALKS, and it walks at exactly ONE thing.
+
+     The old loop did both in one pass, so every target it could not shoot cost
+     a journey: up to eighty journeys inside a single step, each one seconds of
+     walking into whatever was in the way. That is where "76,395 metres for 70
+     actions" came from, and it is the wall-to-wall pacing seen on the watch
+     page. Bolting a better route onto a loop that takes eighty of them makes
+     it eighty times worse, not better. */
+  let reach = null;
   for (const w of s.work.concat(s.seenFar)){
     if (G.st[w.cell] !== SOLID || giveUp(w.cell)) continue;
     if (!R.counted.has(w.cell)){
@@ -849,7 +1200,9 @@ function climb(R){
       if (G.mine[w.cell]) stats.guessMines++;
     }
     if (G.mine[w.cell]) continue;
-    if (w.d <= GUN && clearLine(w.cell)){
+    /* inView, not clearLine: clearLine SIDESTEPS to try to clear the shot, and
+       eighty sidesteps a step is its own version of the same bug. */
+    if (w.d <= GUN && inView(w.cell)){
       const before = G.revealed;
       stats.lastAct = 'dig';
       shoot(); stats.shots++;
@@ -859,11 +1212,27 @@ function climb(R){
       }
       refuse(w.cell); continue;
     }
+    if (!reach) reach = w;                     // the nearest one worth walking to
+  }
+  if (reach){
+    /* One look, one straight line, one route. Then the step ends whatever
+       happened, and the next scan decides again from wherever it ended up. */
+    if (clearLine(reach.cell)){
+      const before = G.revealed;
+      stats.lastAct = 'dig';
+      shoot(); stats.shots++;
+      if (G.revealed > before){
+        R.refused.delete(reach.cell);
+        return A('dug visible work '+reach.d.toFixed(0)+' m off', 'dig');
+      }
+    }
     const px = P.x, py = P.y, pz = P.z;
-    closeOn(w.cell);
+    closeOn(reach.cell);
     if (Math.hypot(P.x-px, P.y-py, P.z-pz) > BLOCK*0.5)
-      return W('going to visible work '+w.d.toFixed(0)+' m off');
-    refuse(w.cell);
+      return W('going to visible work '+reach.d.toFixed(0)+' m off');
+    if (EX.route && routeTo(reach.cell, ()=>inView(reach.cell)) > BLOCK*0.5)
+      return W('routing to visible work '+reach.d.toFixed(0)+' m off');
+    refuse(reach.cell);
   }
 
   /* --- 9. THE LAST FEW. The game only lets a number plant flags once every
@@ -912,35 +1281,41 @@ function climb(R){
      is how it announced "nothing left it can reach anywhere" with 17 safe
      blocks and 9 mines still on the board. --- */
   {
-    const N = G.nx*G.ny*G.nz;
-    let tgt = -1, td = 1e9;
     if (R.travelTry++ % 10 === 9) R.refused.clear();
-    for (let i=0;i<N;i++){
-      if (G.st[i] !== SOLID || G.mine[i]) continue;
-      let touches = false;
-      for (const j of nbrsOf(i)) if (G.st[j] === AIR){ touches = true; break; }
-      if (!touches) continue;
-      const c = cellXYZ(i);
-      const d = Math.hypot((c[0]+.5)*BLOCK-P.x, (c[1]+.5)*BLOCK-P.y, (c[2]+.5)*BLOCK-P.z);
-      if (d < td){ td = d; tgt = i; }
+    const M = mapNow();
+    /* Sorted by how far it must WALK. The old sort was straight-line distance,
+       which is why it kept choosing a wall four metres away and forty round,
+       and why the route Marcelo could see — shorter on foot, longer as the
+       crow flies — was invisible to it. */
+    let list = workNow(M, R.bored);
+    if (!list.length && R.bored.size){         // everywhere is boring: look again
+      R.bored.clear(); R.been.clear(); stats.reroutes++;
+      list = workNow(M, null);
     }
+    const tgt = list.length ? list[0].cell : -1;
     if (tgt >= 0){
+      const td = list[0].d;
       const px = P.x, py = P.y, pz = P.z;
       if (clearLine(tgt)){
         const before = G.revealed;
         stats.lastAct = 'travel-dig';
         shoot(); stats.shots++;
-        if (G.revealed > before) return A('dug toward the work, '+td.toFixed(0)+' m off', 'travel');
+        if (G.revealed > before) return A('dug toward the work, '+td+' cells off', 'travel');
         refuse(tgt);
       }
+      if (EX.route && routeTo(tgt, ()=>inView(tgt)) > BLOCK*0.5)
+        return W('routing to work '+td+' cells away'+(R.bored.size?' ('+R.bored.size+' worked out)':''));
       closeOn(tgt);
       if (Math.hypot(P.x-px, P.y-py, P.z-pz) > BLOCK*0.5)
-        return W('closing on work '+td.toFixed(0)+' m away');
-      /* closeOn can report success while going nowhere — it "walked", into a
-         wall. Only real displacement counts. Anything else means entangled:
-         hug the wall, which traces the pocket until it finds the way out. */
+        return W('closing on work '+td+' cells away');
+      /* Neither the route nor the straight line moved it. Only real
+         displacement counts — closeOn can report success while pressing into a
+         wall. Anything else means entangled: hug the wall, which traces the
+         pocket until it finds the way out. */
       refuse(tgt);
       if (R.stuck++ < 14 && wallFollow()) return W('following the wall out ('+R.stuck+')');
+    } else if (M.reached <= 1){
+      R.note = 'the map reaches nowhere from here';
     }
   }
 
@@ -966,7 +1341,12 @@ function climb(R){
        is genuinely done. */
     R.retried = true; R.dry = 0; R.wander = 0; R.stuck = 0; R.refused.clear();
   }
-  R.note = 'nothing it could reach ('+remain+' still shut)';
+  /* What the HUD says, because that is what a player reads when they are
+     lost, and "nothing it could reach" on its own never said whether the
+     board was nearly done or barely started. */
+  R.note = 'nothing reachable — ' + Math.max(0,G.mines-G.marked) + ' mines to flag, ' +
+           Math.max(0,G.safeTotal-G.revealed) + ' blocks to open, ' +
+           mapNow().reached + ' cells it can stand in';
   return true;
 }
 
@@ -986,13 +1366,27 @@ function playGame(diff, mode, label){
   audit(label+' fresh');
 
   const R = newRun(); R.label = label;
+  trail.length = 0;
   let step = 0;
   const qs = /[?&]steps=(\d+)/.exec(location.search);
   const cap = qs ? +qs[1] : Math.min(1200, G.safeTotal*3 + 300);
 
   for (; step<cap; step++){
     try{ document.body.dataset.r = label+' step '+step; }catch(e){}
-    if (!climb(R)) break;
+    wdNewStep(step);
+    /* An uncaught throw here does not fail the run, it DELETES it: the page
+       dies mid-load, nothing writes data-r, and the harness reports a wall
+       clock timeout — which reads as "endless loop" and sent me hunting one
+       that was not there. The watchdog firing is a RESULT. Print it. */
+    try{
+      if (!climb(R)) break;
+      const [fx,fy,fz] = pcell();
+      trail.push(step+' @'+fx+','+fy+','+fz+'  '+R.note);
+      if (trail.length > 400) trail.shift();
+    }catch(err){
+      R.done = 'threw: ' + err.message;
+      break;
+    }
   }
   if (!R.done) R.done = 'ran out of steps';
 
@@ -1141,6 +1535,7 @@ if (/[?&]watch/.test(location.search)){
     if (dead){ draw(); return; }
     try {
       step++;
+      wdNewStep(step);
       const alive = climb(R);
       say(step + ' ' + R.note);
       if (!alive){
@@ -1201,6 +1596,14 @@ log(`combat: killed ${stats.killed} in ${stats.bursts} engagements, ${stats.shot
     `(${stats.killed?(stats.shotAt/stats.killed).toFixed(1):'-'} per kill), ${stats.dodged} dodges, `+
     `${stats.nudges} nudges, ${stats.chases} chases, ${stats.climbs} climbs, `+
     `${stats.aimFixes} aim corrections`);
+log(`routing: ${stats.routes} routes walked, ${stats.routeWon} got somewhere, `+
+    `${stats.routeSaved} reached a target the straight line could not, `+
+    `${stats.routeStuck} snagged mid-path, ${stats.routeNone} had no path at all`);
+log(`exploring: ${stats.bored} pockets called worked out, ${stats.reroutes} full resets`);
+if (/[?&]trail/.test(location.search)){
+  log('--- the last 40 steps: cell it stood in, and what it decided ---');
+  for (const t of trail.slice(-40)) log('  '+t);
+}
 log(errCount ? `FAULTS: ${errCount} (${seen.size} distinct)` : 'FAULTS: none');
 for (const e of errs) log('  ! '+e);
 
