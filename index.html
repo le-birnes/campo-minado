@@ -642,7 +642,18 @@ const REACH   = 13*BLOCK;
 /* In BLOCK, not in metres. It was a flat 0.45 back when a cube was 4 m wide;
    left flat, a smaller cube would keep the same fat hitbox and numbers would
    steal even more shots than the third they already steal. */
-const NUM_R   = BLOCK*0.1125;  // number hit radius: smaller than the glyph (~0.52),
+/* Every glyph in the cave, scaled together. 60% smaller: a digit was a
+   painted sign the size of the block it belonged to, and a hundred at once is
+   signage rather than a board you can read. One number for all of them keeps
+   a digit, its arrows and its echo the same size relative to each other,
+   which is the only thing that matters. Declared HERE rather than with the
+   rest of the lighting knobs so the hit radius below can use it: a glyph you
+   can no longer see is not allowed to keep stealing shots aimed past it. */
+const NUM_SCALE = (function(){
+  const m = /[?&]numSize=([\d.]+)/.exec(location.search);
+  return m ? parseFloat(m[1]) : 0.40;
+})();
+const NUM_R   = BLOCK*0.1125*NUM_SCALE;  // hit radius: smaller than the glyph,
                         // (see MARK_NUM_R for the tighter right-click radius)
                         // or the number steals shots aimed at the block behind
 const ECHO_DUR= 3.45;   // echo duration on neighboring blocks (75% of 4.6)
@@ -656,7 +667,7 @@ const ECHO_DUR= 3.45;   // echo duration on neighboring blocks (75% of 4.6)
    distance is ~0 by construction — collinear is collinear. Left here, unused,
    with the number that retired it, so nobody wires it up again expecting a fix.
    A real fix would separate the two actions by range, not by radius. */
-const MARK_NUM_R = BLOCK*0.05;   // unused: see above
+const MARK_NUM_R = BLOCK*0.05*NUM_SCALE;   // unused: see above
 const HINT_DUR= 9.0;    // hints hold longer: you are meant to read them
 const FUSE_T  = 0.85;   // the hit mine glows before taking everything
 
@@ -7179,6 +7190,7 @@ function frame(now){
     const put=(x,y,z,sw,sh,tile,col,a,rot,face)=>{
       if(n>=glyphB.max) return;
       const o=n*BB_STRIDE, uv=UVS[tile];
+      sw*=NUM_SCALE; sh*=NUM_SCALE;
       d[o]=x; d[o+1]=y; d[o+2]=z; d[o+3]=sw; d[o+4]=sh;
       d[o+5]=uv[0]; d[o+6]=uv[1]; d[o+7]=uv[2]; d[o+8]=uv[3];
       /* Lit by the same flags and fireflies the stone is, plus the staff you
