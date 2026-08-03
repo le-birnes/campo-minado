@@ -2428,15 +2428,76 @@ const snd = (function(){
       return true;
     }catch(e){ return false; }
   }
-  function env(node, a, d, peak){
-    const g=ac.createGain(); g.gain.setValueAtTime(0.0001, ac.currentTime);
-    g.gain.exponentialRampToValueAtTime(peak, ac.currentTime+a);
-    g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime+a+d);
-    node.connect(g); g.connect(master); return g;
+  /* t0 delays the whole envelope. A gunshot is layered in TIME as well as in
+     frequency — the room answers a few milliseconds after the muzzle and the
+     shell leaves later still — and without a delay every layer had to start
+     together, which is most of why the old one landed as a single beat. */
+  function env(node, a, d, peak, t0, dest){
+    const t = ac.currentTime + (t0||0);
+    const g=ac.createGain();
+    g.gain.setValueAtTime(0.0001, ac.currentTime);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(peak, t+a);
+    g.gain.exponentialRampToValueAtTime(0.0001, t+a+d);
+    node.connect(g); g.connect(dest||master); return g;
+  }
+  /* A soft knee, and the reason the shotgun goes through one. Six layers whose
+     peaks land inside two milliseconds of each other add up to whatever the
+     noise happens to be doing, so the level is a dice roll: tuned to a safe
+     0.65 it was quieter than the old sound, and tuned to be loud it clipped on
+     the unlucky shells. tanh both makes that impossible and does the thing
+     that actually makes a recorded gunshot sound loud, which is saturating on
+     the way in. Push the layers past 1.0 on purpose and let this catch them. */
+  let SAT = null;
+  function sat(drive, dest){
+    if(!SAT){
+      SAT = new Float32Array(1025);
+      const k = Math.tanh(1.7);
+      for(let i=0;i<1025;i++){
+        const x = i/512 - 1;
+        SAT[i] = 0.985*Math.tanh(x*1.7)/k;
+      }
+    }
+    const w = ac.createWaveShaper();
+    /* 'none', deliberately. 2x oversampling runs the signal through a
+       resampling filter, and that filter costs about three milliseconds of
+       smear — which turned a 1.7 ms attack into 4.4 ms and handed the snap
+       straight back to the drum. The aliasing it would have prevented is
+       broadband hiss folded into broadband hiss, which is inaudible here. */
+    w.curve = SAT; w.oversample = 'none';
+    const g = ac.createGain(); g.gain.value = drive;
+    g.connect(w); w.connect(dest||master);
+    return g;
   }
   function noise(dur){
     const b=ac.createBuffer(1, Math.max(1,(ac.sampleRate*dur)|0), ac.sampleRate);
     const d=b.getChannelData(0); for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
+    const s=ac.createBufferSource(); s.buffer=b; return s;
+  }
+  /* Flat noise is a hiss. This is a SHOWER: every sample either starts a new
+     fragment — a ping that dies in a couple of milliseconds — or carries on
+     the one before it, and the chance of a new one falls away across the
+     buffer so the crackle thins instead of stopping dead.
+
+     One buffer rather than forty scheduled sources, because forty sources on
+     every trigger pull is how a browser starts dropping frames, and this is
+     the sound the player makes most often in the whole game.
+
+       dur      how long the shower lasts
+       density  chance per sample of a new fragment at the very start
+       life     how long one fragment rings, in seconds */
+  function grain(dur, density, life){
+    const sr=ac.sampleRate, N=Math.max(1,(sr*dur)|0);
+    const b=ac.createBuffer(1, N, sr);
+    const d=b.getChannelData(0);
+    const k=Math.exp(-1/(life*sr));          // per-sample decay of one fragment
+    let a=0;
+    for(let i=0;i<N;i++){
+      const p=i/N;
+      if(Math.random() < density*(1-p)*(1-p)) a = 0.35 + Math.random()*0.65;
+      d[i] = (Math.random()*2-1)*a;
+      a *= k;
+    }
     const s=ac.createBufferSource(); s.buffer=b; return s;
   }
   const on = ()=> ensure() && !G.muted;
@@ -2629,7 +2690,7 @@ const snd = (function(){
     }
   }
 
-  return {
+  const API = {
     resume(){ if(ensure() && ac.state==='suspended') ac.resume(); },
     setMute(m){ if(master) master.gain.value = m?0:0.5; },
     /* Custom boards pass null and stay silent, on purpose: it is the mode you
@@ -2646,22 +2707,71 @@ const snd = (function(){
     musicVol(v){ mVol=v; if(mBus) mBus.gain.value = mMuted?0:v; },
     musicMute(m){ mMuted=m; if(mBus) mBus.gain.value = m?0:mVol; },
     musicIsMuted(){ return mMuted; },
+    /* A shotgun is not a drum, and the old one was a drum: a swept noise burst
+       over a sine thump, both starting on the same sample and both gone in a
+       fifth of a second. That is a kick with hiss on it, which is exactly what
+       it sounded like.
+
+       What a shell actually is: a pressure front that arrives all at once, a
+       broadband CRACK that collapses inside a tenth of a second, the crackle
+       of a great many burning fragments leaving the barrel behind it, and then
+       the room answering. Six layers, spread across frequency AND across time,
+       and layer three is the one that was never there. */
     shotgun(){ if(!on())return;
-      /* A crack of noise over a low thump, then the shell rattling out. Nothing
-         tonal — the staff's descending sawtooth is what a wand sounds like. */
-      const n1=noise(0.22);
-      const f=ac.createBiquadFilter(); f.type='bandpass';
-      f.frequency.setValueAtTime(2200, ac.currentTime);
-      f.frequency.exponentialRampToValueAtTime(420, ac.currentTime+0.16);
-      f.Q.value=0.8;
-      n1.connect(f); env(f,0.002,0.20,0.55); n1.start(); n1.stop(ac.currentTime+0.26);
+      const t = ac.currentTime;
+      /* No two shells are alike. Without this a fast trigger finger sounds
+         like machinery, because it IS the same fifth of a second end to end. */
+      const v = 0.92 + Math.random()*0.16;
+      const bus = sat(1.0);
+
+      /* 1. THE SNAP — a hundredth of a second, nearly all of it above 3 kHz.
+         This is what reads as a gun on a laptop speaker instead of a thud. */
+      const snap=noise(0.03);
+      const sf=ac.createBiquadFilter(); sf.type='highpass'; sf.frequency.value=3400*v;
+      snap.connect(sf); env(sf,0.0006,0.026,0.40,0,bus);
+      snap.start(t); snap.stop(t+0.05);
+
+      /* 2. THE CRACK — the blast proper. Wide Q on purpose: a blast has no
+         pitch, and the old Q of 0.8 was narrow enough to give it one. */
+      const n1=noise(0.30);
+      const f1=ac.createBiquadFilter(); f1.type='bandpass';
+      f1.frequency.setValueAtTime(2600*v, t);
+      f1.frequency.exponentialRampToValueAtTime(360, t+0.13);
+      f1.Q.value=0.5;
+      n1.connect(f1); env(f1,0.0015,0.15,0.72,0,bus);
+      n1.start(t); n1.stop(t+0.32);
+
+      /* 3. THE FRAGMENTS — the crackle. */
+      const gr=grain(0.22, 0.020, 0.0025);
+      const gf=ac.createBiquadFilter(); gf.type='highpass'; gf.frequency.value=1500;
+      gr.connect(gf); env(gf,0.004,0.20,0.40,0.002,bus);
+      gr.start(t+0.002); gr.stop(t+0.26);
+
+      /* 4. THE PUNCH — chest, not ears. Two voices, so it has a body rather
+         than just a pitch. */
       const o=ac.createOscillator(); o.type='sine';
-      o.frequency.setValueAtTime(120, ac.currentTime);
-      o.frequency.exponentialRampToValueAtTime(42, ac.currentTime+0.13);
-      env(o,0.002,0.16,0.5); o.start(); o.stop(ac.currentTime+0.2);
-      const n2=noise(0.10);
-      const hp=ac.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=3800;
-      n2.connect(hp); env(hp,0.03,0.12,0.10); n2.start(ac.currentTime+0.14); n2.stop(ac.currentTime+0.3);
+      o.frequency.setValueAtTime(190*v, t);
+      o.frequency.exponentialRampToValueAtTime(38, t+0.12);
+      env(o,0.0015,0.17,0.56,0,bus); o.start(t); o.stop(t+0.22);
+      const o2=ac.createOscillator(); o2.type='triangle';
+      o2.frequency.setValueAtTime(96*v, t);
+      o2.frequency.exponentialRampToValueAtTime(30, t+0.16);
+      env(o2,0.003,0.20,0.24,0,bus); o2.start(t); o2.stop(t+0.26);
+
+      /* 5. THE ROOM — you are underground and the walls answer, dark and late.
+         Twelve milliseconds is about four metres of stone. */
+      const tail=noise(1.10);
+      const ft=ac.createBiquadFilter(); ft.type='lowpass';
+      ft.frequency.setValueAtTime(1500, t);
+      ft.frequency.exponentialRampToValueAtTime(140, t+0.85);
+      tail.connect(ft); env(ft,0.03,0.95,0.22,0.012,bus);
+      tail.start(t+0.012); tail.stop(t+1.15);
+
+      /* 6. THE SHELL, on its way out. */
+      const n2=grain(0.10, 0.006, 0.0016);
+      const hp=ac.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=4200;
+      n2.connect(hp); env(hp,0.02,0.11,0.10,0.16,bus);
+      n2.start(t+0.16); n2.stop(t+0.32);
     },
     shot(){ if(!on())return;
       const o=ac.createOscillator(); o.type='sawtooth';
@@ -2803,6 +2913,28 @@ const snd = (function(){
       o.start(); o2.start(); o.stop(ac.currentTime+3.6); o2.stop(ac.currentTime+3.6);
     }
   };
+
+  /* Render one effect into a buffer instead of into the room, so a sound can
+     be MEASURED. Everything else in this game is checked by counting
+     something; sound was the last thing that could only be argued about, and
+     "it sounds like a drum" is a real defect with no test behind it.
+
+     Swaps the module's own context for an offline one, calls the effect
+     exactly as the game does, renders, and puts the real context back — so
+     what gets measured is the shipping code path and not a copy of it. */
+  API.render = function(name, secs){
+    if(typeof OfflineAudioContext === 'undefined') return null;
+    const keepAc = ac, keepMaster = master, keepMuted = G.muted;
+    const off = new OfflineAudioContext(1, Math.ceil(44100*secs), 44100);
+    ac = off;
+    master = off.createGain(); master.gain.value = 1; master.connect(off.destination);
+    G.muted = false;
+    let p = null;
+    try { API[name].call(API); p = off.startRendering(); }
+    finally { ac = keepAc; master = keepMaster; G.muted = keepMuted; }
+    return p;
+  };
+  return API;
 })();
 
 /* ==========================================================================
