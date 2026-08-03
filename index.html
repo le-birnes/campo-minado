@@ -861,6 +861,19 @@ in vec2 vUV;
 in float vSeed, vEmis, vMark, vEcho, vHover;
 uniform vec3 uCam, uSun, uFog;
 uniform float uTime, uOutline, uAlpha, uWallGrey, uEdgeSolid;
+/* THE LIGHTS IN THE ROOM.
+   xyz is where it is and w is how far it carries; the colour carries its peak
+   in rgb and its INNER radius in a. Inside the inner radius a light is at full
+   strength, between inner and outer it drops to three tenths, and past outer
+   it is nothing at all — a hard limit, not a curve going quietly to zero.
+   That is deliberate: a flag is a landmark, and a landmark has an edge you can
+   see. Lights add where they overlap, so two flags light a corner better than
+   one and a room with a dozen fireflies in it is genuinely lit. */
+#define MAXL 48
+uniform vec4 uLight[MAXL];
+uniform vec4 uLightC[MAXL];
+uniform int uLightN;
+uniform float uDark;
 out vec4 frag;
 float hash(vec2 p, float s){ return fract(sin(dot(p, vec2(127.1,311.7)) + s*13.37) * 43758.5453); }
 void main(){
@@ -918,13 +931,48 @@ void main(){
      to the sun, right up against the lantern). Past that the bands blow out. */
   vec3 sky = vec3(0.46,0.56,0.78), gnd = vec3(0.66,0.42,0.24);
   vec3 amb = mix(gnd, sky, N.y*0.5+0.5) * 0.36;
-  vec3 lit = base * (amb + vec3(1.25,1.02,0.72) * band * 0.54);
+  /* uDark is what is left of the sun. There is no sun down here — the verdict
+     on the old lighting was that it read as neither sand nor a place, and a
+     cave lit from an imaginary sky is a lit room with rock textures in it.
+     Turn the sky almost off and let the flags and the fireflies do the work,
+     and the cave becomes somewhere you are being kept. */
+  vec3 lit = base * (amb + vec3(1.25,1.02,0.72) * band * 0.54) * uDark;
 
   /* --- staff lantern, banded as well --- */
   float d = distance(vW, uCam);
   float att = 1.0/(1.0 + d*d*0.0042);
   att = floor(att*5.0)/5.0;
   lit += base * vec3(1.0,0.70,0.34) * att * 0.20;
+
+  /* --- what is actually lighting this place --- */
+  {
+    vec3 pl = vec3(0.0);
+    /* Bounded by the uniform, not by MAXL. Written as a constant loop with a
+       break inside, a compiler is free to UNROLL all 48 iterations and make
+       every fragment pay for lights that are not there — which is exactly what
+       happened: the Forge, which asks for none at all, got slower. GLSL ES
+       3.00 allows a non-constant bound, so use one. */
+    for(int i=0;i<uLightN;i++){
+      vec3 Lv = uLight[i].xyz - vW;
+      float dist = length(Lv);
+      float outer = uLight[i].w;
+      if(dist > outer) continue;
+      float inner = uLightC[i].a;
+      /* full inside the inner radius, three tenths out to the outer
+         one, then nothing. No backticks in here - this is a JS template
+         literal. The
+         smoothsteps are one tenth of a radius wide — enough that the two
+         plateaus do not band into visible rings, narrow enough that the
+         shape is still the flat-then-step Marcelo asked for. */
+      float k = 1.0 - smoothstep(inner, inner*1.15, dist);
+      float f = mix(0.30, 1.0, k) * (1.0 - smoothstep(outer*0.95, outer, dist));
+      /* Mostly directional, but never fully: a face turned away from a lamp in
+         a real room is dim, not black, because everything around it bounces. */
+      float nl = max(dot(N, Lv/max(dist,0.0001)), 0.0);
+      pl += uLightC[i].rgb * f * (0.28 + 0.72*nl);
+    }
+    lit += base * pl;
+  }
 
   /* --- emissive (crystals, mines, gold) --- */
   lit = mix(lit, base*1.15 + vec3(0.18,0.09,0.03), vEmis);
@@ -1051,7 +1099,11 @@ const uC = {
   hover:gl.getUniformLocation(pCube,'uHover'), outline:gl.getUniformLocation(pCube,'uOutline'),
   alpha:gl.getUniformLocation(pCube,'uAlpha'),
   wallGrey:gl.getUniformLocation(pCube,'uWallGrey'),
-  edgeSolid:gl.getUniformLocation(pCube,'uEdgeSolid')
+  edgeSolid:gl.getUniformLocation(pCube,'uEdgeSolid'),
+  light:gl.getUniformLocation(pCube,'uLight'),
+  lightC:gl.getUniformLocation(pCube,'uLightC'),
+  lightN:gl.getUniformLocation(pCube,'uLightN'),
+  dark:gl.getUniformLocation(pCube,'uDark')
 };
 const uB = {
   proj:gl.getUniformLocation(pBB,'uProj'), view:gl.getUniformLocation(pBB,'uView'),
@@ -5855,6 +5907,161 @@ const SUN = (()=>{ const v=[0.42,0.86,0.29]; const l=Math.hypot(...v); return [v
 const FOG = [0.235,0.155,0.115];
 
 let last=performance.now(), nextWhisper=25+Math.random()*30, tGlobal=0;
+
+/* ==========================================================================
+   WHAT LIGHTS THE CAVE
+   ==========================================================================
+   Nothing overhead does. The old lighting was a sun in a place with no sky,
+   which is how you get a lit room with rock textures on the walls — the
+   verdict was that it read as neither sand nor anywhere at all. So the sun is
+   turned down to a rumour and two things do the work instead.
+
+   THE FLAGS. A marked mine shines out THROUGH the block it is buried in. Full
+   strength for five blocks, three tenths at six and seven, and nothing past
+   seven — a hard edge, because a flag is a landmark and a landmark you can
+   see the end of tells you how far away it is. Every flag you plant lights
+   the ground you won, which means the cave gets brighter as you solve it.
+
+   THE FIREFLIES. Every open pocket gets its own. They are not drawn as
+   anything — no wings, no body, just a cube of pure light small enough to be
+   a point — and they carry a tenth of the light out to four blocks, which is
+   enough to say "there is a room here" and nowhere near enough to read a
+   number by. They drift.
+
+   Lights ADD where they overlap, so two flags light a corner better than one.
+   ========================================================================== */
+const MAXL       = 48;        // most lights in one frame; the shader matches
+const LIT_DARK   = 0.24;      // what is left of the sky
+const FLAG_IN    = 5;         // blocks at full strength
+const FLAG_OUT   = 8;         // the hard limit: blocks 6 and 7 get the tail,
+                              // and the fade lands inside the last fifth of
+                              // a block, so nothing at 8 gets anything
+const FLY_R      = 4;         // a firefly carries this far
+const FLY_LEVEL  = 0.10;      // and this much
+const FLY_MIN    = 9;         // an "empty area" is nine touching empty blocks
+const FLY_PER    = 26;        // one more firefly for every this many beyond
+const FLY_MAX    = 260;
+const LIGHT_FLAG = [0.72, 0.52, 1.00];   // the violet the flag already pulses
+const LIGHT_FLY  = [0.62, 0.92, 0.70];   // and something colder for the rooms
+
+/* How many lights the machine in front of you can afford. Every one of them
+   is evaluated per FRAGMENT, so this is the single most expensive number in
+   the renderer: on a GPU 48 is nothing, and on a software rasteriser 19 is
+   already too many to draw a dungeon with. ?lights=n to turn it down. */
+const LIT_CAP = Math.max(0, Math.min(MAXL,
+  +((/[?&]lights=(\d+)/.exec(location.search)||[0,MAXL])[1])));
+const lightBuf  = new Float32Array(MAXL*4);
+const lightCBuf = new Float32Array(MAXL*4);
+const flies = [];
+let fliesStamp = -1;
+
+/* Which pockets are open, and where their middles are. A pocket is a
+   six-connected run of air; anything smaller than nine cells is a crack, not a
+   room, and gets nothing. Bigger ones get more than one, spread through the
+   component rather than piled at its centroid — a long corridor lit only in
+   the middle is still a dark corridor at both ends. */
+function buildFlies(){
+  const N = G.nx*G.ny*G.nz;
+  flies.length = 0;
+  const seen = new Uint8Array(N);
+  const comp = [];
+  for(let i=0;i<N;i++){
+    if(seen[i] || G.st[i]!==AIR) continue;
+    comp.length = 0;
+    const stack=[i]; seen[i]=1;
+    while(stack.length){
+      const c = stack.pop(); comp.push(c);
+      const [x,y,z] = cellXYZ(c);
+      for(const [dx,dy,dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]){
+        const nx=x+dx, ny=y+dy, nz=z+dz;
+        if(!inside(nx,ny,nz)) continue;
+        const j = idx(nx,ny,nz);
+        if(seen[j] || G.st[j]!==AIR) continue;
+        seen[j]=1; stack.push(j);
+      }
+    }
+    if(comp.length < FLY_MIN) continue;
+    const want = Math.max(1, Math.min(14, 1 + ((comp.length - FLY_MIN)/FLY_PER)|0));
+    for(let k=0;k<want && flies.length<FLY_MAX;k++){
+      /* Evenly through the component's own ordering, which for a flood fill
+         runs along the shape rather than across it. */
+      const c = comp[Math.floor((k+0.5)/want * comp.length)];
+      const [x,y,z] = cellXYZ(c);
+      flies.push({x:(x+0.5)*BLOCK, y:(y+0.5)*BLOCK, z:(z+0.5)*BLOCK,
+                  ph: Math.random()*6.283, sp: 0.5+Math.random()*0.7,
+                  rx: 0.18+Math.random()*0.16});
+    }
+    if(flies.length >= FLY_MAX) break;
+  }
+  fliesStamp = G.revealed + G.marked;
+}
+/* Where a firefly is right now. It wanders inside its own cell and never
+   leaves it, so one can never drift into a wall. */
+function flyAt(f, out){
+  const t = tGlobal*f.sp + f.ph;
+  out[0] = f.x + Math.sin(t)*BLOCK*f.rx;
+  out[1] = f.y + Math.sin(t*1.37+1.1)*BLOCK*f.rx*0.7;
+  out[2] = f.z + Math.cos(t*0.83)*BLOCK*f.rx;
+}
+
+/* The nearest MAXL of them, packed for the shader. Everything else in the cave
+   is simply out of range of the camera and costs nothing. */
+const _fp = [0,0,0];
+let lightN = 0;
+function collectLights(cx, cy, cz){
+  if(fliesStamp !== G.revealed + G.marked) buildFlies();
+  const cand = [];
+  const N = G.nx*G.ny*G.nz;
+  const flagOut = FLAG_OUT*BLOCK, flagIn = FLAG_IN*BLOCK;
+  for(let i=0;i<N;i++){
+    if(G.st[i] !== MARKED) continue;
+    const [x,y,z] = cellXYZ(i);
+    const px=(x+0.5)*BLOCK, py=(y+0.5)*BLOCK, pz=(z+0.5)*BLOCK;
+    const d = Math.hypot(px-cx, py-cy, pz-cz);
+    if(d > flagOut + 90) continue;
+    cand.push({d, x:px, y:py, z:pz, out:flagOut, in:flagIn,
+               c:LIGHT_FLAG, k:1.0});
+  }
+  const flyOut = FLY_R*BLOCK;
+  for(const f of flies){
+    flyAt(f, _fp);
+    const d = Math.hypot(_fp[0]-cx, _fp[1]-cy, _fp[2]-cz);
+    if(d > flyOut + 90) continue;
+    /* Their own slow breathing, so a room is never quite still. */
+    const puls = 0.72 + 0.28*Math.sin(tGlobal*1.9 + f.ph);
+    cand.push({d, x:_fp[0], y:_fp[1], z:_fp[2], out:flyOut, in:flyOut,
+               c:LIGHT_FLY, k:FLY_LEVEL*puls});
+  }
+  cand.sort((a,b)=>a.d-b.d);
+  lightN = Math.min(LIT_CAP, cand.length);
+  for(let i=0;i<lightN;i++){
+    const L = cand[i], o = i*4;
+    lightBuf[o]=L.x; lightBuf[o+1]=L.y; lightBuf[o+2]=L.z; lightBuf[o+3]=L.out;
+    lightCBuf[o]=L.c[0]*L.k; lightCBuf[o+1]=L.c[1]*L.k; lightCBuf[o+2]=L.c[2]*L.k;
+    lightCBuf[o+3]=L.in;
+  }
+  return lightN;
+}
+/* The same falloff the shader uses, in JS, for the things that are not lit by
+   the cube shader — the numbers. A glyph is small and there are thousands of
+   fragments in one; evaluating this once per glyph instead of once per pixel
+   costs nothing and looks the same. */
+function lightAt(x, y, z, out){
+  let r=0, g=0, b=0;
+  for(let i=0;i<lightN;i++){
+    const o=i*4;
+    const dx=lightBuf[o]-x, dy=lightBuf[o+1]-y, dz=lightBuf[o+2]-z;
+    const d=Math.hypot(dx,dy,dz), outer=lightBuf[o+3];
+    if(d > outer) continue;
+    const inner=lightCBuf[o+3];
+    const f = (d <= inner ? 1.0 : 0.30) * (1 - Math.min(1, Math.max(0, (d-outer*0.88)/(outer*0.12))));
+    r += lightCBuf[o]*f; g += lightCBuf[o+1]*f; b += lightCBuf[o+2]*f;
+  }
+  out[0]=r; out[1]=g; out[2]=b;
+  return r+g+b;
+}
+const flyB = makeCubeBatch(MAXL);
+
 /* x,y,z,r,g,b per lit number — collected in the glyph pass, spent in the
    additive pass, so a highlighted digit gets a halo behind it too. */
 const litNums=[];
@@ -6294,6 +6501,9 @@ function fzFrame(dt){
   gl.uniform1f(uC.alpha, 1.0);
   gl.uniform1f(uC.edgeSolid, 0.0);
   gl.uniform1f(uC.wallGrey, 0.0);
+  /* Full daylight and no lamps. You cannot pick a colour in a dark room. */
+  gl.uniform1f(uC.dark, 1.0);
+  gl.uniform1i(uC.lightN, 0);
   gl.uniform3f(uC.hover, 1e9,1e9,1e9);
   drawCubes(fzB);
   fzHUD();
@@ -6570,9 +6780,37 @@ function frame(now){
   if(hover.hit && hover.kind==='block' && G.state==='play')
     gl.uniform3f(uC.hover,(hover.x+0.5)*BLOCK,(hover.y+0.5)*BLOCK,(hover.z+0.5)*BLOCK);
   else gl.uniform3f(uC.hover, 1e9,1e9,1e9);
+  /* THE LIGHTS. Gathered once and used by every cube pass in the frame, so a
+     creature standing in the glow of a flag is lit by that flag. */
+  gl.uniform1f(uC.dark, LIT_DARK);
+  gl.uniform1i(uC.lightN, collectLights(camX,camY,camZ));
+  gl.uniform4fv(uC.light,  lightBuf);
+  gl.uniform4fv(uC.lightC, lightCBuf);
   gl.uniform1f(uC.wallGrey, 0.38);
   drawCubes(worldB);
   gl.uniform1f(uC.wallGrey, 0.0);
+
+  /* The fireflies themselves: no wings, no body, no shading — a cube of pure
+     light small enough to read as a point. What they are is what they do. */
+  {
+    const d=flyB.data; let n=0;
+    for(const f of flies){
+      if(n>=flyB.max) break;
+      flyAt(f, _fp);
+      const dd = Math.hypot(_fp[0]-camX, _fp[1]-camY, _fp[2]-camZ);
+      if(dd > FLY_R*BLOCK + 40) continue;
+      const puls = 0.72 + 0.28*Math.sin(tGlobal*1.9 + f.ph);
+      const sz = BLOCK*0.055*(0.8+0.5*puls);
+      const o = n*CUBE_STRIDE;
+      composeAA(d,o, _fp[0],_fp[1],_fp[2], sz,sz,sz);
+      d[o+16]=LIGHT_FLY[0]*puls; d[o+17]=LIGHT_FLY[1]*puls; d[o+18]=LIGHT_FLY[2]*puls;
+      d[o+19]=0.5; d[o+20]=1; d[o+21]=0; d[o+22]=0;
+      d[o+23]=d[o+24]=d[o+25]=0;
+      n++;
+    }
+    flyB.count=n;
+    if(n){ gl.uniform1f(uC.outline, 0.0); drawCubes(flyB); gl.uniform1f(uC.outline, 1.0); }
+  }
 
 
   // escombros
@@ -6864,12 +7102,21 @@ function frame(now){
   litNums.length=0;
   {
     const d=glyphB.data; let n=0;
+    const _gl=[0,0,0];
     const put=(x,y,z,sw,sh,tile,col,a,rot,face)=>{
       if(n>=glyphB.max) return;
       const o=n*BB_STRIDE, uv=UVS[tile];
       d[o]=x; d[o+1]=y; d[o+2]=z; d[o+3]=sw; d[o+4]=sh;
       d[o+5]=uv[0]; d[o+6]=uv[1]; d[o+7]=uv[2]; d[o+8]=uv[3];
-      d[o+9]=col[0]; d[o+10]=col[1]; d[o+11]=col[2]; d[o+12]=a;
+      /* Lit by the same flags and fireflies the stone is, plus the staff you
+         are carrying. A digit in a room nobody has flagged is meant to be hard
+         to read — that is what the dark is FOR. The lantern term is the one
+         thing keeping the block under your nose legible. */
+      lightAt(x,y,z,_gl);
+      const _gd = Math.hypot(x-camX, y-camY, z-camZ);
+      const _gk = Math.min(1.45, LIT_DARK*0.9 + 0.85/(1.0 + _gd*_gd*0.0042)
+                                 + (_gl[0]+_gl[1]+_gl[2])*0.55);
+      d[o+9]=col[0]*_gk; d[o+10]=col[1]*_gk; d[o+11]=col[2]*_gk; d[o+12]=a;
       d[o+13]=rot||0; d[o+14]=0; d[o+15]=face||0;
       n++;
     };
@@ -7125,6 +7372,11 @@ function frame(now){
     gl.uniform3f(uC.hover, 1e9,1e9,1e9);
     gl.uniform1f(uC.outline, 0.55);
     gl.uniform3fv(uC.fog, FOG);
+    /* The thing in your hands is held at arm's length in its own little space,
+       not standing in the cave, so the cave's lamps have no business reaching
+       it — and at a metre away a flag would blow it out completely. */
+    gl.uniform1i(uC.lightN, 0);
+    gl.uniform1f(uC.dark, 1.0);
     buildViewModel(tGlobal, Math.min(1, Math.hypot(P.vx,P.vz)/SPD_RUN), aspect);
     drawCubes(viewB);
   }
