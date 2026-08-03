@@ -1091,7 +1091,14 @@ void main(){
     vec3 oc = mix(vec3(0.97,0.95,0.90), vec3(0.045,0.028,0.024),
                   smoothstep(0.13,0.32,lum));
     vec3 col = vCol.rgb * t.r + oc * t.g;
-    frag = vec4(col, t.a * vCol.a);
+    /* How lit this digit is arrives in the alpha, NOT in the colour, and that
+       is not a shortcut — it is the fix. The outline above flips to bone as
+       soon as the FILL goes dark, so dimming a number by dimming its colour
+       turned the outline white and made the number brighter. Every digit in
+       the cave was wearing a bone halo for exactly that reason. Keep the
+       colour at full strength so the outline decision is the one it was
+       always meant to be, and carry the light in alpha, applied to both. */
+    frag = vec4(col * vCol.a, t.a * vCol.a);
   }
 }`;
 
@@ -5943,7 +5950,7 @@ let last=performance.now(), nextWhisper=25+Math.random()*30, tGlobal=0;
 const litQ = k => { const m=new RegExp('[?&]'+k+'=([\d.]+)').exec(location.search);
                     return m ? parseFloat(m[1]) : null; };
 const MAXL       = 48;        // most lights in one frame; the shader matches
-const LIT_DARK   = litQ('dark')    !== null ? litQ('dark')    : 0.085;
+const LIT_DARK   = litQ('dark')    !== null ? litQ('dark')    : 0.045;
 /* What the staff throws. It is the only light you carry and the only reason a
    block under your nose is readable at all, so it cannot be zero — but it was
    0.20 and reaching fifteen metres, which is a torch, not a wand. */
@@ -5952,6 +5959,9 @@ const LIT_LANTERN= litQ('lantern') !== null ? litQ('lantern') : 0.055;
    it. Numbers were coming out at full brightness everywhere and drowning the
    dark on their own. */
 const LIT_GLYPH  = litQ('glyph')   !== null ? litQ('glyph')   : 0.055;
+/* And what is left of the fog, which is not atmosphere here so much as the
+   colour distance resolves to. Left at 1.0 it IS the ambient light. */
+const LIT_FOG    = litQ('fog')     !== null ? litQ('fog')     : 0.12;
 const FLAG_IN    = 5;         // blocks at full strength
 const FLAG_OUT   = 8;         // the hard limit: blocks 6 and 7 get the tail,
                               // and the fade lands inside the last fifth of
@@ -6782,7 +6792,15 @@ function frame(now){
 
   // ------- draw -------
   gl.viewport(0,0,W,H);
-  const FOGNOW = G.lava ? FOG_HELL : FOG;
+  /* THE FOG WAS THE BASE LIGHT, and this is the one that made "way darker"
+     come back looking the same twice. Every surface fades toward uFog with
+     distance, and FOG is 0.235 — four times brighter than a lit wall at
+     uDark 0.085. So the far end of every room converged on a warm tan glow
+     that no amount of turning the sun down could touch, because it was not
+     the sun. Scale the fog with the dark, and it is the walls that recede
+     into black instead of into daylight. */
+  const _fg = G.lava ? FOG_HELL : FOG;
+  const FOGNOW = [_fg[0]*LIT_FOG, _fg[1]*LIT_FOG, _fg[2]*LIT_FOG];
   gl.clearColor(FOGNOW[0],FOGNOW[1],FOGNOW[2],1);
   gl.enable(gl.DEPTH_TEST); gl.depthMask(true);
   gl.enable(gl.CULL_FACE); gl.cullFace(gl.BACK);
@@ -7136,9 +7154,9 @@ function frame(now){
          thing keeping the block under your nose legible. */
       lightAt(x,y,z,_gl);
       const _gd = Math.hypot(x-camX, y-camY, z-camZ);
-      const _gk = Math.min(1.30, LIT_GLYPH + 0.55/(1.0 + _gd*_gd*0.030)
-                                 + (_gl[0]+_gl[1]+_gl[2])*0.70);
-      d[o+9]=col[0]*_gk; d[o+10]=col[1]*_gk; d[o+11]=col[2]*_gk; d[o+12]=a;
+      const _gk = Math.min(1.0, LIT_GLYPH + 0.55/(1.0 + _gd*_gd*0.030)
+                                + (_gl[0]+_gl[1]+_gl[2])*0.70);
+      d[o+9]=col[0]; d[o+10]=col[1]; d[o+11]=col[2]; d[o+12]=a*_gk;
       d[o+13]=rot||0; d[o+14]=0; d[o+15]=face||0;
       n++;
     };
