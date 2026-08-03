@@ -3092,7 +3092,12 @@ function buildViewModel(t, speed, aspect){
           STAFF_TILT[2],
           hh, hh, hh);
 
-  const VIEW = G.finale ? SHOTGUN : STAFF;
+  /* The shotgun, always. It used to appear only for the finale and the wizard's
+     stick carried the rest of the game, which meant the weapon you spend
+     ninety-nine percent of a run holding was the one nobody was working on.
+     STAFF is left below, whole and unused, because the parts format is the
+     documentation for how a view model is built. */
+  const VIEW = SHOTGUN;
   for(let i=0;i<VIEW.length;i++){
     const s=VIEW[i], o=i*CUBE_STRIDE;
     compose(_L,0, s[0],s[1],s[2], s[3],s[4],s[5], s[6],s[7],s[8]);
@@ -3187,13 +3192,17 @@ function shoot(){
      it up here threw ReferenceError on EVERY shot of the finale, after recoil
      had already been set. So the weapon swung and nothing else happened at all:
      no sound, no beam, no damage. Order matters. */
+  snd.shotgun();
+  /* The KICK stays finale-only. 5.4 m/s is a launch, and a launch on every
+     block you open would rewrite the movement of the whole game — and the
+     bot's with it. The weapon is the same weapon now; what it does to the
+     person holding it still depends on what is loaded in it. */
   if(G.finale){
-    snd.shotgun();
     const kb = 5.4;                       // a shotgun shoves the one holding it
     P.vx -= r.dx*kb; P.vz -= r.dz*kb;
     P.vy += Math.max(0, -r.dy)*kb*0.35 + 1.1;
     G.shake = Math.max(G.shake, 0.10);
-  } else snd.shot();
+  }
   /* Ray recast at the instant of the shot. Reusing the hover from the last
      drawn frame swallows shots whenever two clicks land in the same frame.
      wantNum is off: left click is shooting, always. A number floating in the
@@ -3703,7 +3712,7 @@ function askHint(){
     burstAt(x,y,z, HI_MINE, 20);
     addGhost(h.target, HI_MINE, HINT_DUR, true);
   } else {
-    recoil=1; snd.shot();
+    recoil=1; snd.shotgun();
     revealAt(h.target,false);
     burstAt(x,y,z, HI_TGT, 30);
     addGhost(h.target, HI_TGT, HINT_DUR, true);   // the space it used to fill
