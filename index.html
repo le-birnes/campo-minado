@@ -873,7 +873,7 @@ uniform float uTime, uOutline, uAlpha, uWallGrey, uEdgeSolid;
 uniform vec4 uLight[MAXL];
 uniform vec4 uLightC[MAXL];
 uniform int uLightN;
-uniform float uDark, uLantern;
+uniform float uDark, uLantern, uLanternR;
 out vec4 frag;
 float hash(vec2 p, float s){ return fract(sin(dot(p, vec2(127.1,311.7)) + s*13.37) * 43758.5453); }
 void main(){
@@ -945,9 +945,12 @@ void main(){
      0.12 of warm light onto every wall within fifteen metres, which is most
      of why "way darker" came back looking barely darker at all.
      0.0042 was a fifteen-metre reach. 0.030 is about five. */
+  /* What you can see without help: two blocks, then nothing. An inverse
+     square trailing off over fifteen metres is a floodlight however small the
+     coefficient — there is no distance at which it is actually zero, so there
+     was never any dead black anywhere in the cave. */
   float d = distance(vW, uCam);
-  float att = 1.0/(1.0 + d*d*0.030);
-  att = floor(att*5.0)/5.0;
+  float att = step(d, uLanternR);
   lit += base * vec3(1.0,0.70,0.34) * att * uLantern;
 
   /* --- what is actually lighting this place --- */
@@ -970,8 +973,12 @@ void main(){
          smoothsteps are one tenth of a radius wide — enough that the two
          plateaus do not band into visible rings, narrow enough that the
          shape is still the flat-then-step Marcelo asked for. */
-      float k = 1.0 - smoothstep(inner, inner*1.15, dist);
-      float f = mix(0.30, 1.0, k) * (1.0 - smoothstep(outer*0.95, outer, dist));
+      /* HARD. Not a curve that trails off politely — a torch with an edge you
+         can see, and dead black past it. The radii were given as numbers
+         (full to five, three tenths at six and seven, nothing at eight) and a
+         number with a smoothstep on it is not that number. The ring this
+         leaves on the floor is the point, not an artefact. */
+      float f = (dist <= inner) ? 1.0 : ((dist <= outer) ? 0.30 : 0.0);
       /* Mostly directional, but never fully: a face turned away from a lamp in
          a real room is dim, not black, because everything around it bounces. */
       float nl = max(dot(N, Lv/max(dist,0.0001)), 0.0);
@@ -1117,7 +1124,8 @@ const uC = {
   lightC:gl.getUniformLocation(pCube,'uLightC'),
   lightN:gl.getUniformLocation(pCube,'uLightN'),
   dark:gl.getUniformLocation(pCube,'uDark'),
-  lantern:gl.getUniformLocation(pCube,'uLantern')
+  lantern:gl.getUniformLocation(pCube,'uLantern'),
+  lanternR:gl.getUniformLocation(pCube,'uLanternR')
 };
 const uB = {
   proj:gl.getUniformLocation(pBB,'uProj'), view:gl.getUniformLocation(pBB,'uView'),
@@ -5950,22 +5958,29 @@ let last=performance.now(), nextWhisper=25+Math.random()*30, tGlobal=0;
 const litQ = k => { const m=new RegExp('[?&]'+k+'=([\d.]+)').exec(location.search);
                     return m ? parseFloat(m[1]) : null; };
 const MAXL       = 48;        // most lights in one frame; the shader matches
-const LIT_DARK   = litQ('dark')    !== null ? litQ('dark')    : 0.045;
+/* Zero. Not nearly zero — zero. Anywhere no torch reaches and the player is
+   not standing is BLACK, and that is the design: this is not a room with the
+   lights low, it is a place you cannot see. */
+const LIT_DARK   = litQ('dark')    !== null ? litQ('dark')    : 0.0;
 /* What the staff throws. It is the only light you carry and the only reason a
    block under your nose is readable at all, so it cannot be zero — but it was
    0.20 and reaching fifteen metres, which is a torch, not a wand. */
-const LIT_LANTERN= litQ('lantern') !== null ? litQ('lantern') : 0.055;
+/* With nothing else in the cave to see by, what the player carries has to
+   actually light the stone rather than tint it. */
+const LIT_LANTERN= litQ('lantern') !== null ? litQ('lantern') : 0.78;
+const LIT_LANTR  = litQ('lanternR')!== null ? litQ('lanternR'): 2.0;
 /* And the floor under a number: what a digit is worth with nothing lighting
    it. Numbers were coming out at full brightness everywhere and drowning the
    dark on their own. */
-const LIT_GLYPH  = litQ('glyph')   !== null ? litQ('glyph')   : 0.055;
+const LIT_GLYPH  = litQ('glyph')   !== null ? litQ('glyph')   : 0.0;
 /* And what is left of the fog, which is not atmosphere here so much as the
    colour distance resolves to. Left at 1.0 it IS the ambient light. */
-const LIT_FOG    = litQ('fog')     !== null ? litQ('fog')     : 0.12;
+const LIT_FOG    = litQ('fog')     !== null ? litQ('fog')     : 0.0;
 const FLAG_IN    = 5;         // blocks at full strength
-const FLAG_OUT   = 8;         // the hard limit: blocks 6 and 7 get the tail,
-                              // and the fade lands inside the last fifth of
-                              // a block, so nothing at 8 gets anything
+/* 7, now that the edge is genuinely hard. It was 8 to compensate for a
+   smoothstep that ate the last block; with a step there is nothing to
+   compensate for, and 8 would have handed block 8 the tail as well. */
+const FLAG_OUT   = 7;         // blocks 6 and 7 get the tail, 8 gets nothing
 const FLY_R      = 4;         // a firefly carries this far
 const FLY_LEVEL  = 0.10;      // and this much
 const FLY_MIN    = 9;         // an "empty area" is nine touching empty blocks
@@ -6084,7 +6099,7 @@ function lightAt(x, y, z, out){
     const d=Math.hypot(dx,dy,dz), outer=lightBuf[o+3];
     if(d > outer) continue;
     const inner=lightCBuf[o+3];
-    const f = (d <= inner ? 1.0 : 0.30) * (1 - Math.min(1, Math.max(0, (d-outer*0.88)/(outer*0.12))));
+    const f = d <= inner ? 1.0 : 0.30;      // hard, exactly like the shader
     r += lightCBuf[o]*f; g += lightCBuf[o+1]*f; b += lightCBuf[o+2]*f;
   }
   out[0]=r; out[1]=g; out[2]=b;
@@ -6534,6 +6549,7 @@ function fzFrame(dt){
   /* Full daylight and no lamps. You cannot pick a colour in a dark room. */
   gl.uniform1f(uC.dark, 1.0);
   gl.uniform1f(uC.lantern, 0.20);
+  gl.uniform1f(uC.lanternR, 1e9);
   gl.uniform1i(uC.lightN, 0);
   gl.uniform3f(uC.hover, 1e9,1e9,1e9);
   drawCubes(fzB);
@@ -6823,6 +6839,7 @@ function frame(now){
      creature standing in the glow of a flag is lit by that flag. */
   gl.uniform1f(uC.dark, LIT_DARK);
   gl.uniform1f(uC.lantern, LIT_LANTERN);
+  gl.uniform1f(uC.lanternR, LIT_LANTR*BLOCK);
   gl.uniform1i(uC.lightN, collectLights(camX,camY,camZ));
   gl.uniform4fv(uC.light,  lightBuf);
   gl.uniform4fv(uC.lightC, lightCBuf);
@@ -7154,8 +7171,8 @@ function frame(now){
          thing keeping the block under your nose legible. */
       lightAt(x,y,z,_gl);
       const _gd = Math.hypot(x-camX, y-camY, z-camZ);
-      const _gk = Math.min(1.0, LIT_GLYPH + 0.55/(1.0 + _gd*_gd*0.030)
-                                + (_gl[0]+_gl[1]+_gl[2])*0.70);
+      const _gk = Math.min(1.0, LIT_GLYPH + (_gd <= LIT_LANTR*BLOCK ? 0.85 : 0)
+                                + (_gl[0]+_gl[1]+_gl[2])*0.80);
       d[o+9]=col[0]; d[o+10]=col[1]; d[o+11]=col[2]; d[o+12]=a*_gk;
       d[o+13]=rot||0; d[o+14]=0; d[o+15]=face||0;
       n++;
@@ -7418,6 +7435,7 @@ function frame(now){
     gl.uniform1i(uC.lightN, 0);
     gl.uniform1f(uC.dark, 1.0);
     gl.uniform1f(uC.lantern, 0.20);
+    gl.uniform1f(uC.lanternR, 1e9);
     buildViewModel(tGlobal, Math.min(1, Math.hypot(P.vx,P.vz)/SPD_RUN), aspect);
     drawCubes(viewB);
   }
