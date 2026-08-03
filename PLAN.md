@@ -3,11 +3,59 @@
 Live: https://le-birnes.github.io/campo-minado/
 All six open questions were answered on 2026-07-31 and the work is done and live.
 
-The game is done, pushed and live. What is left is the **playtest bot**, and
-the one thing left in ITS way is navigation: see "Tomorrow's first job" below.
-
     python tools/watch.py --zones 4     # build + print a URL you can watch
     python tools/runbot.py --quick      # headless Apprentice, ~35 s, the fast check
+    index.html?forge                    # the Creature Forge
+
+## The queue, in order — 2026-08-03
+
+1. **The bot needs a real explorer.** Task #19, and it has swallowed the old
+   "tomorrow's first job" below: `routeTo()` is one piece of it, not the whole
+   thing. Marcelo watched a run throw at step 483 — 74/260 opened, 19/57
+   flagged, **76,395 m walked, 8,125 jumps, 366 walks against 70 actions**. It
+   was walking sightlines and doing nothing. Watchdog: `400001 checks without
+   finishing, last phase: inView`.
+
+   On taking manual control, merely TURNING SIDEWAYS let him walk past complete
+   mines to a wall with the way down in sight. It is stuck because it walks
+   straight lines only and picks the LONGEST one; the right route was a shorter
+   one he could see. What he asked for, in his words: *enter, check paths,
+   proceed, check paths, proceed — until a path is seen, mapped, signalled, lit
+   and EVALUATED*, at which point it becomes a primary or a secondary
+   objective; a new path gets explored after walking the same loop about twice.
+   Plus: flag every mine it can see first, then dig where it sees none, then
+   travel a known route; read the HUD (mines to go, blocks left) rather than
+   only the local scan; and expose the knobs so a run can be tailored.
+
+2. **Relight the cave.** Task #20. Dark like a prison, not a sand cave. Flags
+   shine through their block, 100% to 5 blocks and 30% at 6–7, hard stop.
+   Fireflies — bare light voxels, no model — at the centre of every 9-block
+   empty region, 10% out to 4 blocks. Overlaps add. Numbers get lit too.
+   Shadows only if the blocks already cast them, which they do not: that part
+   is a separate job and much larger than the falloff.
+
+3. **The Noita question**, asked and not answered: per-pixel simulation with
+   mass, gravity and 9×9×8 neighbourhood interaction. That is a falling-sand
+   engine, and this renderer is an instanced cube batch with no simulation
+   layer at all — it is a different program, not a tweak. Worth doing as its
+   own thing, not as a patch to this.
+
+### Done 2026-08-03
+
+- **A block is 1.4 of you, not 2.** `BLOCK = P_H*1.4 = 2.8 m`. The cave is
+  50×50×67 m now, and one jump clears two blocks instead of one and a half.
+  The only things that did not follow for free were the number hitboxes, which
+  were flat metres and would have got relatively FATTER as the cube shrank.
+- **The Creature Forge** (`?forge` or the menu). A paint program whose canvas
+  is a solid. See its own comment block in `index.html`.
+- **Creatures can carry real 3D voxel data.** `FORGE_ART` beats the extruded
+  drawing; the renderer learned `z` is a coordinate and `shade` does the
+  lighting a unit cube cannot carry itself.
+- **The shotgun stopped being a drum**, and sound stopped being the one thing
+  here judged only by opinion — `snd.render()` + `tools/h_sound.js` count it.
+  Old: 2 onsets in 250 ms. New: 10.
+- **The shotgun is the weapon now**, not just the finale's weapon. The kick is
+  still finale-only.
 
 ---
 
