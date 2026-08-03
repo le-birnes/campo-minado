@@ -7305,23 +7305,29 @@ function frame(now){
            says nothing lives in — the plane the hint just cleared. */
         if(G.hintArrow && G.hintArrow.i===i && tGlobal < G.hintArrow.until){
           const dir=G.hintArrow.dir;
+          /* The gap scales with the glyph. put() shrinks the arrow itself,
+             but where it SITS was in absolute metres, so shrinking the digits
+             left every arrow floating a block and a half away from the number
+             it belongs to. A label and its pointer have to move together. */
           const bob=Math.sin(tGlobal*3.4)*0.16;
-          put(cx, cy + dir*(1.35+bob), cz, 1.5,1.5,
+          put(cx, cy + dir*(1.35+bob)*NUM_SCALE, cz, 1.5,1.5,
               dir>0?T_UP:T_DOWN, HI_CLUE, 1, 0);
         }
         if(G.arrows){
           const [up,dn]=planeFlags(x,y,z);
-          const A=0.52, R=0.80;
+          /* Same again: A is the arrow's SIZE and put() already scales it,
+             but R is how far out it orbits and that is a distance. */
+          const A=0.52, R=0.80*NUM_SCALE, V=NUM_SCALE;
           if(up&&dn){
             const a=tGlobal*1.5;
-            put(cx+Math.cos(a)*R, cy+Math.sin(tGlobal*2.1)*0.10, cz+Math.sin(a)*R,
+            put(cx+Math.cos(a)*R, cy+Math.sin(tGlobal*2.1)*0.10*V, cz+Math.sin(a)*R,
                 A,A, T_UP,   [1.0,0.80,0.30], al*0.9, 0);
-            put(cx+Math.cos(a+Math.PI)*R, cy+Math.sin(tGlobal*2.1+3.1)*0.10, cz+Math.sin(a+Math.PI)*R,
+            put(cx+Math.cos(a+Math.PI)*R, cy+Math.sin(tGlobal*2.1+3.1)*0.10*V, cz+Math.sin(a+Math.PI)*R,
                 A,A, T_DOWN, [0.72,0.48,1.0], al*0.9, 0);
           } else if(up){
-            put(cx+R, cy+0.20+Math.sin(tGlobal*2.2)*0.09, cz, A,A, T_UP, [1.0,0.80,0.30], al*0.9,0);
+            put(cx+R, cy+(0.20+Math.sin(tGlobal*2.2)*0.09)*V, cz, A,A, T_UP, [1.0,0.80,0.30], al*0.9,0);
           } else if(dn){
-            put(cx+R, cy-0.20+Math.sin(tGlobal*2.2)*0.09, cz, A,A, T_DOWN, [0.72,0.48,1.0], al*0.9,0);
+            put(cx+R, cy-(0.20-Math.sin(tGlobal*2.2)*0.09)*V, cz, A,A, T_DOWN, [0.72,0.48,1.0], al*0.9,0);
           }
         }
       }
