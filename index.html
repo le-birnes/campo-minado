@@ -873,7 +873,7 @@ uniform float uTime, uOutline, uAlpha, uWallGrey, uEdgeSolid;
 uniform vec4 uLight[MAXL];
 uniform vec4 uLightC[MAXL];
 uniform int uLightN;
-uniform float uDark;
+uniform float uDark, uLantern;
 out vec4 frag;
 float hash(vec2 p, float s){ return fract(sin(dot(p, vec2(127.1,311.7)) + s*13.37) * 43758.5453); }
 void main(){
@@ -939,10 +939,16 @@ void main(){
   vec3 lit = base * (amb + vec3(1.25,1.02,0.72) * band * 0.54) * uDark;
 
   /* --- staff lantern, banded as well --- */
+  /* The staff you are carrying. This was the brightest thing in the cave and
+     nobody noticed, because it is the one light that never got turned down
+     with the sun: at a tenth of the old global light it was still throwing
+     0.12 of warm light onto every wall within fifteen metres, which is most
+     of why "way darker" came back looking barely darker at all.
+     0.0042 was a fifteen-metre reach. 0.030 is about five. */
   float d = distance(vW, uCam);
-  float att = 1.0/(1.0 + d*d*0.0042);
+  float att = 1.0/(1.0 + d*d*0.030);
   att = floor(att*5.0)/5.0;
-  lit += base * vec3(1.0,0.70,0.34) * att * 0.20;
+  lit += base * vec3(1.0,0.70,0.34) * att * uLantern;
 
   /* --- what is actually lighting this place --- */
   {
@@ -1103,7 +1109,8 @@ const uC = {
   light:gl.getUniformLocation(pCube,'uLight'),
   lightC:gl.getUniformLocation(pCube,'uLightC'),
   lightN:gl.getUniformLocation(pCube,'uLightN'),
-  dark:gl.getUniformLocation(pCube,'uDark')
+  dark:gl.getUniformLocation(pCube,'uDark'),
+  lantern:gl.getUniformLocation(pCube,'uLantern')
 };
 const uB = {
   proj:gl.getUniformLocation(pBB,'uProj'), view:gl.getUniformLocation(pBB,'uView'),
@@ -5930,8 +5937,21 @@ let last=performance.now(), nextWhisper=25+Math.random()*30, tGlobal=0;
 
    Lights ADD where they overlap, so two flags light a corner better than one.
    ========================================================================== */
+/* All three are tunable from the URL — ?dark=0.06&lantern=0.05&glyph=0.06 —
+   because "way darker" is a look, and a look is found by turning a knob and
+   looking, not by a round trip through a rebuild. */
+const litQ = k => { const m=new RegExp('[?&]'+k+'=([\d.]+)').exec(location.search);
+                    return m ? parseFloat(m[1]) : null; };
 const MAXL       = 48;        // most lights in one frame; the shader matches
-const LIT_DARK   = 0.24;      // what is left of the sky
+const LIT_DARK   = litQ('dark')    !== null ? litQ('dark')    : 0.085;
+/* What the staff throws. It is the only light you carry and the only reason a
+   block under your nose is readable at all, so it cannot be zero — but it was
+   0.20 and reaching fifteen metres, which is a torch, not a wand. */
+const LIT_LANTERN= litQ('lantern') !== null ? litQ('lantern') : 0.055;
+/* And the floor under a number: what a digit is worth with nothing lighting
+   it. Numbers were coming out at full brightness everywhere and drowning the
+   dark on their own. */
+const LIT_GLYPH  = litQ('glyph')   !== null ? litQ('glyph')   : 0.055;
 const FLAG_IN    = 5;         // blocks at full strength
 const FLAG_OUT   = 8;         // the hard limit: blocks 6 and 7 get the tail,
                               // and the fade lands inside the last fifth of
@@ -6503,6 +6523,7 @@ function fzFrame(dt){
   gl.uniform1f(uC.wallGrey, 0.0);
   /* Full daylight and no lamps. You cannot pick a colour in a dark room. */
   gl.uniform1f(uC.dark, 1.0);
+  gl.uniform1f(uC.lantern, 0.20);
   gl.uniform1i(uC.lightN, 0);
   gl.uniform3f(uC.hover, 1e9,1e9,1e9);
   drawCubes(fzB);
@@ -6783,6 +6804,7 @@ function frame(now){
   /* THE LIGHTS. Gathered once and used by every cube pass in the frame, so a
      creature standing in the glow of a flag is lit by that flag. */
   gl.uniform1f(uC.dark, LIT_DARK);
+  gl.uniform1f(uC.lantern, LIT_LANTERN);
   gl.uniform1i(uC.lightN, collectLights(camX,camY,camZ));
   gl.uniform4fv(uC.light,  lightBuf);
   gl.uniform4fv(uC.lightC, lightCBuf);
@@ -7114,8 +7136,8 @@ function frame(now){
          thing keeping the block under your nose legible. */
       lightAt(x,y,z,_gl);
       const _gd = Math.hypot(x-camX, y-camY, z-camZ);
-      const _gk = Math.min(1.45, LIT_DARK*0.9 + 0.85/(1.0 + _gd*_gd*0.0042)
-                                 + (_gl[0]+_gl[1]+_gl[2])*0.55);
+      const _gk = Math.min(1.30, LIT_GLYPH + 0.55/(1.0 + _gd*_gd*0.030)
+                                 + (_gl[0]+_gl[1]+_gl[2])*0.70);
       d[o+9]=col[0]*_gk; d[o+10]=col[1]*_gk; d[o+11]=col[2]*_gk; d[o+12]=a;
       d[o+13]=rot||0; d[o+14]=0; d[o+15]=face||0;
       n++;
@@ -7377,6 +7399,7 @@ function frame(now){
        it — and at a metre away a flag would blow it out completely. */
     gl.uniform1i(uC.lightN, 0);
     gl.uniform1f(uC.dark, 1.0);
+    gl.uniform1f(uC.lantern, 0.20);
     buildViewModel(tGlobal, Math.min(1, Math.hypot(P.vx,P.vz)/SPD_RUN), aspect);
     drawCubes(viewB);
   }
