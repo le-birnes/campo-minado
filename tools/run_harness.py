@@ -1,7 +1,7 @@
 """Build an instrumented copy of the game and run it in headless Chrome.
 
 usage: python run_harness.py <harness.js> [--budget MS] [--cap SECONDS]
-                             [--shot NAME WxH] [--reap]
+                             [--shot NAME WxH] [--q QUERYSTRING] [--reap]
 
 The harness is injected just before the game's IIFE closes, so it can see G,
 genWorld, shoot, mark and everything else without any of it being exported.
@@ -115,7 +115,8 @@ def build(harness_path, out_path, render=False):
     return out_path
 
 
-def run(html_path, budget=8000, shot=None, size=None, cap=CAP_DEFAULT, profile=None):
+def run(html_path, budget=8000, shot=None, size=None, cap=CAP_DEFAULT, profile=None,
+        query=None):
     """Returns (result, seconds, timed_out)."""
     cap = min(cap, CAP_MAX)
     # ABSOLUTE, always: a relative --user-data-dir makes Chrome pop a GUI error
@@ -133,7 +134,13 @@ def run(html_path, budget=8000, shot=None, size=None, cap=CAP_DEFAULT, profile=N
         args.append("--screenshot=" + os.path.abspath(shot))
     else:
         args.append("--dump-dom")
-    args.append("file:///" + os.path.abspath(html_path).replace("\\", "/"))
+    # A harness reads location.search the same way the game does, so --q lets
+    # one harness photograph six angles instead of six harnesses photographing
+    # one each.
+    url = "file:///" + os.path.abspath(html_path).replace("\\", "/")
+    if query:
+        url += "?" + query.lstrip("?")
+    args.append(url)
 
     t0 = time.time()
     p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -172,7 +179,8 @@ def run(html_path, budget=8000, shot=None, size=None, cap=CAP_DEFAULT, profile=N
             "blocked before its first write" % len(out or ""), secs, False)
 
 
-def escalate(html_path, budget=8000, start=30, profile=None, shot=None, size=None):
+def escalate(html_path, budget=8000, start=30, profile=None, shot=None, size=None,
+             query=None):
     """Start impatient and grow. Most runs either answer in a second or are
     broken; waiting five minutes to learn that is wasted time. So try 30 s, and
     on a timeout give it half as long again — 30, 45, 67, 101, 152, 228, 300 —
@@ -184,7 +192,7 @@ def escalate(html_path, budget=8000, start=30, profile=None, shot=None, size=Non
     while True:
         n += 1
         res, secs, bad = run(html_path, budget=budget, shot=shot, size=size,
-                             cap=int(cap), profile=profile)
+                             cap=int(cap), profile=profile, query=query)
         if not bad:
             return res, secs, False, n
         if cap >= CAP_MAX:
@@ -202,6 +210,7 @@ def main():
     harness = a[0]
     budget = int(a[a.index("--budget") + 1]) if "--budget" in a else 8000
     cap = int(a[a.index("--cap") + 1]) if "--cap" in a else CAP_DEFAULT
+    query = a[a.index("--q") + 1] if "--q" in a else None
     shot = size = None
     if "--shot" in a:
         i = a.index("--shot")
@@ -211,7 +220,7 @@ def main():
     reap()
     out = os.path.join(HERE, "t_run.html")
     build(harness, out, render=bool(shot))
-    res, secs, bad = run(out, budget, shot, size, cap)
+    res, secs, bad = run(out, budget, shot, size, cap, query=query)
     print("[%.1fs]" % secs)
     for part in res.split(" | "):
         print(part)

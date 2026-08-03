@@ -50,6 +50,43 @@ html,body{margin:0;padding:0;height:100%;background:var(--soot);overflow:hidden;
 #wrap{position:fixed;inset:0;overflow:hidden;background:var(--soot);}
 canvas#gl{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:none;}
 
+/* ---------- the Creature Forge ----------
+   Docked, not a screen: the canvas behind it is the thing being edited, so
+   the panel gets out of the way and never covers the middle. */
+#forge{position:fixed;inset:0;pointer-events:none;display:none;z-index:40;}
+#forge.on{display:block;}
+#forge .dock{position:absolute;top:10px;left:10px;width:min(300px,44vw);
+  background:var(--w95);box-shadow:var(--out);pointer-events:auto;
+  font:12px var(--ui);color:#000;}
+#forge .dock .titlebar{font:bold 12px var(--ui);}
+#forge .pad{padding:7px 8px 9px;}
+#forge h3{margin:9px 0 4px;font:bold 11px var(--ui);text-transform:uppercase;
+  letter-spacing:.06em;color:#404040;}
+#forge h3:first-child{margin-top:0;}
+#forge .row{display:flex;gap:3px;flex-wrap:wrap;align-items:center;}
+#forge button{font:11px var(--ui);padding:3px 7px;background:var(--w95);
+  box-shadow:var(--out);border:0;color:#000;cursor:pointer;min-width:26px;}
+#forge button:active,#forge button.on{box-shadow:var(--in);background:var(--w95-lt);}
+#forge button.on{font-weight:bold;}
+#forge select{font:11px var(--ui);background:#fff;box-shadow:var(--in);border:0;
+  padding:2px;width:100%;}
+#forge input[type=color]{width:34px;height:20px;padding:0;border:0;
+  box-shadow:var(--in);background:var(--w95);cursor:pointer;}
+#forge .fzsw{width:20px;height:20px;min-width:0;padding:0;
+  box-shadow:inset -1px -1px 0 #000, inset 1px 1px 0 #fff;}
+#forge .fzsw.on{box-shadow:0 0 0 2px var(--w95-nav2), inset -1px -1px 0 #000;}
+#forge .hint{margin:6px 0 0;font:9.5px var(--mono);color:#3a3a3a;line-height:1.5;}
+#forge .go{width:100%;margin-top:3px;padding:5px;font-weight:bold;}
+#fzInfo{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);
+  pointer-events:none;font:12px var(--mono);color:var(--gold);
+  background:rgba(0,0,0,.55);padding:4px 12px;white-space:nowrap;}
+#fzOut{position:absolute;inset:6% 8%;display:none;pointer-events:auto;
+  background:var(--w95);box-shadow:var(--out);flex-direction:column;}
+#fzOut.on{display:flex;}
+#fzOut textarea{flex:1;margin:8px;font:11px var(--mono);background:#fff;
+  box-shadow:var(--in);border:0;resize:none;padding:6px;white-space:pre;}
+#fzOut .row{padding:0 8px 8px;display:flex;gap:5px;}
+
 /* ---------- the entity's aura (a presence, not a character) ---------- */
 #aura{
   position:absolute;inset:-15%;pointer-events:none;z-index:2;
@@ -439,6 +476,7 @@ body.touch.portrait #rotate{display:grid;}
 
       <div class="rule"></div>
       <button class="go" id="btnStart">Enter the cave</button>
+      <button id="btnForge" style="width:100%;margin-top:6px">Creature Forge — design the things down there</button>
       </div>
     </div>
   </div>
@@ -496,6 +534,71 @@ body.touch.portrait #rotate{display:grid;}
         <button class="go" id="btnAgain">Again</button>
         <button id="btnMenu2">Menu</button>
       </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== THE CREATURE FORGE ========== -->
+  <div id="forge">
+    <div class="dock">
+      <div class="titlebar"><span>Creature Forge</span>
+        <span class="btns"><i>_</i><i>□</i><i id="fzX">×</i></span></div>
+      <div class="pad">
+        <h3>Redrawing</h3>
+        <select id="fzWho"></select>
+        <div class="row" style="margin-top:4px">
+          <input type="color" id="fzCol" title="Body colour — the whole ramp follows it">
+          <span style="font:10px var(--mono);color:#404040">body colour drives the ramp</span>
+        </div>
+
+        <h3>Plane</h3>
+        <div class="row">
+          <button id="fzAx0" type="button">X</button>
+          <button id="fzAx1" type="button">Y</button>
+          <button id="fzAx2" type="button">Z</button>
+          <button id="fzPrev" type="button">◄</button>
+          <button id="fzNext" type="button">►</button>
+          <button id="fzSolo" type="button">Solo</button>
+        </div>
+
+        <h3>Tools</h3>
+        <div class="row">
+          <button id="fzT0" type="button">Pencil</button>
+          <button id="fzT1" type="button">Eraser</button>
+          <button id="fzT2" type="button">Fill</button>
+          <button id="fzT3" type="button">Pick</button>
+          <button id="fzMir" type="button">Mirror</button>
+        </div>
+
+        <h3>Ink</h3>
+        <div class="row" id="fzPal"></div>
+
+        <h3>Undo &amp; clear</h3>
+        <div class="row">
+          <button id="fzUndo" type="button">Undo</button>
+          <button id="fzWipeS" type="button">Clear plane</button>
+          <button id="fzWipeA" type="button">Clear all</button>
+        </div>
+
+        <div class="rule" style="margin:9px 0 7px"></div>
+        <button class="go" id="fzTest" type="button">Save &amp; fight it</button>
+        <button class="go" id="fzCode" type="button">Export as code</button>
+        <button class="go" id="fzBack" type="button">Back to the menu</button>
+
+        <p class="hint">drag empty space or hold Alt — orbit · wheel — zoom<br>
+          Shift+wheel or [ ] — step the plane · 1 2 3 — pick the plane<br>
+          WASD — slide · R F — raise, lower · B E G K — tools<br>
+          X — mirror · C — solo · Ctrl+Z — undo · Esc — leave</p>
+      </div>
+    </div>
+    <div id="fzInfo"></div>
+    <div id="fzOut">
+      <div class="titlebar"><span>Paste this into index.html</span>
+        <span class="btns"><i>_</i><i>□</i><i>×</i></span></div>
+      <textarea id="fzText" spellcheck="false" readonly></textarea>
+      <div class="row">
+        <button id="fzCopy" type="button">Copy</button>
+        <button id="fzShut" type="button">Close</button>
       </div>
     </div>
   </div>
@@ -2724,7 +2827,9 @@ const boomB   = makeBBBatch(4);   // the hit mine, drawn over everything
 const sprB    = makeBBBatch(8);   // kept for the death flash only
 /* One finale creature at a time, a few hundred voxels each. */
 /* one alive and one bursting, at the roster's worst case of 485 voxels */
-const hellB   = makeCubeBatch(1400);
+/* 1400 was sized for a relief: 22x26 pixels, four deep at most. A forged
+   body is a solid and its visible surface alone can run to a few thousand. */
+const hellB   = makeCubeBatch(6000);
 
 function rebuildWorld(){
   const d = worldB.data; let n=0;
@@ -3525,10 +3630,14 @@ function muzzleOf(e, out){
     const V = e.hell ? hellVoxels(e.hell) : null;
     if(V && V.vox && V.vox.length){
       const want = V.vox.some(v=>v.ch==='g'||v.ch==='G') ? 'gG' : 'e';
-      let mx=0,my=0,c=0;
-      for(const v of V.vox) if(want.indexOf(v.ch)>=0){ mx+=v.x; my+=v.y; c++; }
+      let mx=0,my=0,mz=0,c=0;
+      for(const v of V.vox) if(want.indexOf(v.ch)>=0){ mx+=v.x; my+=v.y; mz+=(v.z||0); c++; }
       const unit = Math.min(HELL_MAXH, HELL_UNIT*(e.mScale||1))/V.H;
-      if(c){ lx = (mx/c)*unit/T.scale; ly = (my/c)*unit/T.scale; lz = 0.55; }
+      /* mz is 0 for a drawing, so this is the same muzzle it always had. Put
+         metal out on the end of a forged barrel and the shot leaves from
+         there instead of from the middle of the body. */
+      if(c){ lx = (mx/c)*unit/T.scale; ly = (my/c)*unit/T.scale;
+             lz = 0.55 + (mz/c)*unit/T.scale; }
       else { lx=0; ly=0.25; lz=0.6; }
     } else { lx=0.9; ly=0.3; lz=0.7; }
   }
@@ -4130,6 +4239,10 @@ const HELL_VOX = {};
 function hellVoxels(h){
   const key = h.art;
   if(HELL_VOX[key]) return HELL_VOX[key];
+  /* Anything the Forge made wins. The drawing below is the fallback for the
+     creatures nobody has sculpted yet. */
+  if(typeof FORGE_ART !== 'undefined' && FORGE_ART[key])
+    return (HELL_VOX[key] = forgeVoxels(FORGE_ART[key]));
   const rows = HELL_ART[key] || HELL_ART[HELL_SHARE[key]];
   if(!rows) return (HELL_VOX[key]=[]);
   const W=rows[0].length, H=rows.length;
@@ -5241,6 +5354,10 @@ const KEY={};
 window.addEventListener('keydown', e=>{
   if(e.repeat){ if(e.code==='Space') e.preventDefault(); return; }
   KEY[e.code]=true;
+  /* The Forge has its own keyboard. Falling through to the game's would toggle
+     plane arrows, ask for a hint and, on R, throw the model away and start a
+     new cave. */
+  if(G.state==='forge'){ fzKey(e); return; }
   switch(e.code){
     case 'KeyW': case 'ArrowUp':    IN.f=1; break;
     case 'KeyS': case 'ArrowDown':  IN.b=1; break;
@@ -5505,7 +5622,11 @@ function startFinale(){
   G.finale = true; G.lava = 1; G.dirty = true;
   snd.musicHell();
   enemies.length = 0; eshots.length = 0;
-  const pick = HELL[(wrnd()*HELL.length)|0];
+  /* Normally whoever the cave picks. G.forceHell is the Forge saying "the one
+     I just made", so a rehearsal shows you the creature you were editing
+     rather than a random one of the sixteen. */
+  const pick = G.forceHell || HELL[(wrnd()*HELL.length)|0];
+  G.forceHell = null;
   const px=Math.floor(P.x/BLOCK), py=Math.floor(P.y/BLOCK), pz=Math.floor(P.z/BLOCK);
   const cell = inside(px,py,pz) ? idx(px,py,pz) : 0;
   const e = spawnEnemy(FAM_HELL, 2, cell);
@@ -5597,12 +5718,612 @@ let last=performance.now(), nextWhisper=25+Math.random()*30, tGlobal=0;
    additive pass, so a highlighted digit gets a halo behind it too. */
 const litNums=[];
 
+/* ==========================================================================
+   THE CREATURE FORGE
+   ==========================================================================
+   The sixteen creatures in this cave are each ONE DRAWING — a front elevation,
+   22 by 26, one character per pixel — pushed back into three dimensions by a
+   distance transform. That was enough to give them a side and a back, and it
+   is nowhere near enough to design with. You cannot put a horn where you want
+   it. You cannot make a thing hunch, or carry a gun, or face away. Every body
+   is symmetric in depth because depth is COMPUTED rather than drawn, so the
+   third dimension carries no decisions at all — and a creature made entirely
+   of decisions nobody made looks exactly as it should.
+
+   So here is somewhere to make them. The Forge is a paint program whose canvas
+   is a solid: pick a plane, paint on it with a pencil, step the plane through
+   the body, orbit the whole thing to see what you have. It draws through the
+   game's own cube batch and the game's own shader, so what you paint in here
+   is not a preview of the creature — it is the creature.
+
+   Coordinates: x right, y UP FROM THE FEET, z forward, the way the creature
+   faces. HELL_ART counts rows down from the crown instead, so import and
+   export both flip y, and those two lines are the only place the old idiom
+   and this one have to agree.
+   ========================================================================== */
+const FZ_W = 24, FZ_H = 28, FZ_D = 24;
+const FZ_N = FZ_W*FZ_H*FZ_D;
+const fzi  = (x,y,z) => (y*FZ_D + z)*FZ_W + x;
+const fzIn = (x,y,z) => x>=0 && y>=0 && z>=0 && x<FZ_W && y<FZ_H && z<FZ_D;
+
+/* The creature's own ramp then the fixed colours, in the order a hand reaches
+   for them: five body tones dark to light, then bone, metal, eye, blood, fire.
+   Index 0 is empty, which is what lets a Uint8Array simply BE the model. */
+const FZ_CH = 'kdmlhwgGerRy';
+const FZ_LABEL = {
+  k:'shadow', d:'dark', m:'body', l:'light', h:'highlight',
+  w:'bone', g:'metal dark', G:'metal', e:'eye (glows)', r:'blood dark',
+  R:'blood', y:'fire'
+};
+
+/* What the Forge has made, keyed by the art name it replaces. A model is
+   {w,h,d,slices:[[row,row,...],...]} — one array of rows per z layer, rows
+   top-first so a single slice still reads like a HELL_ART drawing. Anything
+   in here beats the extruded drawing. */
+const FORGE_ART = {};
+const FZ_STORE = 'campominado.forge.v1';
+try {
+  const raw = localStorage.getItem(FZ_STORE);
+  if(raw) Object.assign(FORGE_ART, JSON.parse(raw));
+} catch(e){ /* private mode, or somebody else's JSON: the cave still opens */ }
+
+/* A real voxel model. Same output shape as hellVoxels(), so the renderer
+   cannot tell the two apart, plus two fields it now understands: `z`, which
+   every extruded creature leaves at 0, and `shade`, which takes over the
+   lighting job that 2D `depth` used to do — a unit cube no longer carries a
+   thickness to light it by. */
+function forgeVoxels(m){
+  const w=m.w, h=m.h, d=m.d, S=m.slices;
+  const cell = new Uint8Array(w*h*d);
+  const at = (x,y,z) => (y*d + z)*w + x;
+  for(let z=0;z<d;z++){
+    const rows = S[z]; if(!rows) continue;
+    for(let r=0;r<h;r++){
+      const row = rows[r]; if(!row) continue;
+      const y = h-1-r;                            // rows top-first, y counts up
+      for(let x=0;x<w;x++){
+        const ch = row[x];
+        if(ch && ch!=='.') cell[at(x,y,z)] = FZ_CH.indexOf(ch)+1;
+      }
+    }
+  }
+  const solid = (x,y,z) => x>=0&&y>=0&&z>=0&&x<w&&y<h&&z<d && cell[at(x,y,z)]!==0;
+  const out = [];
+  for(let z=0;z<d;z++) for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+    if(!cell[at(x,y,z)]) continue;
+    /* A voxel with all six neighbours filled cannot be seen from anywhere, and
+       a solid body of this size is thirteen thousand of them. Drop the
+       interior: it is most of the model and none of the picture. */
+    if(solid(x+1,y,z)&&solid(x-1,y,z)&&solid(x,y+1,z)&&
+       solid(x,y-1,z)&&solid(x,y,z+1)&&solid(x,y,z-1)) continue;
+    /* How buried is it? Chebyshev distance to the nearest empty cell, capped
+       at 4 — the 2D depth trick one dimension up, and used only as light, so
+       rims fall away dark and bellies catch it. */
+    let bur = 1;
+    for(; bur<=4; bur++){
+      let open = false;
+      for(let dy=-bur;dy<=bur&&!open;dy++)
+        for(let dz=-bur;dz<=bur&&!open;dz++)
+          for(let dx=-bur;dx<=bur;dx++){
+            if(Math.max(Math.abs(dx),Math.abs(dy),Math.abs(dz))!==bur) continue;
+            if(!solid(x+dx,y+dy,z+dz)){ open=true; break; }
+          }
+      if(open) break;
+    }
+    const lx = x-(w-1)/2, ly = y-(h-1)/2, lz = z-(d-1)/2;
+    const ny = h>1 ? y/(h-1) : 0.5;               // 0 at the feet, 1 at the crown
+    let part = 0;                                 // body
+    if(ny < 0.26)                  part = 3;      // legs
+    else if(ny > 0.74)             part = 1;      // head
+    else if(Math.abs(lx) > w*0.26) part = 2;      // arms
+    out.push({x:lx, y:ly, z:lz, ch:FZ_CH[cell[at(x,y,z)]-1], depth:1,
+              shade:bur, part, side: lx<0?-1:1});
+  }
+  return {vox:out, W:w, H:h, D:d, forged:true};
+}
+
+/* ==========================================================================
+   THE FORGE ITSELF
+   ========================================================================== */
+const FZ = {
+  grid: new Uint8Array(FZ_N),
+  art:'imp', col:[0.62,0.38,0.20],
+  yaw:0.55, pitch:0.24, dist:52,
+  tx:FZ_W/2, ty:FZ_H*0.45, tz:FZ_D/2,
+  axis:2, slice:(FZ_D>>1),          // the front elevation, dead centre
+  tool:'pencil', ink:2, mirror:true, solo:false,
+  down:0, erase:false, hov:null, undo:[], count:0
+};
+/* Worst case is a solid block of this grid with its interior culled — 3,840
+   faces — plus one tile per empty cell of the working plane. */
+const fzB = makeCubeBatch(8000);
+const FZ_FOV = 52*Math.PI/180;
+/* Lighter than the cave on purpose. The shader mixes a third of the fog colour
+   in at working distance, and against the cave's near-black that turned every
+   swatch into mud — which is fatal in the one room where picking a colour is
+   the whole job. */
+const FZ_BG  = new Float32Array([0.155,0.150,0.185]);
+const fzView = new Float32Array(16);
+
+function fzGet(x,y,z){ return fzIn(x,y,z) ? FZ.grid[fzi(x,y,z)] : 0; }
+function fzSet(x,y,z,v){
+  if(!fzIn(x,y,z)) return;
+  FZ.grid[fzi(x,y,z)] = v;
+  if(FZ.mirror){
+    const mx = FZ_W-1-x;
+    if(mx!==x) FZ.grid[fzi(mx,y,z)] = v;
+  }
+}
+function fzPush(){                              // one snapshot per stroke
+  FZ.undo.push(FZ.grid.slice());
+  if(FZ.undo.length > 40) FZ.undo.shift();
+}
+function fzUndo(){
+  const g = FZ.undo.pop();
+  if(!g){ toast('Nothing to undo'); return; }
+  FZ.grid.set(g);
+}
+
+/* Start from one of the sixteen. If it has been forged before, that is what
+   comes back; otherwise the extruded relief is unpacked into real voxels, so
+   you are sculpting the thing you actually met in the cave rather than an
+   empty box. A pixel of depth n was being drawn as one cube stretched n deep,
+   so it unpacks into n voxels centred on the mid-plane. */
+function fzLoad(art){
+  const h = HELL.find(x => x.art === art) || HELL[2];
+  FZ.art = h.art; FZ.col = h.col.slice();
+  FZ.grid.fill(0);
+  const M = FORGE_ART[h.art];
+  if(M){
+    const ox=(FZ_W-M.w)>>1, oz=(FZ_D-M.d)>>1;
+    for(let z=0;z<M.d;z++){
+      const rows = M.slices[z]; if(!rows) continue;
+      for(let r=0;r<M.h;r++){
+        const row = rows[r]; if(!row) continue;
+        for(let x=0;x<M.w;x++){
+          const ch = row[x]; if(!ch || ch==='.') continue;
+          const gx=x+ox, gy=M.h-1-r, gz=z+oz;
+          if(fzIn(gx,gy,gz)) FZ.grid[fzi(gx,gy,gz)] = FZ_CH.indexOf(ch)+1;
+        }
+      }
+    }
+  } else {
+    const V = hellVoxels(h);
+    const ox=(FZ_W>>1), oy=1, oz=(FZ_D>>1);
+    for(const v of (V.vox||[])){
+      const gx = Math.round(v.x)+ox, gy = Math.round(v.y + (V.H-1)/2)+oy;
+      const z0 = -(v.depth>>1);
+      const ci = Math.max(1, FZ_CH.indexOf(v.ch)+1);
+      for(let k=0;k<v.depth;k++){
+        const gz = oz+z0+k;
+        if(fzIn(gx,gy,gz)) FZ.grid[fzi(gx,gy,gz)] = ci;
+      }
+    }
+  }
+  FZ.undo.length = 0;
+  /* Frame what was loaded. Dropping a 25-block creature into a camera parked
+     at the middle of a 24-cube box put half of it off the left edge. */
+  const b = fzBounds();
+  if(b){
+    FZ.tx = (b.x0+b.x1+1)/2; FZ.ty = (b.y0+b.y1+1)/2; FZ.tz = (b.z0+b.z1+1)/2;
+    FZ.dist = clamp((b.y1-b.y0+7)/(2*Math.tan(FZ_FOV/2)), 18, 90);
+  }
+  fzSyncUI();
+}
+
+/* ---- serialising ---- */
+function fzBounds(){
+  let x0=FZ_W,y0=FZ_H,z0=FZ_D,x1=-1,y1=-1,z1=-1;
+  for(let z=0;z<FZ_D;z++) for(let y=0;y<FZ_H;y++) for(let x=0;x<FZ_W;x++)
+    if(FZ.grid[fzi(x,y,z)]){
+      if(x<x0)x0=x; if(x>x1)x1=x;
+      if(y<y0)y0=y; if(y>y1)y1=y;
+      if(z<z0)z0=z; if(z>z1)z1=z;
+    }
+  return x1<0 ? null : {x0,y0,z0,x1,y1,z1};
+}
+/* Trimmed to what was actually drawn, so a creature is centred on ITSELF and
+   does not hang off to one side of its own feet once it is in the cave.
+
+   X is the exception and it has to be. The renderer centres a model on its own
+   box, so trimming X to the drawing moves the centre line onto the middle of
+   whatever happens to be widest — and then a body painted symmetrically with
+   the mirror on comes out of the cave leaning, because the axis it was
+   mirrored about is no longer the axis it is drawn about. So keep X symmetric
+   around the Forge's mirror line and let it carry a few empty columns. Height
+   and depth have no mirror and are trimmed hard. */
+function fzModel(){
+  const b = fzBounds();
+  if(!b) return null;
+  const m = Math.min(b.x0, FZ_W-1-b.x1);
+  b.x0 = m; b.x1 = FZ_W-1-m;
+  const w=b.x1-b.x0+1, h=b.y1-b.y0+1, d=b.z1-b.z0+1, slices=[];
+  for(let z=0;z<d;z++){
+    const rows=[];
+    for(let r=0;r<h;r++){
+      const y = b.y1-r;                            // top row first
+      let s='';
+      for(let x=0;x<w;x++){
+        const v = FZ.grid[fzi(b.x0+x, y, b.z0+z)];
+        s += v ? FZ_CH[v-1] : '.';
+      }
+      rows.push(s);
+    }
+    slices.push(rows);
+  }
+  return {w,h,d,slices};
+}
+function fzExport(){
+  const m = fzModel();
+  if(!m) return '/* nothing drawn yet */';
+  const q = s => "'" + s + "'";
+  const out = [
+    '/* ' + FZ.art + ': ' + m.w+'x'+m.h+'x'+m.d + ', ' + FZ.count + ' voxels.',
+    '   Paste into index.html next to the FORGE_ART declaration. */',
+    'FORGE_ART.' + FZ.art + ' = {w:'+m.w+', h:'+m.h+', d:'+m.d+', slices:['
+  ];
+  m.slices.forEach((rows,z)=>{
+    out.push('  /* z ' + z + ' */ [' + rows.map(q).join(',') + (z<m.d-1 ? '],' : ']'));
+  });
+  out.push(']};');
+  return out.join('\n');
+}
+function fzSave(){
+  const m = fzModel();
+  if(!m){ toast('Draw something first'); return false; }
+  FORGE_ART[FZ.art] = m;
+  delete HELL_VOX[FZ.art];                       // the cave must rebuild it
+  try { localStorage.setItem(FZ_STORE, JSON.stringify(FORGE_ART)); }
+  catch(e){ toast('Kept for this session only — this browser refused storage'); }
+  return true;
+}
+
+/* ---- the camera: it orbits, and the model never leaves the middle ---- */
+function fzCam(){
+  const cp=Math.cos(FZ.pitch), sp=Math.sin(FZ.pitch);
+  const cy=Math.cos(FZ.yaw),   sy=Math.sin(FZ.yaw);
+  const fx=-sy*cp, fy=sp, fz=-cy*cp;             // the way it looks
+  return {x:FZ.tx-fx*FZ.dist, y:FZ.ty-fy*FZ.dist, z:FZ.tz-fz*FZ.dist, fx,fy,fz};
+}
+/* Mouse to world ray — the same construction the player's aim uses, from the
+   orbit camera instead of from an eye. */
+function fzRay(mx,my){
+  const c = fzCam();
+  const b = viewFrom(c.x,c.y,c.z, FZ.yaw, FZ.pitch, fzView);
+  const r = canvas.getBoundingClientRect();
+  const ndcx = ((mx-r.left)/r.width)*2 - 1, ndcy = 1 - ((my-r.top)/r.height)*2;
+  const t = Math.tan(FZ_FOV/2), asp = r.width/r.height;
+  const dx = b.rx*(ndcx*t*asp) + b.ux*(ndcy*t) + b.fx;
+  const dy = b.ry*(ndcx*t*asp) + b.uy*(ndcy*t) + b.fy;
+  const dz = b.rz*(ndcx*t*asp) + b.uz*(ndcy*t) + b.fz;
+  const l = Math.hypot(dx,dy,dz)||1;
+  return {ox:c.x, oy:c.y, oz:c.z, dx:dx/l, dy:dy/l, dz:dz/l};
+}
+/* Where the cursor crosses the working plane, in cells. That is the whole
+   input model: a plane you can see and a cell under the pointer. */
+function fzPick(mx,my){
+  const R = fzRay(mx,my), A = FZ.axis;
+  const o = A===0?R.ox : A===1?R.oy : R.oz;
+  const d = A===0?R.dx : A===1?R.dy : R.dz;
+  if(Math.abs(d) < 1e-6) return null;            // looking along the plane
+  const t = (FZ.slice+0.5 - o)/d;
+  if(t <= 0) return null;                        // the plane is behind you
+  const px=R.ox+R.dx*t, py=R.oy+R.dy*t, pz=R.oz+R.dz*t;
+  const x = A===0 ? FZ.slice : Math.floor(px);
+  const y = A===1 ? FZ.slice : Math.floor(py);
+  const z = A===2 ? FZ.slice : Math.floor(pz);
+  return fzIn(x,y,z) ? {x,y,z} : null;
+}
+
+/* ---- the tools ---- */
+function fzPaint(c, erase){
+  if(!c) return;
+  if(FZ.tool==='pick'){
+    const cur = fzGet(c.x,c.y,c.z);
+    if(cur){ FZ.ink = cur-1; fzSyncUI(); }
+    return;
+  }
+  const v = erase ? 0 : FZ.ink+1;
+  if(FZ.tool==='fill'){ fzFill(c, v); return; }
+  fzSet(c.x,c.y,c.z, v);
+}
+/* Flood fill across the WORKING PLANE only. A 3D fill on a hollow model
+   escapes through the first gap and floods the room. */
+function fzFill(c, v){
+  const A = FZ.axis, from = fzGet(c.x,c.y,c.z);
+  if(from === v) return;
+  const seen = new Set(), q = [c];
+  while(q.length){
+    const p = q.pop();
+    if(!fzIn(p.x,p.y,p.z)) continue;
+    const k = fzi(p.x,p.y,p.z);
+    if(seen.has(k) || FZ.grid[k] !== from) continue;
+    seen.add(k);
+    fzSet(p.x,p.y,p.z, v);
+    if(A!==0){ q.push({x:p.x+1,y:p.y,z:p.z}); q.push({x:p.x-1,y:p.y,z:p.z}); }
+    if(A!==1){ q.push({x:p.x,y:p.y+1,z:p.z}); q.push({x:p.x,y:p.y-1,z:p.z}); }
+    if(A!==2){ q.push({x:p.x,y:p.y,z:p.z+1}); q.push({x:p.x,y:p.y,z:p.z-1}); }
+  }
+}
+function fzSliceMax(){ return (FZ.axis===0?FZ_W : FZ.axis===1?FZ_H : FZ_D) - 1; }
+function fzClearSlice(){
+  fzPush();
+  const A=FZ.axis, s=FZ.slice;
+  for(let y=0;y<FZ_H;y++) for(let z=0;z<FZ_D;z++) for(let x=0;x<FZ_W;x++)
+    if((A===0&&x===s)||(A===1&&y===s)||(A===2&&z===s)) FZ.grid[fzi(x,y,z)]=0;
+}
+function fzStep(n){ FZ.slice = clamp(FZ.slice+n, 0, fzSliceMax()); fzSyncUI(); }
+function fzAxis(a){ FZ.axis = a; FZ.slice = Math.min(FZ.slice, fzSliceMax()); fzSyncUI(); }
+
+/* ==========================================================================
+   DRAWING IT
+   ==========================================================================
+   The plane you paint on is a field of thin checked tiles, and everything
+   between it and the camera is simply not drawn. Without that you are
+   painting into a solid and cannot see the tip of the pencil. Orbit past the
+   plane and the hidden half swaps sides on its own.
+   ========================================================================== */
+function fzBuild(){
+  const d = fzB.data; let n = 0;
+  const pal = hellPalette(FZ.col);
+  const c = fzCam(), A = FZ.axis, s = FZ.slice;
+  const camA = A===0?c.x : A===1?c.y : c.z;
+  const nearSide = camA > s+0.5;                 // which side the pencil is on
+  const put = (x,y,z, sx,sy,sz, col, emis) => {
+    if(n>=fzB.max) return;
+    const o = n*CUBE_STRIDE;
+    composeAA(d,o, x,y,z, sx,sy,sz);
+    d[o+16]=col[0]; d[o+17]=col[1]; d[o+18]=col[2];
+    d[o+19]=(n*0.137)%1; d[o+20]=emis||0; d[o+21]=0; d[o+22]=0;
+    d[o+23]=d[o+24]=d[o+25]=0;
+    n++;
+  };
+  const solid = (x,y,z) => fzGet(x,y,z)!==0;
+
+  let drawn = 0;
+  for(let z=0;z<FZ_D;z++) for(let y=0;y<FZ_H;y++) for(let x=0;x<FZ_W;x++){
+    const v = FZ.grid[fzi(x,y,z)]; if(!v) continue;
+    drawn++;
+    if(solid(x+1,y,z)&&solid(x-1,y,z)&&solid(x,y+1,z)&&
+       solid(x,y-1,z)&&solid(x,y,z+1)&&solid(x,y,z-1)) continue;
+    const a = A===0?x : A===1?y : z;
+    if(FZ.solo){ if(a!==s) continue; }
+    else if(nearSide ? a>s : a<s) continue;      // it would hide the plane
+    const base = pal[FZ_CH[v-1]] || pal.m;
+    const lit = (a===s) ? 1.28 : 1.0;            // the working layer reads brighter
+    put(x+0.5, y+0.5, z+0.5, 0.98,0.98,0.98,
+        [Math.min(1,base[0]*lit), Math.min(1,base[1]*lit), Math.min(1,base[2]*lit)],
+        FZ_CH[v-1]==='e' ? 1 : 0);
+  }
+  FZ.count = drawn;
+
+  const uN = A===0 ? FZ_D : FZ_W, vN = A===1 ? FZ_D : FZ_H;
+  for(let bb=0;bb<vN;bb++) for(let aa=0;aa<uN;aa++){
+    const x = A===0 ? s  : aa;
+    const y = A===1 ? s  : bb;
+    const z = A===0 ? aa : (A===1 ? bb : s);
+    if(FZ.grid[fzi(x,y,z)]) continue;            // a filled cell is its own tile
+    const chk = ((aa+bb)&1) ? 0.20 : 0.13;
+    put(x+0.5, y+0.5, z+0.5,
+        A===0?0.05:0.94, A===1?0.05:0.94, A===2?0.05:0.94,
+        [chk*0.85, chk, chk*1.4], 0.12);
+  }
+  if(FZ.hov){
+    put(FZ.hov.x+0.5, FZ.hov.y+0.5, FZ.hov.z+0.5, 1.07,1.07,1.07, [1.0,0.86,0.30], 0.95);
+    const mx = FZ_W-1-FZ.hov.x;
+    if(FZ.mirror && mx!==FZ.hov.x)
+      put(mx+0.5, FZ.hov.y+0.5, FZ.hov.z+0.5, 1.07,1.07,1.07, [0.40,0.78,1.0], 0.75);
+  }
+  // the floor it stands on, so "how tall is this" has an answer
+  put(FZ_W/2, -0.08, FZ_D/2, FZ_W*1.3, 0.12, FZ_D*1.3, [0.15,0.13,0.17], 0);
+  fzB.count = n;
+}
+
+function fzFrame(dt){
+  // WASD slides what the camera orbits; R and F raise and lower it
+  const sp = ((KEY['ShiftLeft']||KEY['ShiftRight']) ? 34 : 14)*dt;
+  const cy=Math.cos(FZ.yaw), sy=Math.sin(FZ.yaw);
+  if(KEY['KeyW']){ FZ.tx -= sy*sp; FZ.tz -= cy*sp; }
+  if(KEY['KeyS']){ FZ.tx += sy*sp; FZ.tz += cy*sp; }
+  if(KEY['KeyA']){ FZ.tx -= cy*sp; FZ.tz += sy*sp; }
+  if(KEY['KeyD']){ FZ.tx += cy*sp; FZ.tz -= sy*sp; }
+  if(KEY['KeyR']) FZ.ty += sp;
+  if(KEY['KeyF']) FZ.ty -= sp;
+
+  const c = fzCam();
+  viewFrom(c.x,c.y,c.z, FZ.yaw, FZ.pitch, fzView);
+  const proj = m4.persp(FZ_FOV, W/H, 0.05, 400);
+  fzBuild();
+
+  gl.viewport(0,0,W,H);
+  gl.clearColor(FZ_BG[0],FZ_BG[1],FZ_BG[2],1);
+  gl.enable(gl.DEPTH_TEST); gl.depthMask(true);
+  gl.enable(gl.CULL_FACE); gl.cullFace(gl.BACK);
+  gl.disable(gl.BLEND);
+  gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+
+  gl.useProgram(pCube);
+  gl.uniformMatrix4fv(uC.proj,false,proj);
+  gl.uniformMatrix4fv(uC.view,false,fzView);
+  gl.uniform3f(uC.cam, c.x,c.y,c.z);
+  gl.uniform3fv(uC.sun, SUN);
+  gl.uniform3fv(uC.fog, FZ_BG);
+  gl.uniform1f(uC.time, tGlobal);
+  gl.uniform1f(uC.outline, 1.30);
+  gl.uniform1f(uC.alpha, 1.0);
+  gl.uniform1f(uC.edgeSolid, 0.0);
+  gl.uniform1f(uC.wallGrey, 0.0);
+  gl.uniform3f(uC.hover, 1e9,1e9,1e9);
+  drawCubes(fzB);
+  fzHUD();
+}
+
+/* ==========================================================================
+   THE PANEL
+   ========================================================================== */
+function fzSwatches(){
+  const box = $('fzPal'); if(!box) return;
+  const pal = hellPalette(FZ.col);
+  box.innerHTML = '';
+  FZ_CH.split('').forEach((ch,i)=>{
+    const col = pal[ch] || pal.m;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'fzsw' + (i===FZ.ink ? ' on' : '');
+    b.style.background = 'rgb(' + col.map(v=>(v*255)|0).join(',') + ')';
+    b.title = ch + ' — ' + FZ_LABEL[ch];
+    b.onclick = ()=>{ FZ.ink = i; fzSyncUI(); };
+    box.appendChild(b);
+  });
+}
+function fzSyncUI(){
+  fzSwatches();
+  const sel = $('fzWho'); if(sel && sel.value !== FZ.art) sel.value = FZ.art;
+  const col = $('fzCol');
+  if(col) col.value = '#' + FZ.col.map(v=>((v*255)|0).toString(16).padStart(2,'0')).join('');
+  const on = [['fzAx0',FZ.axis===0],['fzAx1',FZ.axis===1],['fzAx2',FZ.axis===2],
+              ['fzMir',FZ.mirror],['fzSolo',FZ.solo],
+              ['fzT0',FZ.tool==='pencil'],['fzT1',FZ.tool==='eraser'],
+              ['fzT2',FZ.tool==='fill'],  ['fzT3',FZ.tool==='pick']];
+  for(const [id,v] of on){ const el=$(id); if(el) el.classList.toggle('on', v); }
+}
+function fzHUD(){
+  const el = $('fzInfo'); if(!el) return;
+  el.textContent = 'XYZ'[FZ.axis] + ' plane ' + FZ.slice + ' of ' + fzSliceMax() +
+    '   ·   ' + FZ.count + ' voxels   ·   ' + (FZ.mirror?'mirrored':'free') +
+    (FZ.solo ? '   ·   solo' : '');
+}
+function fzOpen(art){
+  const sel = $('fzWho');
+  if(sel && !sel.options.length){
+    for(const h of HELL){
+      const o = document.createElement('option');
+      o.value = h.art; o.textContent = h.name;
+      sel.appendChild(o);
+    }
+  }
+  fzLoad(art || FZ.art);
+  G.state = 'forge';
+  elMenu.classList.remove('on'); elPause.classList.remove('on');
+  elOver.classList.remove('on'); elHud.classList.remove('on');
+  elCross.classList.remove('on');
+  $('forge').classList.add('on');
+  canvas.style.cursor = 'crosshair';
+  fzSyncUI();
+}
+function fzClose(){
+  $('forge').classList.remove('on');
+  setScreen('menu');
+}
+
+/* ---- input ---- */
+canvas.addEventListener('mousedown', e=>{
+  if(G.state!=='forge') return;
+  e.preventDefault();
+  if(e.button===1 || e.altKey){ FZ.down = 2; return; }        // orbit
+  const c = fzPick(e.clientX, e.clientY);
+  if(!c){ FZ.down = 2; return; }                              // grabbed empty space
+  FZ.down = 1; FZ.erase = (e.button===2);
+  if(FZ.tool!=='pick') fzPush();
+  fzPaint(c, FZ.erase || FZ.tool==='eraser');
+});
+window.addEventListener('mouseup', ()=>{ if(G.state==='forge') FZ.down = 0; });
+canvas.addEventListener('mousemove', e=>{
+  if(G.state!=='forge') return;
+  if(FZ.down===2){
+    FZ.yaw  -= e.movementX*0.006;
+    FZ.pitch = clamp(FZ.pitch - e.movementY*0.006, -1.45, 1.45);
+    return;
+  }
+  const c = fzPick(e.clientX, e.clientY);
+  FZ.hov = c;
+  if(FZ.down===1 && c && FZ.tool!=='fill') fzPaint(c, FZ.erase || FZ.tool==='eraser');
+});
+canvas.addEventListener('wheel', e=>{
+  if(G.state!=='forge') return;
+  e.preventDefault();
+  if(e.shiftKey) fzStep(e.deltaY>0 ? -1 : 1);
+  else FZ.dist = clamp(FZ.dist*(e.deltaY>0 ? 1.11 : 0.9), 8, 180);
+}, {passive:false});
+
+function fzKey(e){
+  switch(e.code){
+    case 'Digit1': fzAxis(0); break;
+    case 'Digit2': fzAxis(1); break;
+    case 'Digit3': fzAxis(2); break;
+    case 'BracketLeft':  fzStep(-1); break;
+    case 'BracketRight': fzStep(1);  break;
+    case 'KeyB': FZ.tool='pencil'; fzSyncUI(); break;
+    case 'KeyE': FZ.tool='eraser'; fzSyncUI(); break;
+    case 'KeyG': FZ.tool='fill';   fzSyncUI(); break;
+    case 'KeyK': FZ.tool='pick';   fzSyncUI(); break;
+    case 'KeyX': FZ.mirror=!FZ.mirror; fzSyncUI(); break;
+    case 'KeyC': FZ.solo=!FZ.solo;     fzSyncUI(); break;
+    case 'KeyZ': if(e.ctrlKey){ e.preventDefault(); fzUndo(); } break;
+    case 'Escape': fzClose(); break;
+  }
+}
+
+/* ---- the panel ---- */
+$('fzWho').addEventListener('change', e => fzLoad(e.target.value));
+$('fzCol').addEventListener('input', e => {
+  const v = e.target.value;
+  FZ.col = [0,1,2].map(k => parseInt(v.substr(1+k*2,2),16)/255);
+  fzSwatches();
+});
+$('fzAx0').onclick = ()=>fzAxis(0);
+$('fzAx1').onclick = ()=>fzAxis(1);
+$('fzAx2').onclick = ()=>fzAxis(2);
+$('fzPrev').onclick = ()=>fzStep(-1);
+$('fzNext').onclick = ()=>fzStep(1);
+$('fzSolo').onclick = ()=>{ FZ.solo=!FZ.solo; fzSyncUI(); };
+$('fzT0').onclick = ()=>{ FZ.tool='pencil'; fzSyncUI(); };
+$('fzT1').onclick = ()=>{ FZ.tool='eraser'; fzSyncUI(); };
+$('fzT2').onclick = ()=>{ FZ.tool='fill';   fzSyncUI(); };
+$('fzT3').onclick = ()=>{ FZ.tool='pick';   fzSyncUI(); };
+$('fzMir').onclick = ()=>{ FZ.mirror=!FZ.mirror; fzSyncUI(); };
+$('fzUndo').onclick  = fzUndo;
+$('fzWipeS').onclick = fzClearSlice;
+$('fzWipeA').onclick = ()=>{ fzPush(); FZ.grid.fill(0); };
+$('fzBack').onclick  = fzClose;
+$('fzX').onclick     = fzClose;
+$('fzCode').onclick  = ()=>{ $('fzText').value = fzExport(); $('fzOut').classList.add('on'); };
+$('fzShut').onclick  = ()=>$('fzOut').classList.remove('on');
+$('fzCopy').onclick  = ()=>{
+  const t = $('fzText'); t.select();
+  try { document.execCommand('copy'); toast('Copied'); }
+  catch(e){ toast('Select it and copy by hand'); }
+};
+/* A rehearsal, not a run. These sixteen only ever appear once every mine on
+   the board is flagged, and walking a whole dungeon down to meet the horn you
+   just moved two voxels is not a design loop. So: open the board, flag it,
+   and let checkWin() do exactly what it does when you earn it. */
+$('fzTest').onclick = ()=>{
+  if(!fzSave()) return;
+  $('forge').classList.remove('on');
+  $('fzOut').classList.remove('on');
+  const b = document.querySelector('.diffs [data-m="1"]');
+  if(b) b.click();                                  // Dungeon Mode, UI and all
+  G.forceHell = HELL.find(h => h.art === FZ.art) || null;
+  startGame();
+  const n = G.nx*G.ny*G.nz;
+  for(let i=0;i<n;i++) if(G.st[i]===SOLID && !G.mine[i]){ G.st[i]=AIR; G.revealed++; }
+  for(let i=0;i<n;i++) if(G.mine[i] && G.st[i]!==MARKED){ G.st[i]=MARKED; G.marked++; }
+  G.dirty = true; G.rehearsal = true;
+  checkWin();
+};
+$('btnForge').addEventListener('click', ()=>fzOpen());
+if(/[?&]forge/.test(location.search)) setTimeout(()=>fzOpen(), 60);
+
 function frame(now){
   requestAnimationFrame(frame);
   let dt = Math.min(0.05, (now-last)/1000); last=now;
   turnedThisFrame = 0;          // the view's turning budget, refilled each frame
   tGlobal += dt;
   resize();
+  /* The Forge borrows the canvas, the shader and the clock, and nothing else:
+     no physics, no enemies, no board. It returns before any of that runs. */
+  if(G.state==='forge'){ fzFrame(dt); return; }
 
   const sim = dt * (G.state==='over' ? G.slowmo : 1);
   if(G.state==='over' && G.slowmo<1) G.slowmo = Math.min(1, G.slowmo + dt*0.35);
@@ -5825,9 +6546,13 @@ function frame(now){
            inside the silhouette each pixel sits, so use it as light: the rim
            falls away dark, the belly catches it. Flat fields of one colour per
            palette letter is what made these read as cardboard. */
-        const lit = 0.72 + 0.055*v.depth + 0.06*Math.sin(v.x*1.7) * 0.5;
+        const lit = 0.72 + 0.055*(v.shade||v.depth) + 0.06*Math.sin(v.x*1.7) * 0.5;
         const col = [Math.min(1,base[0]*lit), Math.min(1,base[1]*lit), Math.min(1,base[2]*lit)];
         let lx = v.x*unit, ly = v.y*unit;
+        /* An extruded pixel sits on the mid-plane and is stretched to its own
+           depth; a forged voxel has a z of its own and is a cube. `lz` is 0
+           for every one of the sixteen drawings, so this costs them nothing. */
+        const lz = (v.z||0)*unit;
         const dz = v.depth*unit;
         if(v.part===3){            // legs
           /* a spider runs every leg on its own phase, off its position, so the
@@ -5845,7 +6570,7 @@ function frame(now){
           ly += bob;
         }
         // local (lx, ly, 0) rotated about Y, then placed on the creature
-        const wx = e.x + cy*lx, wz = e.z - sy*lx;
+        const wx = e.x + cy*lx + sy*lz, wz = e.z - sy*lx + cy*lz;
         const o = n*CUBE_STRIDE;
         compose(d,o, wx, e.y+ly, wz, 0, yaw, 0, unit*1.02, unit*1.02, dz);
         /* whitens when hit, warms while its shot lines up — the same tells the
@@ -5873,9 +6598,9 @@ function frame(now){
       for(const v of V.vox){
         if(n>=hellB.max) break;
         const col=pal[v.ch]||pal.m;
-        const lx=v.x*unit, ly=v.y*unit;
+        const lx=v.x*unit, ly=v.y*unit, lz=(v.z||0)*unit;
         const o=n*CUBE_STRIDE;
-        compose(d,o, c.x+cy*lx, c.y+ly, c.z-sy*lx, 0, yaw, 0,
+        compose(d,o, c.x+cy*lx+sy*lz, c.y+ly, c.z-sy*lx+cy*lz, 0, yaw, 0,
                 unit*1.02, unit*1.02, v.depth*unit);
         d[o+16]=Math.min(1,col[0]+k*0.95); d[o+17]=Math.min(1,col[1]+k*0.55);
         d[o+18]=Math.min(1,col[2]+k*0.30);
