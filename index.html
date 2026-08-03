@@ -1704,6 +1704,45 @@ function isSolidCell(x,y,z){
   if(!inside(x,y,z)) return true;             // outside = bedrock
   return G.st[idx(x,y,z)] !== AIR;
 }
+/* ---------- two scales, and the difference between them -----------------
+   The dungeon is architecture: ROCK walls at a full 2.8 m block, corridors
+   and arenas you walk through. The PUZZLE is not architecture. A mine or a
+   safe block is meant to be something you could hold — Marcelo's measure was
+   a keyboard in your hands — so a cluster reads as a structure you orbit and
+   analyse from outside rather than a wall you tunnel into.
+
+   Two separate questions fall out of that and they have to stay separate:
+   how big a puzzle cell is DRAWN, and whether it stops your body. A cluster
+   you walk around cannot also be a cluster you walk into. ROCK answers the
+   second question on its own — it is what holds you up and what boxes you in
+   — and the puzzle cells stop being furniture.
+
+   Both are knobs, and both revert to the old behaviour at 1: ?cellSize=1
+   puts the board back to player-sized blocks, ?cellSolid=1 makes them stop
+   you again. 3D Minesweeper keeps the old behaviour until this is judged,
+   because there the board IS the floor. */
+let CELL_S = 1.0;                 // how big a puzzle cell is drawn, in blocks
+let CELL_B = true;                // ...and whether it blocks the body
+function setCellScale(dungeon){
+  const q = (k,d) => { const m=new RegExp('[?&]'+k+'=([\\d.]+)').exec(location.search);
+                       return m ? parseFloat(m[1]) : d; };
+  CELL_S = q('cellSize',  dungeon ? 0.125 : 1.0);
+  CELL_B = q('cellSolid', dungeon ? 0     : 1) > 0.5;
+}
+/* What stops you moving. ROCK and the world's shell, always; a puzzle cell
+   only if it is still being treated as furniture. */
+function blocksBody(x,y,z){
+  if(!inside(x,y,z)) return true;
+  const st = G.st[idx(x,y,z)];
+  if(st === AIR) return false;
+  if(st === ROCK) return true;
+  return CELL_B;
+}
+/* And how near the middle of a cell a shot has to pass to count as hitting
+   it. At full size this is the whole cell and the DDA answer is exact; at an
+   eighth it is a small target you have to walk up to, which is the point —
+   no aim assist was the explicit call. */
+const cellHitR = () => BLOCK*0.5*CELL_S*1.08;
 
 /* ---------- world shape -------------------------------------------------
    A shaper runs before a single mine exists. It writes ROCK where the level
@@ -2198,6 +2237,9 @@ function genWorld(d){
      board when you are playing the plain puzzle. When the dungeon learns to
      differ per difficulty, this is the one line that changes. */
   const dung = G.mode===MODE_DUNGEON;
+  /* The dungeon gets hand-sized puzzle cells; the plain puzzle keeps whole
+     blocks, because there the board IS the floor you are standing on. */
+  setCellScale(dung);
   const D = dung ? DUNGEON : DIFFS[d];
   G.diff=d; G.nx=D.nx; G.nz=D.nz; G.ny=D.ny;
   const N = G.nx*G.ny*G.nz;
@@ -3093,7 +3135,7 @@ function rebuildWorld(){
     if(G.fuse>0 && G.boomCell && x===G.boomCell[0] && y===G.boomCell[1] && z===G.boomCell[2]){
       const k = 1 - G.fuse/FUSE_T;                    // 0 -> 1 conforme queima
       const tremor = Math.sin(tGlobal*46)*0.05*k;
-      put((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, BLOCK*(1+0.16*k+tremor),
+      put((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, BLOCK*CELL_S*(1+0.16*k+tremor),
           [1.0, 0.42-0.34*k, 0.16-0.10*k], 0.5, 1, 0, 0);
       continue;
     }
@@ -3109,7 +3151,9 @@ function rebuildWorld(){
        hold long enough to walk around the block and look at it. */
     const left = G.echoT[i] - tGlobal;
     const echo = left > 0 ? Math.min(1, left/(G.echoD[i]*0.34 || 1)) : 0;
-    put((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, BLOCK,
+    /* THE PUZZLE CELL, at its own scale. The shell and the ROCK above are
+       still whole blocks — that is the cave. This is the thing in it. */
+    put((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, BLOCK*CELL_S,
         m.c, ((i*2654435761)>>>0 %1000)/1000, G.lava?emis:(m.gold?0.16:0),
         G.st[i]===MARKED?1:0, echo, echo>0 ? echoColOf(i) : null);
   }
@@ -3211,7 +3255,7 @@ function collideAxis(axis, delta){
   const z0=Math.floor(minZ/BLOCK), z1=Math.floor(maxZ/BLOCK);
   let hit=false, edge = delta>0 ? Infinity : -Infinity;
   for(let y=y0;y<=y1;y++) for(let z=z0;z<=z1;z++) for(let x=x0;x<=x1;x++){
-    if(!isSolidCell(x,y,z)) continue;
+    if(!blocksBody(x,y,z)) continue;
     hit=true;
     const c = (axis===0?x:axis===1?y:z);
     if(delta>0) edge = Math.min(edge, c*BLOCK);
@@ -3831,7 +3875,7 @@ function askHint(){
 const enemies=[], eshots=[];
 
 function solidAtWorld(x,y,z){
-  return isSolidCell(Math.floor(x/BLOCK), Math.floor(y/BLOCK), Math.floor(z/BLOCK));
+  return blocksBody(Math.floor(x/BLOCK), Math.floor(y/BLOCK), Math.floor(z/BLOCK));
 }
 /* local X -> right, Y -> up, Z -> forward. Euler angles cannot express the
    slug stuck to a wall, so enemies get a basis matrix instead. */
@@ -5971,7 +6015,7 @@ let last=performance.now(), nextWhisper=25+Math.random()*30, tGlobal=0;
 /* All three are tunable from the URL — ?dark=0.06&lantern=0.05&glyph=0.06 —
    because "way darker" is a look, and a look is found by turning a knob and
    looking, not by a round trip through a rebuild. */
-const litQ = k => { const m=new RegExp('[?&]'+k+'=([\d.]+)').exec(location.search);
+const litQ = k => { const m=new RegExp('[?&]'+k+'=([\\d.]+)').exec(location.search);
                     return m ? parseFloat(m[1]) : null; };
 const MAXL       = 48;        // most lights in one frame; the shader matches
 /* Zero. Not nearly zero — zero. Anywhere no torch reaches and the player is
