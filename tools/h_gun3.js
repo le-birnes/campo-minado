@@ -87,9 +87,31 @@ setTimeout(()=>{
                              ' — the first one never plays'
                            : 'DID NOT REPLACE IT'));
 
-    /* --- knockback, from one shot with the slate clean --- */
-    R.push('knockback ' + kick.toFixed(2) + ' m/s from one shot (SHOT_KICK ' +
-           SHOT_KICK + ', horizontal share cos(pitch))');
+    /* Nothing lands in P.vx any more — that is the bug, not the measurement.
+       The real check is the displacement one further down. */
+    if(kick > 0.001) R.push('WARNING: ' + kick.toFixed(2) +
+                            ' m/s leaked into P.vx, where the controller eats it');
+
+    /* --- does the kick actually MOVE anything? ---
+       This is the whole point: an impulse in P.vx was being deleted by the
+       movement controller inside two frames and moved the player about a
+       centimetre and a half. Fire once, stand still, integrate, and measure
+       how far back it actually went. */
+    IN.f=IN.b=IN.l=IN.r=0; IN.mf=IN.ms=0; IN.sprint=false;
+    P.vx=P.vz=P.kx=P.kz=0; P.vy=0;
+    const x0=P.x, z0=P.z;
+    fire();
+    const kx0 = Math.hypot(P.kx, P.kz);
+    for(let k=0;k<40;k++) physics(1/60);
+    const slid = Math.hypot(P.x-x0, P.z-z0);
+    R.push('one shot: kick velocity ' + kx0.toFixed(2) + ' m/s -> slid ' +
+           (slid*100).toFixed(1) + ' cm (v0*tau predicts ' +
+           (kx0*KICK_TAU*100).toFixed(1) + ')' +
+           (slid > 0.05 ? '' : ' — STILL BEING DELETED'));
+    /* And the view punches without moving the aim. */
+    recoil = 1;
+    R.push('view punch ' + (recoil*VIEW_PUNCH*180/Math.PI).toFixed(1) +
+           ' deg at the trigger, aim pitch untouched at ' + P.pitch.toFixed(3));
 
     /* --- smoke --- */
     const smoke = particles.slice(nP).filter(p => p.e === 0 && p.c[0] < 0.2);

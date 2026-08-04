@@ -1700,7 +1700,20 @@ const G = {
   musVol:25, musMuted:false, best:{},
   boom:0, win:false, shake:0, slowmo:1, fuse:0, boomCell:null
 };
-const P = { x:0,y:0,z:0, vx:0,vy:0,vz:0, yaw:0,pitch:0, ground:false, bob:0, step:0,
+/* kx/kz are the KICK, and they are separate from vx/vz for a reason that
+   took a measurement to see. The movement controller does not accumulate
+   velocity, it CHASES a target one:
+
+       P.vx += (wx*target - P.vx) * min(1, 52*dt)
+
+   At 60 fps that factor is 0.87, so standing still it multiplies your
+   velocity by 0.13 every frame. An impulse added to P.vx is 13% of itself
+   after one frame and gone inside two — 0.85 m/s of recoil moved the player
+   about a centimetre and a half, which is why the kick could not be felt: it
+   was not small, it was being deleted. Kept here, it decays on its own terms
+   and is added at integration time. */
+const P = { x:0,y:0,z:0, vx:0,vy:0,vz:0, kx:0,kz:0, yaw:0,pitch:0,
+            ground:false, bob:0, step:0,
             coyote:0, jumps:0, hp:4, hurtT:0 };
 const IN = { f:0,b:0,l:0,r:0, sprint:false,
              jumpHeld:false, jumpFired:false, jumpBuf:0,
@@ -2438,7 +2451,7 @@ function genWorld(d){
   P.hp = 4; P.hurtT = 0;   // counted in halves
 
   P.x=L.spawn[0]; P.y=L.spawn[1]; P.z=L.spawn[2];
-  P.vx=P.vy=P.vz=0; P.yaw=L.yaw; P.pitch=L.pitch||0; P.ground=true; P.coyote=COYOTE;
+  P.vx=P.vy=P.vz=0; P.kx=P.kz=0; P.yaw=L.yaw; P.pitch=L.pitch||0; P.ground=true; P.coyote=COYOTE;
   P.jumps=0;
   syncPowHud();
   particles.length=0; sprites.length=0; pellets.length=0; debris.count=0;
@@ -2600,7 +2613,22 @@ const PEL_SPD   = 78;               // m/s. 44 read as a thrown handful
    is a launch, and a launch on every block you open would rewrite the
    movement of the whole game — and the bot's with it. This is a nudge you
    feel and walk out of, not a shove that moves you anywhere. */
-const SHOT_KICK = 0.85;
+const SHOT_KICK = (function(){ const m=/[?&]kick=([\d.]+)/.exec(location.search);
+                               return m ? parseFloat(m[1]) : 2.4; })();
+const KICK_TAU  = 0.07;        // seconds; v0*tau is how far it shoves you
+/* AND THE VIEW PUNCHES. The gun kicking on its own is a puppet show — what
+   sells a shot is the ROOM moving. This rides on `recoil`, which is already
+   1 at the trigger and 0 about a sixth of a second later.
+
+   Applied to the rendered pitch ONLY, never to aimRay. There is a scar in
+   this file about exactly that: shake used to jitter the angles while the aim
+   used the unshaken ones, and the picture lurched around independently of the
+   mouse. The difference here is that this is not random per frame — it is one
+   smooth rise and fall caused by your own trigger, three degrees at its
+   worst, which is a fifth of a block at ten metres. The aim never moves, so
+   the bot and the crosshair still agree about what you are pointing at. */
+const VIEW_PUNCH = (function(){ const m=/[?&]punch=([\d.]+)/.exec(location.search);
+                                return m ? parseFloat(m[1]) : 0.055; })();
 /* And it smokes. Four puffs, dark, drifting up out of the barrel — smoke has
    to be CUBES rather than the glow sprites everything else uses, because
    those are drawn additively and additive can only ever make things
@@ -3692,17 +3720,23 @@ function physics(dt){
   if(P.vy < -60) P.vy = -60;
 
   // substeps so we cannot tunnel through a block
-  const dist = Math.hypot(P.vx,P.vy,P.vz)*dt;
+  const dist = Math.hypot(P.vx+P.kx, P.vy, P.vz+P.kz)*dt;
   const steps = Math.max(1, Math.ceil(dist/0.4));
   const sdt = dt/steps;
   let grounded=false;
   for(let s=0;s<steps;s++){
-    collideAxis(0, P.vx*sdt);
-    collideAxis(2, P.vz*sdt);
+    collideAxis(0, (P.vx + P.kx)*sdt);
+    collideAxis(2, (P.vz + P.kz)*sdt);
     const h = collideAxis(1, P.vy*sdt);
     if(h){ if(P.vy<0) grounded=true; P.vy=0; }
   }
   P.ground = grounded;
+  /* Exponential, so the shove is hardest at the instant of the shot and
+     nothing a fifth of a second later. It walks through walls the same way
+     ordinary movement does — collideAxis handles it — so a shot taken with
+     your back to the rock does not push you into it. */
+  const kf = Math.exp(-dt/KICK_TAU);
+  P.kx *= kf; P.kz *= kf;
 
   const spd = Math.hypot(P.vx,P.vz);
   if(P.ground && spd>0.4){
@@ -3734,8 +3768,8 @@ function shoot(){
   /* Every shot shoves you a little now. The finale keeps its own, far bigger
      kick on top: same weapon, but what it does to the person holding it still
      depends on what is loaded in it. */
-  P.vx -= r.dx*SHOT_KICK; P.vz -= r.dz*SHOT_KICK;
-  G.shake = Math.max(G.shake, 0.035);
+  P.kx -= r.dx*SHOT_KICK; P.kz -= r.dz*SHOT_KICK;
+  G.shake = Math.max(G.shake, 0.05);
   /* And the pump moves when the rack is heard, not when the trigger is
      pulled. shotgun() hands back the delay it scheduled the sound for. */
   PUMPA.at = tGlobal + rackIn;
@@ -3769,7 +3803,7 @@ function shoot(){
          r.dx*2.0 + (wrnd()-.5)*0.9,
          r.dy*2.0 + (wrnd()-.5)*0.9 + 0.45,
          r.dz*2.0 + (wrnd()-.5)*0.9,
-         BLOCK*(0.045+wrnd()*0.030), 0.40+wrnd()*0.30,
+         BLOCK*(0.015+wrnd()*0.011), 0.40+wrnd()*0.30,
          [0.115,0.110,0.115], 0, -0.05);
   /* The pellets leave the muzzle but they land on the CROSSHAIR, because the
      ray does. A barrel sitting off to one side of your eye and firing exactly
@@ -7324,7 +7358,7 @@ function frame(now){
   const camX = P.x + (Math.random()-0.5)*shk*0.42;
   const camY = P.y + EYE + Math.sin(P.bob*2)*0.035 + (Math.random()-0.5)*shk*0.42;
   const camZ = P.z + (Math.random()-0.5)*shk*0.42;
-  const yaw = P.yaw, pit = P.pitch;
+  const yaw = P.yaw, pit = P.pitch + recoil*VIEW_PUNCH;
   const basis = viewFrom(camX, camY, camZ, yaw, pit, viewM);
   const aspect = W/H;
   const projMain = m4.persp(70*Math.PI/180, aspect, 0.08, 400);
