@@ -3078,6 +3078,50 @@ const snd = (function(){
   const SEMI = s => Math.pow(2, s/12);
   /* 'x' is a hit. Sixteen of them is one bar. */
   const P16 = p => p.split('').map(c => c==='x' ? 1 : 0);
+  /* ======================================================================
+     GROOVE
+     ======================================================================
+     The bass used to be the chord's root on six fixed sixteenths, the same
+     six in every bar of every section of every theme — so the low end never
+     moved, and a part that never moves is not a bassline, it is a drone with
+     rhythm. There was no snare anywhere but hell, and the hats were a coin
+     toss per offbeat, which is not a pattern, it is sixteen unrelated
+     decisions.
+
+     So: real lines, chosen from a small library, and the three parts rotate
+     INDEPENDENTLY. Four basslines against four snares against four hat
+     patterns is sixty-four combinations out of twelve short patterns, and
+     the section change moves each of them by a different amount, so the loop
+     keeps turning over long after you would have learned any one of them.
+
+     Bass degrees, relative to whatever the bar's chord is:
+       r root   t minor third   f fifth   b flat seventh
+       o octave u the fifth below   n the second below         . rest      */
+  const BDEG = {r:0, t:3, f:7, b:10, o:12, u:-5, n:-2};
+  const BASS = p => p.split('').map(c => c==='.' ? null : BDEG[c]);
+  const BASSLINES = [
+    BASS('r...r...f...r..o'),   // plain, on the front foot
+    BASS('r..r..f...r.o..f'),   // pushed, lands late twice
+    BASS('r...ro..f..bf...'),   // walks up into the fifth
+    BASS('r.o.r.f.b...r.f.')    // busiest: the one that swings hardest
+  ];
+  const SNARES = [
+    P16('....x.......x...'),    // the backbeat, and nothing else
+    P16('....x.....x.x...'),    // with a push before the four
+    P16('....x..x....x..x'),    // sixteenth pickups
+    P16('....x.......x.x.')     // a flam into the turnaround
+  ];
+  const HATS = [
+    P16('..x...x...x...x.'),    // quarters, offbeat
+    P16('..x..xx...x..xx.'),    // doubled
+    P16('.x.x.x.x.x.x.x.x'),    // straight eighths
+    P16('..x...x..x..x.x.')     // limping, on purpose
+  ];
+  /* Swing. Every odd sixteenth is late by this share of a sixteenth, which is
+     the whole difference between a drum machine and a drummer. Applied to
+     everything EXCEPT the kick, because the kick is the grid the rest is late
+     against — swing it too and nothing is late at all. */
+  const SWING = 0.20;
   /* Each mode has FOUR sections, and every 32 bars it moves to a different one
      at random. A section changes the drum pattern, the four-bar harmony, and
      the two-note figure the lead plays, so the loop stays recognisably the same
@@ -3218,6 +3262,11 @@ const snd = (function(){
       }
       const V=T.vars[mVar];
       const chord = T.root*SEMI(V.prog[bar]);
+      /* Rotated by different amounts so they do not all turn over together. */
+      const BL = V.bass  || BASSLINES[(mVar + mSection)     % BASSLINES.length];
+      const SN = V.snare || SNARES   [(mVar + mSection*3)   % SNARES.length];
+      const HT = V.hats  || HATS     [(mVar*2 + mSection)   % HATS.length];
+      const ts = (s%2===1) ? t + sixteenth*SWING : t;   // the late half
 
       if(V.kick[s]){                                  // the pulse
         const o=ac.createOscillator(); o.type='sine';
@@ -3233,15 +3282,27 @@ const snd = (function(){
         if(off!==null && off!==undefined) chug(chord*SEMI(off), t, sixteenth*0.94, 0.30);
         if(s===4 || s===12) snare(t);
       }
-      if(s%2===1 && Math.random()<T.hat){             // offbeat tick
+      /* Hats follow a pattern now, and the odd ones are the late ones. T.hat
+         stopped being "how often" and became "how hard", which is what a hat
+         control is everywhere else. */
+      if(HT[s]){
         const n=noise(0.03);
         const f=ac.createBiquadFilter(); f.type='highpass'; f.frequency.value=6500;
         const g=ac.createGain();
-        g.gain.setValueAtTime(0.10,t); g.gain.exponentialRampToValueAtTime(0.0001,t+0.035);
-        n.connect(f); f.connect(g); g.connect(mBus); n.start(t); n.stop(t+0.05);
+        const vel = 0.055 + T.hat*0.14*(s%4===2 ? 1.0 : 0.62);   // accent the beat
+        g.gain.setValueAtTime(vel,ts); g.gain.exponentialRampToValueAtTime(0.0001,ts+0.035);
+        n.connect(f); f.connect(g); g.connect(mBus); n.start(ts); n.stop(ts+0.05);
       }
-      if(!T.hell && (s===0||s===3||s===6||s===8||s===11||s===14))  // bass, syncopated
-        blip('sawtooth', chord, t, 0.20, T.saw, 420, 4);
+      /* A backbeat outside hell, which never had one. */
+      if(!T.hell && SN[s]) snare(ts);
+      /* AND A LINE, not a pedal. It moves with the bar's chord and it lands
+         off the grid where the pattern says so. */
+      if(!T.hell){
+        const bd = BL[s];
+        if(bd !== null && bd !== undefined)
+          blip('sawtooth', chord*SEMI(bd), ts, s%2 ? 0.16 : 0.22,
+               T.saw*(s%4===0 ? 1.0 : 0.78), 420, 4);
+      }
       if(s===0){                                      // pad: the harmony that moves
         blip('triangle', chord*2,        t, spb*3.6, T.pad, 900);
         blip('triangle', chord*2*SEMI(3),t, spb*3.6, T.pad*0.8, 900);
