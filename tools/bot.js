@@ -120,7 +120,7 @@ const stats = { walked:0, jumps:0, shots:0, flags:0, noEffect:0,
                 routes:0, routeWon:0, routeStuck:0, routeNone:0, routeSaved:0,
                 bored:0, reroutes:0, kills1:0,
                 goals:0, goalDone:0, goalLost:0, goalDrop:0, hunts:0,
-                busted:0, bustOpen:0 };
+                busted:0, bustOpen:0, crawlUp:0 };
 
 /* ---------------- audit ---------------- */
 let baseAir = 0, baseRock = 0;
@@ -354,6 +354,7 @@ function closeOn(cell){
   const [cx,cy,cz]=cellXYZ(cell);
   const tx=(cx+0.5)*BLOCK, tz=(cz+0.5)*BLOCK, ty=(cy+0.5)*BLOCK;
   const climb = ty > P.y + BLOCK*1.5;      // needs height: give it longer
+  let lastFlat = 1e9, stall = 0;
   for (let k=0;k<(climb?4.0:2.0)/DT;k++){
     const dx=tx-P.x, dz=tz-P.z;
     const flat=Math.hypot(dx,dz);
@@ -365,8 +366,29 @@ function closeOn(cell){
        block, so anything ABOVE it was unreachable — it fell into a lower
        chamber, and every job on the floor it came from became "can't get
        there". Jump toward height whether or not it is standing on anything. */
-    if (ty > P.y + BLOCK*0.6 && (P.ground || (P.vy < 1.0 && P.jumps < MAX_JUMPS)))
+    /* THE FIRST PIECE OF THE CRAWL.
+
+       Up is ALWAYS available. Twenty mid-air jumps, none of them needing the
+       ground, means nothing in this cave can actually trap the body — so
+       "blocked" is never a fact about the world, it is a fact about the plan.
+       The old rule only jumped when the TARGET was overhead, which meant a
+       wall between it and something at its own height stopped it dead, and
+       the bot answered that by shooting the wall.
+
+       So: jump for height when the target is above, and ALSO jump the moment
+       the flat distance stops falling — that is a wall, and a wall is
+       something you go over. `stall` is the micro-wander Marcelo watched
+       working: a couple of frames of not-closing is enough to change the
+       plan, not enough to look like dithering. */
+    const closing = flat < lastFlat - 0.004;
+    if (closing) stall = 0; else stall++;
+    lastFlat = flat;
+    const blocked = stall >= 3;
+    if ((ty > P.y + BLOCK*0.6 || blocked) &&
+        (P.ground || (P.vy < 1.0 && P.jumps < MAX_JUMPS))){
       jumpNow();
+      if (blocked) stats.crawlUp++;
+    }
     else IN.jumpHeld=false;
     if (!tick()){ IN.f=0; IN.jumpHeld=false; return false; }
     stats.walked += SPD_RUN*DT;
@@ -1800,6 +1822,7 @@ log(`clue-led digs: ${stats.clueWork} (shots aimed at an unfinished number's own
 log(`solver rules: ${Object.keys(stats.byRule).map(k=>k+' '+stats.byRule[k]).join(', ')||'none'}`);
 log(`hunting: ${stats.hunts} steps spent going to find something it could not see`);
 log(`cinderstone: ${stats.busted} shots into walls in the way, ${stats.bustOpen} of them broke through`);
+log(`crawl: ${stats.crawlUp} times it went UP because forward had stopped working`);
 log(`combat: killed ${stats.killed} in ${stats.bursts} engagements, ${stats.shotAt} shots `+
     `(${stats.killed?(stats.shotAt/stats.killed).toFixed(1):'-'} per kill), ${stats.dodged} dodges, `+
     `${stats.nudges} nudges, ${stats.chases} chases, ${stats.climbs} climbs, `+
