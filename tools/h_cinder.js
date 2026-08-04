@@ -35,7 +35,10 @@ setTimeout(()=>{ const R=[]; try{
   }
   R.push('wall gone after '+broke+' shots, rockCount '+rock0+' -> '+G.rockCount);
   R.push('CINDER '+JSON.stringify(CINDER)+'  BEDROCK(shell) '+JSON.stringify(BEDROCK));
-  R.push('lantern walled up at cell '+G.lampCell+(G.lampCell>=0?' (found)':' — NONE PLACED'));
+  let rock=0, coat=0;
+  for(let i=0;i<N;i++){ if(G.st[i]===ROCK){ rock++; if(G.coat[i]) coat++; } }
+  R.push('rock '+rock+', of which coat '+coat+' ('+(100*coat/rock).toFixed(0)+'%) — rest is permanent');
+  R.push('lantern walled up at cell '+G.lampCell+(G.lampCell>=0?' (behind coat: '+(G.coat[G.lampCell]?'yes':'NO')+')':' — NONE PLACED'));
   const d0=darkNow(); G.lamp=3; const d1=darkNow();
   R.push('ambient '+d0.toFixed(3)+' -> '+d1.toFixed(3)+' after 3 lanterns (+0.01 each)');
   document.body.dataset.r=R.join(' | ');

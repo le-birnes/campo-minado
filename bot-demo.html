@@ -2494,19 +2494,32 @@ function genWorld(d){
      ground you cross BEFORE the first minefield — a single cinderstone wall
      has a lantern behind it. Nothing marks it. You find it by breaking a wall
      that did not need breaking, which is the only way a secret is a secret. */
+  /* CINDERSTONE IS A COAT, ONE BLOCK THICK, AND THE COAT IS DECIDED HERE.
+     It was every ROCK cell, which in a dungeon is 6601 of 7776 — so you could
+     stand and chew straight through eleven of them, and "breakable walls"
+     turned into "the whole cave is soft".
+     It has to be settled ONCE, now, at generation: a cell is coat if it has a
+     face on the open air TODAY. Deciding it live would be no different from
+     before, because breaking the skin exposes the next layer and that would
+     become skin in its turn, all the way to the far side.
+     So: one block of cinderstone over everything, and solid rock behind it
+     for good. */
+  G.coat = new Uint8Array(N);
+  for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
+    const ci = idx(x,y,z);
+    if(G.st[ci]!==ROCK) continue;
+    for(const [dx,dy,dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]){
+      const X=x+dx,Y=y+dy,Z=z+dz;
+      if(inside(X,Y,Z) && G.st[idx(X,Y,Z)]===AIR){ G.coat[ci]=1; break; }
+    }
+  }
   G.lampCell = -1;
   if(dung){
     const pool=[];
     const yTop = Math.max(0, G.ny - DL_H);
     for(let y=yTop;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
       const i2=idx(x,y,z);
-      if(G.st[i2]!==ROCK) continue;
-      let open=false;                        // it has to be shootable
-      for(const [dx,dy,dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]){
-        const X=x+dx,Y=y+dy,Z=z+dz;
-        if(inside(X,Y,Z) && G.st[idx(X,Y,Z)]===AIR){ open=true; break; }
-      }
-      if(open) pool.push(i2);
+      if(G.coat[i2]) pool.push(i2);          // only a coat wall can be opened
     }
     if(pool.length) G.lampCell = pool[(rnd()*pool.length)|0];
   }
@@ -3625,8 +3638,13 @@ function rebuildWorld(){
       /* Every shot takes it a fifth of the way to black. That IS the damage
          display — no overlay, no second draw, and it reads at any distance
          and from any angle, which a decal stuck to one face does not. */
-      const k = 1 - (G.rockHit[i]||0)/CINDER_HP;
-      const base = hs ? hs[0] : (cryst?BEDCRYST:CINDER);
+      /* Coat reads as cinderstone and darkens as it takes shots. What is
+         behind it is the same black as the shell, because it is the same
+         promise: this does not open, ever. Breaking the skin is how you find
+         that out — the black is only ever seen once you have earned it. */
+      const isCoat = G.coat && G.coat[i];
+      const k = isCoat ? 1 - (G.rockHit[i]||0)/CINDER_HP : 1;
+      const base = hs ? hs[0] : (cryst?BEDCRYST:(isCoat?CINDER:BEDROCK));
       put((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, BLOCK,
           [base[0]*k, base[1]*k, base[2]*k], (s%1000)/1000,
           (hs ? hs[1] : cryst?1:0) * k, 0, 0);
@@ -4009,7 +4027,8 @@ function shoot(){
        different things under that name: cinderstone walls INSIDE the grid,
        which break, and the shell outside it, which is the edge of the world.
        Telling them apart is one inside() test and it is the whole feature. */
-    if(inside(hit.x,hit.y,hit.z) && G.st[idx(hit.x,hit.y,hit.z)]===ROCK){
+    if(inside(hit.x,hit.y,hit.z) && G.st[idx(hit.x,hit.y,hit.z)]===ROCK
+       && G.coat && G.coat[idx(hit.x,hit.y,hit.z)]){
       const w = idx(hit.x,hit.y,hit.z);
       const n = G.rockHit[w] = Math.min(CINDER_HP, G.rockHit[w]+1);
       G.dirty = true;                       // it just got darker
