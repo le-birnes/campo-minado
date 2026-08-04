@@ -143,7 +143,10 @@ function audit(tag){
   if (air-baseAir !== G.revealed) err(`${tag}: revealed=${G.revealed} but ${air-baseAir} opened`);
   if (marked!==G.marked)          err(`${tag}: G.marked=${G.marked} but ${marked} flagged`);
   if (mines!==G.mines)            err(`${tag}: mines=${G.mines} but ${mines} placed`);
-  if (rock!==baseRock)            err(`${tag}: structure changed ${baseRock} -> ${rock}`);
+  /* Cinderstone walls break now, so structure may go DOWN. It must never go
+     up: that would mean rock appearing out of nothing. */
+  if (rock>baseRock)              err(`${tag}: structure grew ${baseRock} -> ${rock}`);
+  baseRock = Math.min(baseRock, rock);
   if (G.revealed+openable !== G.safeTotal)
     err(`${tag}: ${G.revealed} opened + ${openable} openable != safeTotal ${G.safeTotal}`);
   if (G.state==='play' && mineAir) err(`${tag}: ${mineAir} mine(s) revealed while alive`);
