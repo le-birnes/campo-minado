@@ -1,1 +1,8 @@
 shots/
+
+# The untrimmed shotgun recordings Marcelo supplied: 1.7 MB of third-party
+# sound-library files. The game does not need them -- what it plays is baked
+# into index.html by tools/bake_snd.py -- and this repository is PUBLIC, so
+# redistributing someone else's audio library from it is not a call to make
+# by accident. Keep the originals locally; re-bake from them when needed.
+Shotgun src/

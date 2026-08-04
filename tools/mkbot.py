@@ -1,4 +1,4 @@
-import sys, os
+import sys, os, re
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 SP   = HERE + os.sep
@@ -51,6 +51,29 @@ s = s.replace(OLD, HOOK)
 import lint_bot
 if lint_bot.main() != 0:
     raise SystemExit('mkbot: refusing to build, the hook and bot.js disagree')
+
+# THE SOUND BANK DOES NOT COME TO THE TEST RIG.
+#
+# bot.js mutes the game on its first line, so on() is false for the whole run
+# and not one sample is ever decoded or played. The 260 KB of base64
+# recordings in index.html are therefore pure ballast here — and measured,
+# they are not free ballast. Interleaved against the same build without
+# them, a bot page carrying the blob finished 0 runs out of 10 where the one
+# without it finished 2 of 8, the same rate as the build from before the
+# sound work existed. It is not the DECODING: a build with bankLoad() removed
+# but the blob still in the page scored 0 of 8 as well, and so did a page
+# padded with the same weight of the letter A. Whatever headless Chrome does
+# with a very large inline script, it does it whether or not anyone reads it.
+#
+# (The rig ALSO has a much older intermittent hang that fails ~60% of runs on
+# a completely unmodified game. That one is still open. This only stops the
+# audio from making it near-total.)
+s, stripped = re.subn(r'window\.SND_B64\s*=\s*\{.*?\n\};', 'window.SND_B64={};',
+                      s, flags=re.S)
+if 'SND_B64' in s and not stripped:
+    print('mkbot: WARNING — index.html has a sound bank this could not strip. '
+          'If the blob was renamed, fix the pattern above: the bot pages get '
+          'much slower and much flakier when it is left in.')
 
 bot = open(os.path.join(HERE, 'bot.js'), encoding='utf-8').read()
 s = s + '\n<script>\n' + bot + '\n</script>\n'
