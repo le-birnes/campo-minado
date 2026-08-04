@@ -249,6 +249,7 @@ function inView(cell){
    step aside — a pace left, a pace right, or one small hop to see over — and
    look again. Firing at a target you cannot actually see is how a shot ends up
    in a number, or in the wrong block entirely. */
+const R_BUST = {n:0};        // shots spent on walls this run; see bustWall
 /* THE WALL IN THE WAY IS A TARGET NOW.
 
    The bot's whole model of the world predates cinderstone: structure was
@@ -267,6 +268,16 @@ function inView(cell){
 function bustWall(cell){
   PH('bustWall'); WD();
   if (!G.coat) return false;                     // an older board, no coat
+  /* A SECRET, NOT A TOOL. Marcelo's ruling, and the measurement that earned
+     it: one four-zone run put 249 shots into walls and broke 42 of them. That
+     is not a hidden thing a player might discover, that is a mechanic — and
+     anything the bot leans on that hard, players will too.
+     So it is allowed for one case only: an INTANGIBLE mine. Every safe block
+     already out, nothing left on the board but mines, and one of them with no
+     line to it from anywhere. Before that point there is always another way
+     round and the bot is required to find it. */
+  if (G.safeTotal - G.revealed > 0) return false;
+  if (R_BUST.n >= 12) return false;              // and never more than a few
   const [cx,cy,cz] = cellXYZ(cell);
   aimAt((cx+0.5)*BLOCK, (cy+0.5)*BLOCK, (cz+0.5)*BLOCK);
   const r = aimRay();
@@ -275,6 +286,7 @@ function bustWall(cell){
   const w = idx(h.x,h.y,h.z);
   if (G.st[w] !== ROCK || !G.coat[w]) return false;   // rock that never gives
   stats.lastAct = 'bust';
+  R_BUST.n++;
   shoot(); stats.shots++; stats.busted++;
   if (G.st[w] === AIR) stats.bustOpen++;             // that was the fifth
   return true;
@@ -1426,9 +1438,7 @@ function climb(R){
         shoot(); stats.shots++;
         if (G.revealed > before) return A('dug one of the last safe blocks', 'lastfew');
         refuse(best);
-      } else if (bustWall(best))
-        return A('shot the cinderstone in the way of the last blocks', 'bust');
-      else refuse(best);
+      } else refuse(best);   /* no wall-breaking for BLOCKS — see bustWall */
       R.note = 'hunting the last safe blocks';
       R.moved = true;
       return true;
@@ -1534,6 +1544,7 @@ function playGame(diff, mode, label){
   audit(label+' fresh');
 
   const R = newRun(); R.label = label;
+  R_BUST.n = 0;
   trail.length = 0;
   let step = 0;
   const qs = /[?&]steps=(\d+)/.exec(location.search);
