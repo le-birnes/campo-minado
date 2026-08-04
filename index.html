@@ -714,7 +714,7 @@ const DIFFS = [
      50/50 is a wall, because a wall isolates a pocket that no clue outside it
      can reach. 6-12% structure took it to 4 in 14 before sampling, which
      rejection sampling then finishes. */
-  {name:"Sorcerer",   nx:12, nz:12, ny:3, dens:0.11, rough:[0.06,0.12], guess:[0,0],
+  {name:"Sorcerer",   nx:12, nz:12, ny:3, dens:0.11, rough:[0.06,0.12], guess:[0,1],
    clusters:[15,20], csize:[2,4], depth:[0.06,0.30]},
   // Arcane is not just denser: it is the one arena with a shape.
   /* Arcane is as deep as a guess-free board gets, and that ceiling is real.
@@ -726,11 +726,19 @@ const DIFFS = [
        clusters 30-60 of 3-8  12% stacked, 154 mines, 2-14 guesses
        clusters 40-80 of 4-10 21% stacked, 252 mines, 8-37 guesses
 
-     Since these boards must stay solvable, Arcane sits at the top of the first
-     band and leans on sampling to find the deepest deal that still needs no
-     coin toss. If a guess ever becomes acceptable here, the depth available
-     roughly quadruples. */
-  {name:"Arcane",     nx:15, nz:15, ny:4, dens:0.20, rough:[0.16,0.30], guess:[0,0],
+     A guess IS acceptable here now: Arcane allows up to three and Sorcerer
+     one. Marcelo's call, and it buys back the depth the table above says the
+     bigger clusters were always holding hostage.
+
+     It also fixes a load time. Measured, Arcane was spending 80, 80, 55 and
+     17 solver runs on a 900-cell board before it would start — and the two
+     that burned the whole 80-deal budget still came out with ZERO guesses.
+     They were not failing the guess test at all; they were failing the DEPTH
+     band, dealing over and over looking for stacked logic that a zero-guess
+     board of this size rarely has. Depth and forced guesses come from the
+     same clustering, so allowing the second is what makes the first findable
+     in a deal or two. */
+  {name:"Arcane",     nx:15, nz:15, ny:4, dens:0.20, rough:[0.16,0.30], guess:[0,3],
    clusters:[20,36], csize:[2,6], depth:[0.04,0.30]},
   // mutable: the menu sliders write straight into this one
   {name:"Custom",     nx:12, nz:12, ny:3, dens:0.130, custom:true}
@@ -1870,20 +1878,46 @@ function reachablePuzzle(sx,sy,sz){
 }
 
 /* The plain arena: six flat walls, every cell a puzzle block. */
-/* Anywhere but the middle. Always starting at the centre of the same box makes
-   every board open the same way, and it wastes the density gradient, which is
-   measured from wherever you actually stand. */
-function randomStart(){
-  const cy = Math.min(1, G.ny-1);
+/* YOU START ON A FACE OF THE BOARD, top or bottom, never in the middle.
+   The whole of that face is open before you take a step.
+
+   It used to be a 3x3 hole one layer up, somewhere random, and that gave you
+   no way to read the board: three layers of solid rock look identical from
+   inside a pocket of them, so the opening move was always to dig blind until
+   something had a number on it. Opening the entire face instead turns the
+   first thing you see into an actual minesweeper board -- a plane of numbers,
+   every one of them describing the layer underneath -- and turns the game
+   into digging INTO it. The depth is the thing you earn.
+
+   Which face is a coin toss, and it matters more than it sounds: from the
+   bottom you work upward and the board hangs over you, from the top you work
+   down into it. Same board, two quite different rooms. */
+let FACE_TOP = false;
+function faceStart(){
+  FACE_TOP = rnd() < 0.5;
+  const cy = FACE_TOP ? G.ny-1 : 0;
   const cx = 1 + ((rnd()*(G.nx-2))|0);
   const cz = 1 + ((rnd()*(G.nz-2))|0);
   return [Math.max(1,Math.min(G.nx-2,cx)), cy, Math.max(1,Math.min(G.nz-2,cz))];
 }
+/* Every cell of the face that is not structure, and a note to the reveal that
+   this one must NOT flood. A face is opened because it is the board you are
+   meant to read, not because a cascade happened to reach it -- if it spread,
+   the first thing the game did would be to solve a third of itself. */
+function openFace(L, cy){
+  for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
+    const i = idx(x,cy,z);
+    if(G.st[i] !== ROCK) L.safe.add(i);
+  }
+  L.flat = true;
+  /* Look at it. Standing in the open face with the camera level puts the
+     plane of numbers edge-on, which is the one angle it reads worst from. */
+  L.pitch = FACE_TOP ? -0.40 : 0.40;
+}
 function shapeArena(D){
   const L=blankLayout(), N=G.nx*G.ny*G.nz;
-  const [cx,cy,cz]=randomStart();
-  for(let dx=-1;dx<=1;dx++) for(let dz=-1;dz<=1;dz++)
-    if(inside(cx+dx,cy,cz+dz)) L.safe.add(idx(cx+dx,cy,cz+dz));
+  const [cx,cy,cz]=faceStart();
+  openFace(L, cy);
   const cells=[]; for(let i=0;i<N;i++) cells.push(i);
   L.groups=[{cells, mines:Math.round(N*D.dens), from:[cx,cy,cz],
              clusters:D.clusters, csize:D.csize}];
@@ -1900,7 +1934,7 @@ function shapeRough(D){
   const N=G.nx*G.ny*G.nz;
   const rr = Array.isArray(D.rough) ? D.rough : [0.15, 0.30];
   const target = (rr[0] + rnd()*(rr[1]-rr[0])) * N;
-  const [cx,cy,cz] = randomStart();
+  let [cx,cy,cz] = faceStart();
   for(let attempt=0; attempt<80; attempt++){
     G.st.fill(SOLID);
     let rock=0, guard=0;
@@ -1932,15 +1966,24 @@ function shapeRough(D){
         if(G.st[i]!==ROCK){ G.st[i]=ROCK; rock++; }
       }
     }
-    // you cannot start inside a pillar
-    let clear=true;
-    for(let dx=-1;dx<=1 && clear;dx++) for(let dz=-1;dz<=1;dz++)
-      if(G.st[idx(cx+dx,cy,cz+dz)]===ROCK){ clear=false; break; }
+    /* You cannot start inside a pillar — and on Arcane the keeps run floor
+       to ceiling, so a face layer is exactly where they all show. Hunt for a
+       clear spot in the face rather than hoping the one picked before the
+       rock went down happens to be free; that hoping is thrown-away work,
+       and this is the difficulty that can least afford any. */
+    let clear=false;
+    for(let tryK=0; tryK<60 && !clear; tryK++){
+      const tx = 1 + ((rnd()*(G.nx-2))|0), tz = 1 + ((rnd()*(G.nz-2))|0);
+      let ok=true;
+      for(let dx=-1;dx<=1 && ok;dx++) for(let dz=-1;dz<=1;dz++)
+        if(G.st[idx(tx+dx,cy,tz+dz)]===ROCK){ ok=false; break; }
+      if(ok){ cx=tx; cz=tz; clear=true; }
+    }
     if(!clear) continue;
     if(reachablePuzzle(cx,cy,cz) !== N-rock) continue;   // a sealed-off pocket
 
     const L=blankLayout();
-    for(let dx=-1;dx<=1;dx++) for(let dz=-1;dz<=1;dz++) L.safe.add(idx(cx+dx,cy,cz+dz));
+    openFace(L, cy);
     const cells=[];
     for(let i=0;i<N;i++) if(G.st[i]!==ROCK) cells.push(i);
     L.groups=[{cells, mines:Math.round(cells.length*D.dens), from:[cx,cy,cz],
@@ -2303,6 +2346,12 @@ function genWorld(d){
         }
         G.cnt[idx(x,y,z)]=c;
       }
+      /* An open FACE cannot cascade — revealAt is called flat for it — so a
+         zero in it is harmless and this reroll would be pure waste. Worse
+         than waste: with a hundred-odd cells open, one of them reads zero
+         almost every deal, so the guard would spend all eighty attempts
+         every single time and then ship the eightieth anyway. */
+      if(L.flat) break;
       let zero=false;
       for(const i of safe) if(G.cnt[i]===0){ zero=true; break; }
       if(!zero || attempt>=80) break;
@@ -2311,7 +2360,7 @@ function genWorld(d){
     for(let i=0;i<N;i++) if(G.st[i]===SOLID && !G.mine[i]) safeN++;
     G.safeTotal=safeN;
     G.revealed=0; G.marked=0;
-    for(const i of safe) revealAt(i,true);
+    for(const i of safe) revealAt(i,true,L.flat);
   }
 
   /* Deal boards until one has the number of 50/50s this difficulty promises,
@@ -2389,7 +2438,7 @@ function genWorld(d){
   P.hp = 4; P.hurtT = 0;   // counted in halves
 
   P.x=L.spawn[0]; P.y=L.spawn[1]; P.z=L.spawn[2];
-  P.vx=P.vy=P.vz=0; P.yaw=L.yaw; P.pitch=0; P.ground=true; P.coyote=COYOTE;
+  P.vx=P.vy=P.vz=0; P.yaw=L.yaw; P.pitch=L.pitch||0; P.ground=true; P.coyote=COYOTE;
   P.jumps=0;
   syncPowHud();
   particles.length=0; sprites.length=0; debris.count=0;
@@ -2398,7 +2447,9 @@ function genWorld(d){
 }
 
 /* reveals with flood fill through zeros (26 neighbors) */
-function revealAt(start, silent){
+/* `flat` opens exactly the cell asked for and nothing else. Used for the
+   opening face, where the flood is not wanted: see openFace. */
+function revealAt(start, silent, flat){
   if(G.st[start]===AIR || G.st[start]===ROCK) return;
   const stack=[start]; let opened=0;
   while(stack.length){
@@ -2414,7 +2465,7 @@ function revealAt(start, silent){
     if(MATS[G.mat[i]].gold){ G.gold += 5 + ((rnd()*12)|0); }
     const x = i % G.nx, z = ((i/G.nx)|0) % G.nz, y = (i/(G.nx*G.nz))|0;
     if(!silent) spawnCrumble(x,y,z, G.mat[i]);
-    if(G.cnt[i]===0){
+    if(G.cnt[i]===0 && !flat){
       for(let dy=-1;dy<=1;dy++) for(let dz=-1;dz<=1;dz++) for(let dx=-1;dx<=1;dx++){
         if(!dx&&!dy&&!dz) continue;
         const X=x+dx,Y=y+dy,Z=z+dz;
@@ -5563,9 +5614,14 @@ function updateHUD(){
   }
 }
 function updateDiffNote(){
+  /* 15 blocks at 2.8 m is 42; 4 blocks is 11.200000000000001, because 2.8
+     has no exact form in binary. One decimal, and no trailing .0 on the
+     ones that come out whole. */
+  const m1 = v => { const r = Math.round(v*10)/10;
+                    return r % 1 === 0 ? String(r) : r.toFixed(1); };
   if(G.mode===MODE_DUNGEON){
     $('dNote').textContent =
-      `A descent, generated fresh every run · ${DL_N} levels down a ${DUNGEON.ny*BLOCK} m shaft · ` +
+      `A descent, generated fresh every run · ${DL_N} levels down a ${m1(DUNGEON.ny*BLOCK)} m shaft · ` +
       `three dead-end minefields and an arena you fall into · things live down here · ` +
       `flag every mine to get out`;
     return;
@@ -5582,7 +5638,7 @@ function updateDiffNote(){
     ? ' · no guesswork: every board is solvable by logic alone'
     : (D.guess ? ` · ${D.guess[0]}–${D.guess[1]} coin tosses` : '');
   $('dNote').textContent =
-    `${cl}${st} · cave ${D.nx*BLOCK} × ${D.ny*BLOCK} × ${D.nz*BLOCK} m${gs} · nothing lives here`;
+    `${cl}${st} · cave ${m1(D.nx*BLOCK)} × ${m1(D.ny*BLOCK)} × ${m1(D.nz*BLOCK)} m${gs} · nothing lives here`;
 }
 /* Custom writes straight into its DIFFS entry, so genWorld needs no special
    case at all — it is just another difficulty whose numbers you picked. */
