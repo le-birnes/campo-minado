@@ -1055,7 +1055,15 @@ function workNow(M, skip){
     out.push({cell:i, d:M.dist[touch], via:touch});
   }
   out.sort((a,b)=> EX.farFirst ? b.d-a.d : a.d-b.d);
-  return out;
+  /* FINISH THE FLOOR YOU ARE ON. The way down is just another cell that
+     touches open space, so the nearest work was sometimes a shaft — and the
+     bot would descend with mines still unflagged behind it and never come
+     back, because down is easy and up is not. Anything at or above the feet
+     wins outright; only when there is nothing left up here does the next
+     level count as work at all. */
+  const py = pcell()[1];
+  const here = out.filter(w => cellXYZ(w.cell)[1] >= py - 1);
+  return here.length ? here : out;
 }
 
 /* ==========================================================================
@@ -1250,6 +1258,13 @@ function climb(R){
      there is always another dig, so it once flagged NOTHING in 206 steps. --- */
   for (const cell of provenMines()){
     if (giveUp(cell) || G.st[cell] !== SOLID) continue;
+    /* A PROVEN MINE IS WORTH A WALL. This is where a full dungeon ended:
+       356 of 356 blocks open, 65 of 66 flags, and one mine with no line to
+       it — the run then span out its whole step budget with nothing left to
+       do but the one thing it could not reach. Cinderstone changed that and
+       nothing here had been told. */
+    if (!clearLine(cell) && bustWall(cell))
+      return A('shot the cinderstone in front of the last mine', 'bust');
     if (!clearLine(cell)){
       R.moved = true;
       if (!closeOn(cell) || !clearLine(cell)){ refuse(cell); continue; }
@@ -1471,9 +1486,14 @@ function climb(R){
      down a corridor is how you FIND work, not how you do it. --- */
   for (let k=0;k<3;k++){
     const o = s.open[k];
-    if (o && o.run >= BLOCK*1.5 && followLine(o)){
+    /* Capped. This is the last rung before giving up and it is not progress:
+       walking a corridor is how you FIND work, not how you do it. Uncapped it
+       span 66 times in a row on a board with 395 of 395 open and two mines
+       left — the ladder announcing it had nothing, while the rung below it,
+       the one that ends a run with a verdict, never got to run. */
+    if (o && o.run >= BLOCK*1.5 && R.wander < 24 && followLine(o)){
       R.wander++;
-      return W('walking a sightline ('+R.wander+')');
+      return W('walking a sightline ('+R.wander+' of 24)');
     }
   }
 

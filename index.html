@@ -4714,8 +4714,11 @@ function spawnEnemy(fam, tier, cell){
    variant is common and the strong one is rare, so most of what you meet is
    survivable and a III is an event. Rolled rarest first, and the first hit
    wins, so at most one thing ever comes out of a single flag. */
-const ODDS_COMMON = [0.45, 0.20, 0.04];   // Bannerman / Wanderer / Creeper, I II III
-const ODDS_ARCHON = [0.045, 0.02, 0.008]; // the flier: halved now the gate is a 3
+/* HALVED, all of it, on Marcelo's call. A flag was spawning something close
+   to half the time, and a dungeon turned into a corridor fight with a puzzle
+   somewhere behind it. */
+const ODDS_COMMON = [0.225, 0.10, 0.02];  // Bannerman / Wanderer / Creeper, I II III
+const ODDS_ARCHON = [0.0225, 0.01, 0.004];// the flier, halved again
 /* Flagging is no longer the only thing that wakes them. Breaking rock does
    too, on a fuse of between 3 and 75 destructive shots — so a careful player
    who never flags anything is not immune, and the interval is long enough
