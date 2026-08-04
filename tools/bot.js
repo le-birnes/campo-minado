@@ -118,7 +118,8 @@ const stats = { walked:0, jumps:0, shots:0, flags:0, noEffect:0,
                 aimFixes:0, bursts:0, nudges:0, chases:0, climbs:0,
                 flagAim:0, flagBlocked:0, aimBlind:0, wallSteps:0, futile:0,
                 routes:0, routeWon:0, routeStuck:0, routeNone:0, routeSaved:0,
-                bored:0, reroutes:0, kills1:0 };
+                bored:0, reroutes:0, kills1:0,
+                goals:0, goalDone:0, goalLost:0, goalDrop:0 };
 
 /* ---------------- audit ---------------- */
 let baseAir = 0, baseRock = 0;
@@ -724,6 +725,10 @@ function newRun(){
        next objective has to be somewhere else. `bored` is the set of approach
        cells that judgement has retired. */
     been: new Map(), bored: new Set(),
+    /* The objective it is currently walking at, how close it has managed to
+       get, how many steps it has failed to get closer, and the ones it has
+       given up on. See pickGoal. */
+    goal: null, goalD: 1e9, goalAge: 0, dropped: new Set(),
     counted: new Set(),        // a cell is counted as a guess once, not once per step
     wander: 0,                 // steps spent walking without finding work
     stuck: 0,                  // consecutive failures to travel
@@ -783,6 +788,7 @@ const EX = {
   sweep: 0.85,   // how far the head swings off the direction of travel, radians
   route:  1,     // 0 = straight lines only, the old behaviour
   farFirst: 0,   // 1 = always head for the FARTHEST work (pure exploration)
+  patience: 14,  // steps it will keep walking at one objective without closing
   kill:  30,     // most shots poured into one enemy before breaking off
   killHell: 90   // and into a finale creature, which has real hit points
 };
@@ -1001,6 +1007,63 @@ function workNow(M, skip){
   }
   out.sort((a,b)=> EX.farFirst ? b.d-a.d : a.d-b.d);
   return out;
+}
+
+/* ==========================================================================
+   THE OBJECTIVE
+   ==========================================================================
+   Everything above this decides what is worth doing. This decides what it is
+   DOING, and the difference is the whole complaint: the bot used to re-pick
+   the nearest job every single step, so a job that stopped being nearest
+   half way there was abandoned half way there. Two jobs on opposite sides of
+   a room take turns being nearest, and a machine that always walks at the
+   nearest one walks back and forth between them forever. That is the pacing
+   Marcelo watched, and no amount of better routing fixes it, because the
+   route was never the thing that was wrong.
+
+   So an objective is CHOSEN ONCE and then kept. It is dropped for exactly
+   three reasons, and "something else is closer now" is not one of them:
+
+     * it is finished  — somebody dug or flagged it, so there is nothing there
+     * it is cut off   — no cell next to it is on the map any more
+     * it is hopeless  — EX.patience steps in a row without getting nearer
+
+   Hopeless ones go on a list so the next choice is somewhere else, and that
+   list is cleared when it runs out of anywhere to go — the bot is allowed to
+   change its mind, just not every step.
+   ========================================================================== */
+function goalReach(cell, M){
+  let best = -1;
+  for (const j of nbrsOf(cell))
+    if (M.dist[j] >= 0 && (best < 0 || M.dist[j] < best)) best = M.dist[j];
+  return best;                       // -1 when nothing beside it is reachable
+}
+function pickGoal(R, M){
+  const g = R.goal;
+  if (g !== null && g >= 0){
+    if (G.st[g] !== SOLID || G.mine[g]) { stats.goalDone++; R.goal = null; }
+    else {
+      const d = goalReach(g, M);
+      if (d < 0){ stats.goalLost++; R.goal = null; }
+      else if (d < R.goalD){ R.goalD = d; R.goalAge = 0; return g; }  // closing
+      else if (++R.goalAge <= EX.patience) return g;                  // stalled, keep at it
+      else { stats.goalDrop++; R.dropped.add(g); R.goal = null; }
+    }
+  }
+  let list = workNow(M, R.bored).filter(w => !R.dropped.has(w.cell));
+  if (!list.length){
+    /* Out of anywhere to go: forget both grudges and look again with clear
+       eyes. Refusing to reconsider is how a bot decides a solvable board is
+       finished and stands still next to the rest of it. */
+    if (R.bored.size || R.dropped.size){
+      R.bored.clear(); R.been.clear(); R.dropped.clear(); stats.reroutes++;
+      list = workNow(M, null);
+    }
+  }
+  if (!list.length){ R.goal = null; return null; }
+  R.goal = list[0].cell; R.goalD = list[0].d; R.goalAge = 0;
+  stats.goals++;
+  return R.goal;
 }
 
 function climb(R){
@@ -1287,14 +1350,9 @@ function climb(R){
        which is why it kept choosing a wall four metres away and forty round,
        and why the route Marcelo could see — shorter on foot, longer as the
        crow flies — was invisible to it. */
-    let list = workNow(M, R.bored);
-    if (!list.length && R.bored.size){         // everywhere is boring: look again
-      R.bored.clear(); R.been.clear(); stats.reroutes++;
-      list = workNow(M, null);
-    }
-    const tgt = list.length ? list[0].cell : -1;
-    if (tgt >= 0){
-      const td = list[0].d;
+    const tgt = pickGoal(R, M);
+    if (tgt !== null && tgt >= 0){
+      const td = R.goalD;
       const px = P.x, py = P.y, pz = P.z;
       if (clearLine(tgt)){
         const before = G.revealed;
@@ -1303,11 +1361,14 @@ function climb(R){
         if (G.revealed > before) return A('dug toward the work, '+td+' cells off', 'travel');
         refuse(tgt);
       }
+      /* The note says which objective and how long it has been at it, because
+         "walking a sightline" told nobody watching anything at all. */
+      const why = ' (objective '+tgt+', '+td+' cells, held '+R.goalAge+' steps)';
       if (EX.route && routeTo(tgt, ()=>inView(tgt)) > BLOCK*0.5)
-        return W('routing to work '+td+' cells away'+(R.bored.size?' ('+R.bored.size+' worked out)':''));
+        return W('routing to its objective'+why);
       closeOn(tgt);
       if (Math.hypot(P.x-px, P.y-py, P.z-pz) > BLOCK*0.5)
-        return W('closing on work '+td+' cells away');
+        return W('closing on its objective'+why);
       /* Neither the route nor the straight line moved it. Only real
          displacement counts — closeOn can report success while pressing into a
          wall. Anything else means entangled: hug the wall, which traces the
@@ -1600,6 +1661,8 @@ log(`routing: ${stats.routes} routes walked, ${stats.routeWon} got somewhere, `+
     `${stats.routeSaved} reached a target the straight line could not, `+
     `${stats.routeStuck} snagged mid-path, ${stats.routeNone} had no path at all`);
 log(`exploring: ${stats.bored} pockets called worked out, ${stats.reroutes} full resets`);
+log(`objectives: ${stats.goals} chosen, ${stats.goalDone} seen through to the end, `+
+    `${stats.goalLost} cut off, ${stats.goalDrop} given up on after ${EX.patience} steps`);
 if (/[?&]trail/.test(location.search)){
   log('--- the last 40 steps: cell it stood in, and what it decided ---');
   for (const t of trail.slice(-40)) log('  '+t);

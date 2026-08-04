@@ -150,13 +150,43 @@ get mapped. Descend or ascend only once every mine in the current cluster is
 marked; if you went down early, come back up.
 
 That is fixed work per step whatever the level size, and it is what the ladder
-now does. The one piece never built is the "go there" underneath it.
+now does. ~~The one piece never built is the "go there" underneath it.~~
+
+**Built, 2026-08-04.** Two pieces, and the second one mattered more than the
+first.
+
+`routeTo(cell)` is the BFS-over-standable-cells router described above, walked
+as waypoints with the straight line kept as the fast path. That went in first.
+
+It was not enough on its own, and the reason is worth writing down because it
+was not a navigation bug at all. The bot re-picked the nearest job **every
+step**, so a job that stopped being nearest half way there was abandoned half
+way there — and two jobs on opposite sides of a room take turns being nearest,
+so a machine that always walks at the nearest one walks between them forever.
+Better routing cannot fix that. The route was never the thing that was wrong.
+
+So `pickGoal` gives the run a *persistent objective*: chosen once, then kept,
+and dropped for exactly three reasons — it is finished (somebody dug or flagged
+it), it is cut off (nothing beside it is on the map), or it is hopeless
+(`EX.patience` steps in a row without getting nearer). "Something else is closer
+now" is deliberately not one of them. Objectives given up on go on a list so the
+next choice is somewhere else, and that list is cleared when it runs out of
+anywhere to go — it may change its mind, just not every step.
+
+Reported per run as `objectives: N chosen, N seen through, N cut off, N given
+up on`, which is the number to watch: chosen ≈ seen-through means it is
+committing, chosen ≫ seen-through means it is dithering again.
 
 ### Out of scope for now
 
-The old watchable demo (`bot-demo.html`, `mkdemo.py`) is untouched and still has
-every one of the old bugs. It is superseded by `python tools/watch.py` and
-should probably just be deleted.
+~~The old watchable demo (`bot-demo.html`, `mkdemo.py`) is untouched and still
+has every one of the old bugs.~~ **Done, 2026-08-04.** `mkdemo.py` was already
+gone and `bot-demo.html` had rotted to 159 KB against a 640 KB game — watching
+it meant watching bugs that had been fixed months earlier. It is not a copy any
+more, it is an OUTPUT: `mkbot.py` writes it from the same bytes as
+`tools/bot_index.html`, so the page you open in a browser and the page the
+headless runs drive are the same bot playing the same game. Only the query
+string differs, and that lives in the URL. There is one bot.
 
 **Still outstanding, unrelated to the bot:** none of the creatures is drawn
 holding a gun. The 22x26 roster needs redrawing at roughly double resolution.

@@ -29,5 +29,11 @@ print('  open this in a browser:')
 print()
 print('  ' + url)
 print()
+# mkbot writes bot-demo.html from the same bytes, so the published page and
+# the one above are the same bot playing the same game. It used to be a stale
+# hand-copy that nobody rebuilt.
+print('  the published copy, now rebuilt from this same build:')
+print('  https://le-birnes.github.io/campo-minado/bot-demo.html' + q)
+print()
 print('  right panel: step, state, what it is doing, stats, errors')
 print('  bottom right: pace slider, pause, single step')

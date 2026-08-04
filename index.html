@@ -222,6 +222,24 @@ button:focus-visible{outline:1px dotted #000;outline-offset:-5px;}
 .diffnote.warn{color:#a00000;}
 
 /* the custom-board sliders, sunk into the panel like a group box */
+/* THE MENU OPENS CLOSED. Two buttons, and everything else appears when it
+   becomes relevant: difficulties once a mode is picked, the manual only if
+   asked for. A first screen with four groups of buttons, a wall of keys and
+   three sliders on it does not read as "pick one", it reads as homework. */
+#diffBox,#howBox{display:none;}
+#diffBox.on,#howBox.on{display:block;}
+#howBox{margin-top:12px;}
+/* A difficulty the mode cannot play yet. Shown rather than hidden, because a
+   thing you can see you cannot have yet is information; a thing that is not
+   there is just a shorter list. */
+.diffs button.locked{color:var(--w95-sh);text-shadow:1px 1px 0 var(--w95-hi);
+                     box-shadow:var(--out);cursor:not-allowed;}
+.diffs button.locked.sel{box-shadow:var(--out);background:var(--w95);}
+/* The last row: what you came for on the right, the side door on the left. */
+.startRow{display:flex;align-items:center;justify-content:space-between;gap:12px;
+          flex-wrap:wrap;margin-top:2px;}
+button.small{padding:5px 12px;font-size:clamp(10px,1.25vmin,12px);font-weight:400;}
+button.how{padding:6px 14px;font-size:clamp(11px,1.4vmin,13px);}
 #customBox{display:none;margin-top:10px;padding:10px 14px 14px;box-shadow:var(--in);}
 #customBox.on{display:block;}
 #customBox .opt{margin-top:8px;}
@@ -396,26 +414,26 @@ body.touch.portrait #rotate{display:grid;}
       <div class="body">
       <p class="eyebrow">Someone locked you in here</p>
       <h1>Minesweeper<em>Three Planes</em></h1>
-      <p class="lede">You are <b>inside</b> the board. Sand above, sand below, sand all around —
-        three layers of blocks and a staff. Every block touches <b>26 others</b> (3×3×3 minus itself),
-        so the number you uncover counts mines in your own plane, in the ceiling <b>and</b> in the floor.
-        An arrow pointing up means a mine sits in one of the 9 blocks overhead. Pointing down, in the floor.
-        Get it wrong once and the whole cave turns to glass.</p>
 
       <div class="rule"></div>
 
-      <div class="diffs" role="group" aria-label="Difficulty">
-        <button data-d="0" class="sel">Apprentice</button>
-        <button data-d="1">Sorcerer</button>
-        <button data-d="2">Arcane</button>
-        <button data-d="3">Custom</button>
-      </div>
-
-      <div class="diffs" role="group" aria-label="Mode" style="margin-top:8px">
-        <button data-m="0" class="sel">3D Minesweeper</button>
+      <!-- ONE QUESTION AT A TIME. Which of the two games, first. -->
+      <div class="diffs" role="group" aria-label="Mode">
+        <button data-m="0">3D Minesweeper</button>
         <button data-m="1">Dungeon Mode</button>
       </div>
-      <p class="diffnote" id="dNote"></p>
+      <p class="diffnote" id="modeNote">Pick one to begin.</p>
+
+      <!-- ...then how hard, once the mode has decided which are on offer. -->
+      <div id="diffBox">
+        <div class="diffs" role="group" aria-label="Difficulty">
+          <button data-d="0">Apprentice</button>
+          <button data-d="1">Sorcerer</button>
+          <button data-d="2">Arcane</button>
+          <button data-d="3" id="bCustom">Custom</button>
+        </div>
+        <p class="diffnote" id="dNote"></p>
+      </div>
 
       <!-- only shown when Custom is the chosen difficulty -->
       <div id="customBox">
@@ -431,6 +449,19 @@ body.touch.portrait #rotate{display:grid;}
       </div>
 
       <div class="rule"></div>
+
+      <button id="btnHow" class="how" type="button" aria-expanded="false"
+              aria-controls="howBox">How to play?</button>
+      <div id="howBox">
+      <p class="lede">You are <b>inside</b> the board. Sand above, sand below, sand all around —
+        three layers of blocks and a shotgun. Every block touches <b>26 others</b> (3×3×3 minus itself),
+        so the number you uncover counts mines in your own plane, in the ceiling <b>and</b> in the floor.
+        An arrow pointing up means a mine sits in one of the 9 blocks overhead. Pointing down, in the floor.
+        Get it wrong once and the whole cave turns to glass.</p>
+      <p class="lede"><b>3D Minesweeper</b> is that and nothing else: a board, no enemies, and
+        every one of them solvable by thinking. <b>Dungeon Mode</b> is the same rules somewhere
+        that fights back — a descent through mine pockets, with things living in the rock, won
+        by flagging every mine in the place.</p>
 
       <div class="keys">
         <div><kbd>W A S D</kbd>move</div>
@@ -456,6 +487,7 @@ body.touch.portrait #rotate{display:grid;}
           in mid-air, and the same<br>
           two actions sit under your right hand: Shoot, and Think held</div>
       </div>
+      </div><!-- /howBox -->
 
       <div class="rule"></div>
 
@@ -475,8 +507,10 @@ body.touch.portrait #rotate{display:grid;}
       </div>
 
       <div class="rule"></div>
-      <button class="go" id="btnStart">Enter the cave</button>
-      <button id="btnForge" style="width:100%;margin-top:6px">Creature Forge — design the things down there</button>
+      <div class="startRow">
+        <button id="btnForge" class="small" type="button">Creature Forge</button>
+        <button class="go" id="btnStart">Enter the cave</button>
+      </div>
       </div>
     </div>
   </div>
@@ -2651,9 +2685,14 @@ const STAG_MIN = 0.18;         // ...at its worst, this share of your speed
    mouse. The difference here is that this is not random per frame — it is one
    smooth rise and fall caused by your own trigger, three degrees at its
    worst, which is a fifth of a block at ten metres. The aim never moves, so
-   the bot and the crosshair still agree about what you are pointing at. */
+   the bot and the crosshair still agree about what you are pointing at.
+
+   Halved to 1.6 degrees on Marcelo's call: with the PHYSICAL kick landing at
+   the same instant — the slide back and the stagger — three degrees of camera
+   on top was the two of them saying the same thing twice. The body moving is
+   the honest half; this only has to punctuate it. */
 const VIEW_PUNCH = (function(){ const m=/[?&]punch=([\d.]+)/.exec(location.search);
-                                return m ? parseFloat(m[1]) : 0.055; })();
+                                return m ? parseFloat(m[1]) : 0.0275; })();
 /* And it smokes. Four puffs, dark, drifting up out of the barrel — smoke has
    to be CUBES rather than the glow sprites everything else uses, because
    those are drawn additively and additive can only ever make things
@@ -5888,11 +5927,17 @@ function syncCustom(){
   $('cde').value=pct; $('cdeV').textContent=pct+'%';
   /* Custom is a board you dimension yourself, so its sliders only mean
      anything in the plain puzzle: the dungeon brings its own geometry. */
-  $('customBox').classList.toggle('on', G.diff===CUSTOM && G.mode===MODE_SWEEP);
+  $('customBox').classList.toggle('on',
+      G.modePicked && G.diff===CUSTOM && G.mode===MODE_SWEEP);
+  /* !! IS NOT DECORATION. classList.toggle(name, undefined) does not force
+     the class off — it falls back to plain toggling, so with G.modePicked
+     still undefined both mode buttons flipped on every sync and the "nothing
+     picked" menu came up with BOTH modes lit. */
   document.querySelectorAll('.diffs [data-m]').forEach(
-    b => b.classList.toggle('sel', +b.dataset.m === G.mode));
+    b => b.classList.toggle('sel', !!G.modePicked && +b.dataset.m === G.mode));
   document.querySelectorAll('.diffs [data-d]').forEach(
-    b => b.classList.toggle('sel', +b.dataset.d === G.diff));
+    b => b.classList.toggle('sel', !!G.modePicked && +b.dataset.d === G.diff));
+  menuStage();
   /* Below about 10% the first flood fill opens the whole cave at once — the
      percolation threshold at 26 neighbors. Their board, their call, but they
      should know before they press start. */
@@ -5919,19 +5964,55 @@ $('btnMusic2').addEventListener('click', ()=>syncMusic(null, !G.musMuted));
 $('btnArrows2').addEventListener('click', ()=>{ G.arrows=!G.arrows; syncToggles(); });
 $('btnSound2').addEventListener('click', ()=>{ G.muted=!G.muted; snd.setMute(G.muted); syncToggles(); });
 
+/* WHAT THE MENU IS SHOWING RIGHT NOW.
+   One function, called from syncCustom, so there is a single place that
+   decides what is visible and it cannot disagree with itself. Three states:
+
+     nothing picked   two buttons and a line of instruction, and Enter is dead
+     3D Minesweeper   four difficulties, Custom among them
+     Dungeon Mode     the same three, and only Apprentice can be pressed
+
+   The dungeon locks rather than hides the other two because a difficulty you
+   can see you cannot have yet tells you something is coming; one that is
+   simply absent tells you nothing. */
+const DUNGEON_OK = [0];        // difficulties the dungeon can currently deal
+function menuStage(){
+  $('diffBox').classList.toggle('on', !!G.modePicked);
+  $('modeNote').textContent = G.modePicked ? '' : 'Pick one to begin.';
+  $('modeNote').style.display = G.modePicked ? 'none' : '';
+  const dungeon = G.modePicked && G.mode === MODE_DUNGEON;
+  const cb = $('bCustom');
+  if(cb) cb.style.display = dungeon ? 'none' : '';
+  document.querySelectorAll('.diffs [data-d]').forEach(b=>{
+    const locked = dungeon && DUNGEON_OK.indexOf(+b.dataset.d) < 0;
+    b.classList.toggle('locked', locked);
+    b.disabled = locked;
+    b.title = locked ? 'The dungeon only builds Apprentice for now' : '';
+  });
+  const go = $('btnStart');
+  go.disabled = !G.modePicked;
+  go.style.opacity = G.modePicked ? '' : '0.5';
+}
 document.querySelectorAll('.diffs [data-m]').forEach(b=>{
   b.addEventListener('click', ()=>{
-    document.querySelectorAll('.diffs [data-m]').forEach(o=>o.classList.remove('sel'));
-    b.classList.add('sel'); G.mode = +b.dataset.m;
+    G.mode = +b.dataset.m;
+    G.modePicked = true;
+    /* Never leave a selection standing that the new mode cannot play. */
+    if(G.mode === MODE_DUNGEON && DUNGEON_OK.indexOf(G.diff) < 0) G.diff = DUNGEON_OK[0];
     updateDiffNote(); syncCustom();
   });
 });
 document.querySelectorAll('.diffs [data-d]').forEach(b=>{
   b.addEventListener('click', ()=>{
-    document.querySelectorAll('.diffs [data-d]').forEach(o=>o.classList.remove('sel'));
-    b.classList.add('sel'); G.diff = +b.dataset.d;
+    if(b.disabled) return;
+    G.diff = +b.dataset.d;
     updateDiffNote(); syncCustom();
   });
+});
+$('btnHow').addEventListener('click', ()=>{
+  const open = $('howBox').classList.toggle('on');
+  $('btnHow').setAttribute('aria-expanded', open ? 'true' : 'false');
+  $('btnHow').textContent = open ? 'How to play? — hide' : 'How to play?';
 });
 let toastT=0;
 function toast(msg, ms){

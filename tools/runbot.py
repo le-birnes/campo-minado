@@ -14,7 +14,24 @@ def main():
     R.reap()
     subprocess.run([sys.executable, os.path.join(R.HERE, "mkbot.py"), "index.html"],
                    capture_output=True)
-    page = os.path.join(R.HERE, "bot_index.html") + ("?quick" if quick else "")
+    # LIGHTS OFF, unless you ask for them. This is the fix for what looked for
+    # weeks like an intermittent hang in the bot and was really the relit cave
+    # meeting a software rasteriser: every point light is evaluated per
+    # FRAGMENT, headless Chrome draws through SwiftShader on the CPU, and how
+    # many lights come into range depends on where the flags and fireflies
+    # land — which is why the same build finished in one second or never, with
+    # nothing in between and no crash to show for it.
+    #
+    #   quick, lights ON   2/5 finished   15 15  1  1 15
+    #   quick, lights=0    5/5 finished    1  1  1  1  1
+    #
+    # The bot does not look at anything, so it loses nothing. Pass --lit when
+    # you specifically want to test the lighting.
+    lit = "--lit" in sys.argv
+    q = "?quick" if quick else "?"
+    if not lit:
+        q += ("&" if q != "?" else "") + "lights=0"
+    page = os.path.join(R.HERE, "bot_index.html") + q
     res, secs, bad = R.run(page, budget=900000, cap=cap,
                            profile=os.path.join(R.HERE, "cdata_bot"))
     print("[%.0fs] %s" % (secs, "QUICK Apprentice" if quick else "full suite"))

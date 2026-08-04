@@ -79,3 +79,21 @@ bot = open(os.path.join(HERE, 'bot.js'), encoding='utf-8').read()
 s = s + '\n<script>\n' + bot + '\n</script>\n'
 open(os.path.join(HERE, 'bot_' + src), 'w', encoding='utf-8').write(s)
 print('built bot_' + src)
+
+# ONE BOT, ONE BUILD, PUBLISHED TWICE.
+#
+# bot-demo.html at the repo root is the copy Marcelo opens in a browser to
+# WATCH the thing play. It used to be built by a separate mkdemo.py, which was
+# deleted, and after that it was simply a file nobody rebuilt: by the time
+# anyone looked it was 159 KB against a 640 KB game and carried none of the
+# last several months of either the game or the bot. Watching it was watching
+# bugs that had already been fixed.
+#
+# So it is not a copy any more, it is an OUTPUT. Identical bytes to
+# bot_index.html; only the query string differs when you open it, and that
+# lives in the URL rather than in the file. It cannot drift again without
+# somebody deliberately deleting this.
+if src == 'index.html':
+    demo = os.path.join(REPO, 'bot-demo.html')
+    open(demo, 'w', encoding='utf-8').write(s)
+    print('built bot-demo.html (same build, for watching in a browser)')
