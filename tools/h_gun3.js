@@ -113,6 +113,59 @@ setTimeout(()=>{
     R.push('view punch ' + (recoil*VIEW_PUNCH*180/Math.PI).toFixed(1) +
            ' deg at the trigger, aim pitch untouched at ' + P.pitch.toFixed(3));
 
+    /* --- shooting down lifts you a third of a block ---
+       Cleared a column overhead first: standing in a one-block opening there
+       is only 0.8 m of headroom and the ceiling, not the shot, would decide
+       the answer. That clamp is real in play and worth knowing about, but it
+       is not what is being measured here. */
+    {
+      const cx0=Math.floor(P.x/BLOCK), cz0=Math.floor(P.z/BLOCK);
+      for(let y=0;y<G.ny;y++) for(let dz=-1;dz<=1;dz++) for(let dx=-1;dx<=1;dx++){
+        const X=cx0+dx, Z=cz0+dz;
+        if(inside(X,y,Z) && G.st[idx(X,y,Z)]!==ROCK && !G.mine[idx(X,y,Z)])
+          G.st[idx(X,y,Z)]=AIR;
+      }
+      G.dirty=true;
+      IN.f=IN.b=IN.l=IN.r=0; IN.mf=IN.ms=0;
+      P.vx=P.vz=P.kx=P.kz=0; P.vy=0; P.stagger=0;
+      for(let k=0;k<30;k++) physics(1/60);      // settle on the floor
+      const y0=P.y;
+      P.pitch = -Math.PI/2;                     // straight down
+      fire();
+      const vy = P.vy;
+      let top = P.y;
+      for(let k=0;k<90;k++){ physics(1/60); if(P.y>top) top=P.y; }
+      R.push('shot straight down: ' + vy.toFixed(2) + ' m/s up, rose ' +
+             (top-y0).toFixed(2) + ' m = ' + ((top-y0)/BLOCK).toFixed(2) +
+             ' of a block (asked for 0.33, free rise v^2/2g = ' +
+             (vy*vy/(2*GRAV)/BLOCK).toFixed(2) + ')');
+      /* Level shot must lift nothing at all. */
+      P.pitch = 0; P.vy = 0;
+      for(let k=0;k<20;k++) physics(1/60);
+      fire();
+      R.push('level shot lifts ' + P.vy.toFixed(2) + ' m/s');
+    }
+
+    /* --- walking forward and firing nearly stops you --- */
+    {
+      P.pitch = 0; P.vx=P.vz=P.kx=P.kz=0; P.stagger=0;
+      IN.f = 1;
+      for(let k=0;k<60;k++) physics(1/60);     // up to running speed
+      const before = Math.hypot(P.vx, P.vz);
+      const fwd = () => -(P.vx*Math.sin(P.yaw) + P.vz*Math.cos(P.yaw));
+      const run = fwd();
+      fire();
+      let low = 1e9;
+      for(let k=0;k<24;k++){ physics(1/60);
+        const v = fwd() + (-(P.kx*Math.sin(P.yaw) + P.kz*Math.cos(P.yaw)));
+        if(v < low) low = v; }
+      for(let k=0;k<40;k++) physics(1/60);
+      R.push('running ' + run.toFixed(2) + ' m/s, fired: dropped to ' +
+             low.toFixed(2) + ' (' + (100*low/Math.max(0.01,run)).toFixed(0) +
+             '% of it), back to ' + fwd().toFixed(2) + ' after');
+      IN.f = 0;
+    }
+
     /* --- smoke --- */
     const smoke = particles.slice(nP).filter(p => p.e === 0 && p.c[0] < 0.2);
     let rising = 0, lum = 0;

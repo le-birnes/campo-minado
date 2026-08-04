@@ -1712,7 +1712,7 @@ const G = {
    about a centimetre and a half, which is why the kick could not be felt: it
    was not small, it was being deleted. Kept here, it decays on its own terms
    and is added at integration time. */
-const P = { x:0,y:0,z:0, vx:0,vy:0,vz:0, kx:0,kz:0, yaw:0,pitch:0,
+const P = { x:0,y:0,z:0, vx:0,vy:0,vz:0, kx:0,kz:0, stagger:0, yaw:0,pitch:0,
             ground:false, bob:0, step:0,
             coyote:0, jumps:0, hp:4, hurtT:0 };
 const IN = { f:0,b:0,l:0,r:0, sprint:false,
@@ -2451,7 +2451,7 @@ function genWorld(d){
   P.hp = 4; P.hurtT = 0;   // counted in halves
 
   P.x=L.spawn[0]; P.y=L.spawn[1]; P.z=L.spawn[2];
-  P.vx=P.vy=P.vz=0; P.kx=P.kz=0; P.yaw=L.yaw; P.pitch=L.pitch||0; P.ground=true; P.coyote=COYOTE;
+  P.vx=P.vy=P.vz=0; P.kx=P.kz=0; P.stagger=0; P.yaw=L.yaw; P.pitch=L.pitch||0; P.ground=true; P.coyote=COYOTE;
   P.jumps=0;
   syncPowHud();
   particles.length=0; sprites.length=0; pellets.length=0; debris.count=0;
@@ -2616,6 +2616,31 @@ const PEL_SPD   = 78;               // m/s. 44 read as a thrown handful
 const SHOT_KICK = (function(){ const m=/[?&]kick=([\d.]+)/.exec(location.search);
                                return m ? parseFloat(m[1]) : 2.4; })();
 const KICK_TAU  = 0.07;        // seconds; v0*tau is how far it shoves you
+/* STRAIGHT DOWN LIFTS YOU A THIRD OF A BLOCK. Not a tuned number — solved:
+   v = sqrt(2*g*h) with h = BLOCK/3, which at GRAV 20 and BLOCK 2.8 is
+   6.11 m/s. Scaled by how far down you are actually looking, so a level shot
+   lifts nothing and a glance at the floor lifts a little.
+
+   Firing down repeatedly therefore climbs, because each shot adds another
+   third of a block to a velocity that has not finished being spent. That is
+   inherent in "one third of a block per shot" and it is left in: the cave has
+   a bedrock shell on every side, so the worst it buys is height inside a room
+   you were already allowed to jump twenty times in. */
+const SHOT_LIFT = Math.sqrt(2*GRAV*BLOCK/3);
+/* AND IT STOPS YOU DEAD FOR A MOMENT.
+
+   Killing P.vx would do nothing, for the same reason the old kick did
+   nothing: the controller chases its target at 87% a frame and would have
+   you back at running speed inside two. So the STAGGER throttles the target
+   itself. For a fifth of a second the fastest you are allowed to want to go
+   is a fifth of a run, and the controller drags you down to that as
+   eagerly as it normally drags you up to full speed.
+
+   Firing while running forward therefore does what Marcelo asked: the
+   backward kick and a target of almost nothing arrive together, you stop
+   going anywhere, and then the target ramps back and you carry on. */
+const STAG_T   = 0.18;         // seconds
+const STAG_MIN = 0.18;         // ...at its worst, this share of your speed
 /* AND THE VIEW PUNCHES. The gun kicking on its own is a puppet show — what
    sells a shot is the ROOM moving. This rides on `recoil`, which is already
    1 at the trigger and 0 about a sixth of a second later.
@@ -3711,7 +3736,14 @@ function physics(dt){
   let wx = -sy*fwd + cy*side;
   let wz = -cy*fwd - sy*side;
   const ln=Math.hypot(wx,wz); if(ln>0){ wx/=ln; wz/=ln; }
-  const target = (IN.sprint?SPD_SPR:SPD_RUN);
+  let target = (IN.sprint?SPD_SPR:SPD_RUN);
+  /* A shell just went off in your hands. Ramps back to full as it wears off,
+     rather than switching, so the recovery is a shove out of it and not a
+     step change in how fast you are walking. */
+  if(P.stagger > 0){
+    target *= STAG_MIN + (1-STAG_MIN)*(1 - P.stagger/STAG_T);
+    P.stagger = Math.max(0, P.stagger - dt);
+  }
   const accel = P.ground ? 52 : 13;
   P.vx += (wx*target - P.vx) * Math.min(1, accel*dt);
   P.vz += (wz*target - P.vz) * Math.min(1, accel*dt);
@@ -3769,6 +3801,11 @@ function shoot(){
      kick on top: same weapon, but what it does to the person holding it still
      depends on what is loaded in it. */
   P.kx -= r.dx*SHOT_KICK; P.kz -= r.dz*SHOT_KICK;
+  /* Aim at the floor and it puts you in the air. P.vy is a real accumulating
+     velocity — it is what jumping uses — so unlike the horizontal kick this
+     one can simply be added. */
+  P.vy += Math.max(0, -r.dy) * SHOT_LIFT;
+  P.stagger = STAG_T;
   G.shake = Math.max(G.shake, 0.05);
   /* And the pump moves when the rack is heard, not when the trigger is
      pulled. shotgun() hands back the delay it scheduled the sound for. */
