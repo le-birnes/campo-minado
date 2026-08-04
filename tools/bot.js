@@ -119,7 +119,8 @@ const stats = { walked:0, jumps:0, shots:0, flags:0, noEffect:0,
                 flagAim:0, flagBlocked:0, aimBlind:0, wallSteps:0, futile:0,
                 routes:0, routeWon:0, routeStuck:0, routeNone:0, routeSaved:0,
                 bored:0, reroutes:0, kills1:0,
-                goals:0, goalDone:0, goalLost:0, goalDrop:0, hunts:0 };
+                goals:0, goalDone:0, goalLost:0, goalDrop:0, hunts:0,
+                busted:0, bustOpen:0 };
 
 /* ---------------- audit ---------------- */
 let baseAir = 0, baseRock = 0;
@@ -140,13 +141,22 @@ function audit(tag){
     else if (!G.mine[i]) openable++;
     if (G.mine[i]) mines++;
   }
+  /* Reconcile the broken walls FIRST. Every block of cinderstone that goes
+     becomes AIR that was never "revealed" — revealing is what happens to
+     puzzle blocks — so the air baseline has to move by the same amount
+     BEFORE the line below counts it. Doing it after, which is where it went
+     first, means the check fires on numbers that are about to be corrected. */
+  if (rock < baseRock){ baseAir += (baseRock - rock); baseRock = rock; }
   if (air-baseAir !== G.revealed) err(`${tag}: revealed=${G.revealed} but ${air-baseAir} opened`);
   if (marked!==G.marked)          err(`${tag}: G.marked=${G.marked} but ${marked} flagged`);
   if (mines!==G.mines)            err(`${tag}: mines=${G.mines} but ${mines} placed`);
-  /* Cinderstone walls break now, so structure may go DOWN. It must never go
-     up: that would mean rock appearing out of nothing. */
+  /* Cinderstone walls break now, so structure may go DOWN — and every block
+     of it that goes becomes AIR that was never "revealed", because revealing
+     is what happens to puzzle blocks. Move the air baseline by the same
+     amount or the very next line reports a discrepancy for the rest of the
+     run: 44 faults in one dungeon, all of them this. Rock going UP is still
+     a fault; that would be walls appearing out of nothing. */
   if (rock>baseRock)              err(`${tag}: structure grew ${baseRock} -> ${rock}`);
-  baseRock = Math.min(baseRock, rock);
   if (G.revealed+openable !== G.safeTotal)
     err(`${tag}: ${G.revealed} opened + ${openable} openable != safeTotal ${G.safeTotal}`);
   if (G.state==='play' && mineAir) err(`${tag}: ${mineAir} mine(s) revealed while alive`);
@@ -239,6 +249,37 @@ function inView(cell){
    step aside — a pace left, a pace right, or one small hop to see over — and
    look again. Firing at a target you cannot actually see is how a shot ends up
    in a number, or in the wrong block entirely. */
+/* THE WALL IN THE WAY IS A TARGET NOW.
+
+   The bot's whole model of the world predates cinderstone: structure was
+   permanent, so a block behind a wall was simply unreachable and the only
+   sane move was to go round. That is why a full dungeon ended at 64 of 66
+   flags with every one of 356 blocks dug out — two mines with no line to
+   them, and no idea that the thing in the way could be removed.
+
+   Only the COAT can be shot through, which is one block in six of the
+   structure and settled at generation, so this cannot turn into chewing
+   through the map: five shots buys exactly one layer and then the black
+   behind it refuses forever.
+
+   Aims at the target, fires at whatever cinderstone is in the way, and
+   reports whether it actually spent a shot on one. */
+function bustWall(cell){
+  PH('bustWall'); WD();
+  if (!G.coat) return false;                     // an older board, no coat
+  const [cx,cy,cz] = cellXYZ(cell);
+  aimAt((cx+0.5)*BLOCK, (cy+0.5)*BLOCK, (cz+0.5)*BLOCK);
+  const r = aimRay();
+  const h = raycast(r.ox,r.oy,r.oz, r.dx,r.dy,r.dz, REACH, false);
+  if (!h.hit || !inside(h.x,h.y,h.z)) return false;
+  const w = idx(h.x,h.y,h.z);
+  if (G.st[w] !== ROCK || !G.coat[w]) return false;   // rock that never gives
+  stats.lastAct = 'bust';
+  shoot(); stats.shots++; stats.busted++;
+  if (G.st[w] === AIR) stats.bustOpen++;             // that was the fifth
+  return true;
+}
+
 function clearLine(cell){
   PH('clearLine'); WD();
   if (inView(cell)) return true;
@@ -1370,7 +1411,9 @@ function climb(R){
         shoot(); stats.shots++;
         if (G.revealed > before) return A('dug one of the last safe blocks', 'lastfew');
         refuse(best);
-      } else refuse(best);
+      } else if (bustWall(best))
+        return A('shot the cinderstone in the way of the last blocks', 'bust');
+      else refuse(best);
       R.note = 'hunting the last safe blocks';
       R.moved = true;
       return true;
@@ -1407,6 +1450,9 @@ function climb(R){
       const why = ' (objective '+tgt+', '+td+' cells, held '+R.goalAge+' steps)';
       if (EX.route && routeTo(tgt, ()=>inView(tgt)) > BLOCK*0.5)
         return W('routing to its objective'+why);
+      /* Walked as far as walking goes. If what is between us is a coat wall,
+         it is not an obstacle any more, it is five shots. */
+      if (bustWall(tgt)) return A('shot the cinderstone in the way'+why, 'bust');
       closeOn(tgt);
       if (Math.hypot(P.x-px, P.y-py, P.z-pz) > BLOCK*0.5)
         return W('closing on its objective'+why);
@@ -1722,6 +1768,7 @@ log(`worked THROUGH a number, reaching blocks it could not hit: `+
 log(`clue-led digs: ${stats.clueWork} (shots aimed at an unfinished number's own blocks)`);
 log(`solver rules: ${Object.keys(stats.byRule).map(k=>k+' '+stats.byRule[k]).join(', ')||'none'}`);
 log(`hunting: ${stats.hunts} steps spent going to find something it could not see`);
+log(`cinderstone: ${stats.busted} shots into walls in the way, ${stats.bustOpen} of them broke through`);
 log(`combat: killed ${stats.killed} in ${stats.bursts} engagements, ${stats.shotAt} shots `+
     `(${stats.killed?(stats.shotAt/stats.killed).toFixed(1):'-'} per kill), ${stats.dodged} dodges, `+
     `${stats.nudges} nudges, ${stats.chases} chases, ${stats.climbs} climbs, `+
