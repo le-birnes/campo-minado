@@ -694,6 +694,7 @@ function diedHow(){
 }
 
 const NOFOES = /[?&]nofoes/.test(location.search);
+const TRACE  = /[?&]trace/.test(location.search);
 
 /* ============================================================
    ONE LADDER
@@ -1434,6 +1435,14 @@ function playGame(diff, mode, label){
 
   for (; step<cap; step++){
     try{ document.body.dataset.r = label+' step '+step; }catch(e){}
+    /* ?trace prints every step to the CONSOLE, which headless Chrome streams
+       to stderr as it happens. dataset.r only reaches anybody if the page
+       survives to be dumped, so it is worth nothing for the one failure that
+       matters: a run that does not come back. This is how you watch one. */
+    if (TRACE) console.log('BOT '+label+' step '+step+
+                           ' opened='+G.revealed+'/'+G.safeTotal+
+                           ' flags='+G.marked+'/'+G.mines+
+                           ' phase='+phase+' | '+R.note);
     wdNewStep(step);
     /* An uncaught throw here does not fail the run, it DELETES it: the page
        dies mid-load, nothing writes data-r, and the harness reports a wall
