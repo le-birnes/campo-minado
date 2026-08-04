@@ -2595,7 +2595,17 @@ const PEL_N     = 18;
 const PEL_SIZE  = BLOCK*0.032;      // a voxel, and deliberately a tiny one
 const PEL_RADII = 4;                // ...and it opens to four of its own
 const PEL_OPEN  = 1.4;              // metres it takes to get there
-const PEL_SPD   = 44;               // m/s: fast, but you can see it leave
+const PEL_SPD   = 78;               // m/s. 44 read as a thrown handful
+/* A shell shoves the one holding it. Deliberately small: the finale's 5.4 m/s
+   is a launch, and a launch on every block you open would rewrite the
+   movement of the whole game — and the bot's with it. This is a nudge you
+   feel and walk out of, not a shove that moves you anywhere. */
+const SHOT_KICK = 0.85;
+/* And it smokes. Four puffs, dark, drifting up out of the barrel — smoke has
+   to be CUBES rather than the glow sprites everything else uses, because
+   those are drawn additively and additive can only ever make things
+   brighter. Dark smoke that lightens the wall behind it is not smoke. */
+const SMOKE_N = 4;
 const pellets   = [];
 function addPellets(ox,oy,oz, dx,dy,dz, reach){
   /* Two axes across the shot to scatter on. Pick the seed axis away from the
@@ -3134,12 +3144,17 @@ const snd = (function(){
        Shells themselves are allowed to overlap. Real gunfire does, the cave
        is still answering the last one, and cutting the previous tail at
        every trigger pull is what makes rapid fire sound like a toy. */
-    shotgun(){ if(!on())return;
+    /* RETURNS how long from now the gun gets racked, in seconds, so the pump
+       on the view model can move in time with the sound of it moving. The
+       timing contract is honoured even when the sound is off — muting a game
+       should not freeze its animation — which is why the muted path returns
+       the nominal delay instead of just leaving. */
+    shotgun(){ if(!on())return PUMP_T;
       const b = pick('shot');
       /* API, not `this`. Every caller today invokes this as a method, but
          the fallback is the path EVERY player takes on their first shot and
          it must not depend on how it was called. */
-      if(!b){ API.shotgunSynth(); return; }         // bank still decoding, or no Opus
+      if(!b){ API.shotgunSynth(); return PUMP_T; }  // bank still decoding, or no Opus
       fadeOut(pump, 0.012); pump = null;
       const t = ac.currentTime;
       const v = voice(b, SHOT_G, t, 0.97 + Math.random()*0.06);
@@ -3147,12 +3162,13 @@ const snd = (function(){
       v.s.onended = ()=>{ const i = shots.indexOf(v); if(i>=0) shots.splice(i,1); };
       while(shots.length > SHOT_VOICES) fadeOut(shots.shift(), 0.08);
       const lb = pick('load');
+      const at = PUMP_T + Math.random()*PUMP_J;
       if(lb){
-        const p = voice(lb, LOAD_G, t + PUMP_T + Math.random()*PUMP_J,
-                        0.98 + Math.random()*0.04);
+        const p = voice(lb, LOAD_G, t + at, 0.98 + Math.random()*0.04);
         pump = p;
         p.s.onended = ()=>{ if(pump === p) pump = null; };
       }
+      return at;
     },
     /* Right click is the weapon being handled, so it gets the two loose
        recordings. Reports whether it managed to, because the caller has a
@@ -3535,6 +3551,24 @@ const STAFF_Z    = -0.90;
    The rest is small: about 5 degrees of yaw so the barrel angles in towards
    the middle of the screen, 2 of pitch, and a little roll. */
 const GUN_TILT = [0.035, Math.PI + 0.09, -0.10];
+/* Three quarters of the size it was, and ONLY the size: the placement below
+   is exactly where it was at full size. Pulling it further into the corner to
+   "keep it anchored" was tried and pushed the barrel half out of frame, which
+   is worse than a slightly higher gun — you lose the thing the last change
+   was for, which is being able to see that it points where you aim. */
+const GUN_SCALE = 0.75;
+/* Part 2 of SHOTGUN is the pump, and it is the only part that moves on its
+   own. It slides along the magazine tube, which is the model's -Z, so racking
+   is a negative offset: back towards the receiver and forward again, once. */
+const GUN_PUMP  = 2;
+const PUMP_TRAVEL = 0.40;     // in model units, about two thirds of its length
+const PUMP_DUR    = 0.26;     // seconds for the whole back-and-forth
+/* WHEN it happens is not a guess: snd.shotgun() returns how long until the
+   rack sound plays and this is set to match. Firing again replaces it, which
+   is exactly right — the second shot cancels the first rack in the audio too,
+   because you cannot pump a gun you are firing. Hold the trigger down and you
+   never see a pump, which is what Marcelo asked for and also what happens. */
+const PUMPA = {at: -1};
 /* Where the barrel ENDS, in camera space, refreshed every frame from the
    matrix the muzzle ring was actually drawn with. The shot comes out of
    here. Seeded with a plausible value so that a shot fired on the very first
@@ -3575,7 +3609,17 @@ function buildViewModel(t, speed, aspect){
           GUN_TILT[0] + brR*0.5 + swayY*0.4 - recoil*0.10,
           GUN_TILT[1] + swayX*1.2,
           GUN_TILT[2],
-          hh, hh, hh);
+          hh*GUN_SCALE, hh*GUN_SCALE, hh*GUN_SCALE);
+
+  /* The rack. sin(pi*u) is 0 at both ends and 1 in the middle, so the pump
+     goes back and comes home in one gesture with no seam where it turns. */
+  let pumpZ = 0;
+  if(PUMPA.at >= 0){
+    const u = (t - PUMPA.at)/PUMP_DUR;
+    if(u < 0) pumpZ = 0;
+    else if(u <= 1) pumpZ = -PUMP_TRAVEL*Math.sin(u*Math.PI);
+    else PUMPA.at = -1;
+  }
 
   /* The shotgun, always. It used to appear only for the finale and the wizard's
      stick carried the rest of the game, which meant the weapon you spend
@@ -3585,7 +3629,8 @@ function buildViewModel(t, speed, aspect){
   const VIEW = SHOTGUN;
   for(let i=0;i<VIEW.length;i++){
     const s=VIEW[i], o=i*CUBE_STRIDE;
-    compose(_L,0, s[0],s[1],s[2], s[3],s[4],s[5], s[6],s[7],s[8]);
+    compose(_L,0, s[0], s[1], s[2] + (i===GUN_PUMP ? pumpZ : 0),
+                  s[3],s[4],s[5], s[6],s[7],s[8]);
     mulM(_S,_L,d,o);
     d[o+16]=s[9][0]; d[o+17]=s[9][1]; d[o+18]=s[9][2];
     d[o+19]=i*0.17;  d[o+20]=s[10]?(0.72+0.28*Math.sin(t*3.1)):0;  d[o+21]=0; d[o+22]=0;
@@ -3685,11 +3730,15 @@ function shoot(){
      it up here threw ReferenceError on EVERY shot of the finale, after recoil
      had already been set. So the weapon swung and nothing else happened at all:
      no sound, no beam, no damage. Order matters. */
-  snd.shotgun();
-  /* The KICK stays finale-only. 5.4 m/s is a launch, and a launch on every
-     block you open would rewrite the movement of the whole game — and the
-     bot's with it. The weapon is the same weapon now; what it does to the
-     person holding it still depends on what is loaded in it. */
+  const rackIn = snd.shotgun();
+  /* Every shot shoves you a little now. The finale keeps its own, far bigger
+     kick on top: same weapon, but what it does to the person holding it still
+     depends on what is loaded in it. */
+  P.vx -= r.dx*SHOT_KICK; P.vz -= r.dz*SHOT_KICK;
+  G.shake = Math.max(G.shake, 0.035);
+  /* And the pump moves when the rack is heard, not when the trigger is
+     pulled. shotgun() hands back the delay it scheduled the sound for. */
+  PUMPA.at = tGlobal + rackIn;
   if(G.finale){
     const kb = 5.4;                       // a shotgun shoves the one holding it
     P.vx -= r.dx*kb; P.vz -= r.dz*kb;
@@ -3713,6 +3762,15 @@ function shoot(){
   const my = P.y + EYE +                     cpw*MUZZLE[1] - r.dy*MUZZLE[2];
   const mz = P.z       - syw*MUZZLE[0] + cyw*r.dy*MUZZLE[1] - r.dz*MUZZLE[2];
   addS(mx,my,mz, 0,0,0, 0.52, 0.07, [1.0,0.86,0.45], T_GLOW, 0.55);
+  /* Just a bit of it, and slow: smoke that keeps pace with the pellets reads
+     as a second shot. Negative gravity so it lifts instead of falling. */
+  for(let i=0;i<SMOKE_N;i++)
+    addP(mx + (wrnd()-.5)*0.10, my + (wrnd()-.5)*0.10, mz + (wrnd()-.5)*0.10,
+         r.dx*2.0 + (wrnd()-.5)*0.9,
+         r.dy*2.0 + (wrnd()-.5)*0.9 + 0.45,
+         r.dz*2.0 + (wrnd()-.5)*0.9,
+         BLOCK*(0.045+wrnd()*0.030), 0.40+wrnd()*0.30,
+         [0.115,0.110,0.115], 0, -0.05);
   /* The pellets leave the muzzle but they land on the CROSSHAIR, because the
      ray does. A barrel sitting off to one side of your eye and firing exactly
      parallel to it is what a real gun does and it looks like a miss. */
@@ -5085,10 +5143,20 @@ function enemyFire(e){
   muzzleOf(e, _mz);
   let dx=e.aim[0]-_mz[0], dy=e.aim[1]-_mz[1], dz=e.aim[2]-_mz[2];
   const d=Math.hypot(dx,dy,dz)||1;
+  /* THREE VOXELS, not a bead of light. It used to be one big additive glow
+     billboard — a flying ball, and against the relit cave a flying ball of
+     light is the brightest thing on screen and reads like a lamp rather than
+     like something thrown at you. A little clump of matter tumbling towards
+     you says the same thing and says it in the game's own language. */
+  const bits = [];
+  for(let b=0;b<3;b++)
+    bits.push([(wrnd()-.5)*1.4, (wrnd()-.5)*1.4, (wrnd()-.5)*1.4,
+               wrnd()*6.283, 2.0+wrnd()*5.0]);
   eshots.push({x:_mz[0], y:_mz[1], z:_mz[2],
                dx:dx/d, dy:dy/d, dz:dz/d, life:3.2,
                col: _hell ? [1.0,0.55,0.12] : T.col,
                hell: _hell,                       // theirs costs a whole heart
+               bits,
                sz: _hell ? 0.85 : (T.fam===FAM_FLAG ? 0.55 : 0.34)});
   snd.efire(T.fam===FAM_FLAG ? 180 : T.fam===FAM_SLUG ? 260 : 340);
   if(T.fam===FAM_FLAG){ e.banner=0; e.bannerT=1.05; }   // it throws its banner
@@ -5247,7 +5315,12 @@ function updateEShots(dt){
       }
     }
     if(gone){ eshots.splice(i,1); continue; }
-    if(rnd()<0.6) addS(s.x,s.y,s.z, 0,0,0, s.sz*2.2, 0.16, s.col, T_GLOW, 0.5);
+    /* The trail is shed matter too: a cube that stops dead and fades where
+       the thing passed, rather than a glow smeared along behind it. */
+    if(wrnd()<0.5)
+      addP(s.x+(wrnd()-.5)*s.sz, s.y+(wrnd()-.5)*s.sz, s.z+(wrnd()-.5)*s.sz,
+           (wrnd()-.5)*1.2, (wrnd()-.5)*1.2, (wrnd()-.5)*1.2,
+           s.sz*0.34, 0.22+wrnd()*0.16, s.col, 0.85, 0);
   }
 }
 
@@ -6433,6 +6506,16 @@ const FLY_PER    = 26;        // one more firefly for every this many beyond
 const FLY_MAX    = 260;
 const LIGHT_FLAG = [0.72, 0.52, 1.00];   // the violet the flag already pulses
 const LIGHT_FLY  = [0.62, 0.92, 0.70];   // and something colder for the rooms
+/* THE THINGS THAT LIVE HERE GLOW, one block out, in their own colour.
+   A dark cave and silent creatures is not tension, it is a cheap shot: you
+   die to something you were never given a chance to see. A block of light
+   around each one means a corridor with something in it looks different from
+   an empty corridor before you are standing in it — and because the lights
+   add where they overlap, a group reads as brighter than one, which is
+   exactly the thing you want to know from a distance. */
+const FOE_IN    = litQ('foeIn')  !== null ? litQ('foeIn')  : 1;
+const FOE_OUT   = litQ('foeOut') !== null ? litQ('foeOut') : 1.5;
+const FOE_LEVEL = litQ('foeLit') !== null ? litQ('foeLit') : 0.55;
 
 /* How many lights the machine in front of you can afford. Every one of them
    is evaluated per FRAGMENT, so this is the single most expensive number in
@@ -6521,6 +6604,18 @@ function collectLights(cx, cy, cz){
     const puls = 0.72 + 0.28*Math.sin(tGlobal*1.9 + f.ph);
     cand.push({d, x:_fp[0], y:_fp[1], z:_fp[2], out:flyOut, in:flyOut,
                c:LIGHT_FLY, k:FLY_LEVEL*puls});
+  }
+  /* and whatever is alive in here. Full to FOE_IN blocks, the standard tail
+     out to FOE_OUT, nothing past it — the same two-step shape as everything
+     else that lights this cave, so a creature and a flag fall off the same
+     way and the eye can compare them. */
+  const foeOut = FOE_OUT*BLOCK;
+  for(const e of enemies){
+    const d = Math.hypot(e.x-cx, e.y-cy, e.z-cz);
+    if(d > foeOut + 60) continue;
+    const c = e.hell ? e.hell.col : ((ETYPES[e.t] && ETYPES[e.t].col) || [1.0,0.45,0.30]);
+    cand.push({d, x:e.x, y:e.y, z:e.z, out:foeOut, in:FOE_IN*BLOCK,
+               c, k:FOE_LEVEL*(e.flash ? 1.8 : 1.0)});
   }
   cand.sort((a,b)=>a.d-b.d);
   lightN = Math.min(LIT_CAP, cand.length);
@@ -7351,6 +7446,22 @@ function frame(now){
       d[o+23]=d[o+24]=d[o+25]=0;
       n++;
     }
+    /* What the creatures threw. Three voxels a shot, tumbling — the spin is
+       what stops three cubes in a line reading as one smeared cube. */
+    for(let i=0;i<eshots.length && n<debris.max-3;i++){
+      const sh = eshots[i];
+      if(!sh.bits) continue;
+      for(const b of sh.bits){
+        const o = n*CUBE_STRIDE, ph = tGlobal*b[4] + b[3];
+        compose(d,o, sh.x + b[0]*sh.sz, sh.y + b[1]*sh.sz, sh.z + b[2]*sh.sz,
+                ph, ph*0.7, ph*1.3,
+                sh.sz*0.55, sh.sz*0.55, sh.sz*0.55);
+        d[o+16]=sh.col[0]; d[o+17]=sh.col[1]; d[o+18]=sh.col[2];
+        d[o+19]=(i*0.311)%1; d[o+20]=1; d[o+21]=0; d[o+22]=0;
+        d[o+23]=d[o+24]=d[o+25]=0;
+        n++;
+      }
+    }
     debris.count=n;
     gl.uniform3f(uC.hover, 1e9,1e9,1e9);
     // (ghosts are drawn after everything solid, further down)
@@ -7815,7 +7926,10 @@ function frame(now){
        the player: it appears the moment an enemy locks on, follows the point
        it committed to, and brightens as its lock runs out. If you are still
        standing on that point when it fills, that is on you. */
-    for(const s of eshots) put(s.x,s.y,s.z, s.sz*3.4, T_GLOW, s.col, 0.85);
+    /* The bead of light is gone; the shot is drawn as cubes with the debris.
+       What is left here is only the soft halo that keeps it visible against a
+       dark wall, and it is a fraction of the size the ball used to be. */
+    for(const s of eshots) put(s.x,s.y,s.z, s.sz*1.5, T_GLOW, s.col, 0.30);
     for(const e of enemies){
       if(!e.aim || e.state!=='live') continue;
       const k = 1 - e.lock/Math.max(0.05, e.lockMax);
