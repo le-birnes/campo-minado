@@ -3543,9 +3543,36 @@ function rebuildWorld(){
     else  { d[o+23]=d[o+24]=d[o+25]=0; }
     n++;
   };
+  /* ONLY WHAT HAS A FACE ON THE OPEN AIR.
+     A cube packed on all six sides by other cubes cannot be seen from
+     anywhere a player can stand, and drawing it costs an instance, 26 floats
+     of upload, and its share of a batch with a HARD cap that drops geometry
+     SILENTLY when it overflows. Measured on the four-level dungeon before
+     this: 9731 of 10464 instances, 93% full, and 58% of them buried. A fifth
+     level did not fit.
+
+     Only air counts as open — not the edge of the grid — so the outward face
+     of the shell, which nobody can ever get behind, stays unbuilt too.
+
+     The board changes and G.dirty is set, so this is recomputed the moment a
+     block comes out and its neighbours are exposed. */
+  const FACE6 = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+  /* ...unless the puzzle cells are drawn SMALLER than their block, in which
+     case there are gaps between them and a "buried" cube is visible through
+     the cracks. Nothing ships that way today, but ?cellSize does. */
+  const cull = CELL_S > 0.999;
+  const facesAir = (x,y,z) => {
+    if(!cull) return true;
+    for(let k=0;k<6;k++){
+      const X=x+FACE6[k][0], Y=y+FACE6[k][1], Z=z+FACE6[k][2];
+      if(inside(X,Y,Z) && G.st[idx(X,Y,Z)]===AIR) return true;
+    }
+    return false;
+  };
   // bedrock: a one-block shell around everything
   for(let y=-1;y<=G.ny;y++) for(let z=-1;z<=G.nz;z++) for(let x=-1;x<=G.nx;x++){
     if(inside(x,y,z)) continue;
+    if(!facesAir(x,y,z)) continue;
     const s=(x*73856093 ^ y*19349663 ^ z*83492791)>>>0;
     const cryst = (s%37)===0;
     const hs = G.lava ? hellStone(x,y,z) : null;
@@ -3557,6 +3584,7 @@ function rebuildWorld(){
   for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
     const i=idx(x,y,z);
     if(G.st[i]===AIR) continue;
+    if(!facesAir(x,y,z)) continue;
     /* Structure reads as the same stone as the shell, so a wall inside the
        cave and the wall at its edge are visibly the same promise: this does
        not open, do not waste a shot on it. */
