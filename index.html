@@ -6730,6 +6730,27 @@ function buildFlies(){
       }
     }
     if(comp.length < FLY_MIN) continue;
+    /* AND IT HAS TO BE SOMEWHERE YOU HAVE ALREADY WON. A pocket only gets its
+       fireflies once a flagged mine touches it — everywhere else is pitch
+       black, however open it is.
+       This turns the light into a reward instead of scenery. Before, a big
+       empty room lit itself for free, which meant the cave was brightest
+       exactly where you had done the least; now the room stays dark until you
+       have proved something in it, and the map you can see IS the map you
+       have solved. It also gives the flag two jobs at once: the landmark it
+       already was, and the switch that wakes the room. */
+    let earned = false;
+    for(const c of comp){
+      const [ax,ay,az] = cellXYZ(c);
+      for(let dy=-1;dy<=1 && !earned;dy++) for(let dz=-1;dz<=1 && !earned;dz++)
+        for(let dx=-1;dx<=1;dx++){
+          if(!dx&&!dy&&!dz) continue;
+          const X=ax+dx, Y=ay+dy, Z=az+dz;
+          if(inside(X,Y,Z) && G.st[idx(X,Y,Z)]===MARKED){ earned=true; break; }
+        }
+      if(earned) break;
+    }
+    if(!earned) continue;
     const want = Math.max(1, Math.min(14, 1 + ((comp.length - FLY_MIN)/FLY_PER)|0));
     for(let k=0;k<want && flies.length<FLY_MAX;k++){
       /* Evenly through the component's own ordering, which for a flood fill
