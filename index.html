@@ -2441,7 +2441,7 @@ function genWorld(d){
   P.vx=P.vy=P.vz=0; P.yaw=L.yaw; P.pitch=L.pitch||0; P.ground=true; P.coyote=COYOTE;
   P.jumps=0;
   syncPowHud();
-  particles.length=0; sprites.length=0; debris.count=0;
+  particles.length=0; sprites.length=0; pellets.length=0; debris.count=0;
   seedDust();
   G.dirty=true;
 }
@@ -2576,6 +2576,52 @@ function addS(x,y,z, vx,vy,vz, size, life, col, tile, alpha){
   if(sprites.length>=MAXS) sprites.shift();
   sprites.push({x,y,z,vx,vy,vz,s:size,l:life,ml:life,c:col,
                 tile:tile===undefined?T_GLOW:tile, a:alpha===undefined?1:alpha});
+}
+/* ==========================================================================
+   BUCKSHOT — what leaving the barrel looks like
+   ==========================================================================
+   The shot itself is still one ray down the middle of the screen and this
+   changes none of it: what a pellet does is be seen. Nothing here is ever
+   asked whether it hit anything.
+
+   A shell opens into a cone and then stops opening. Real buckshot keeps
+   spreading forever, but forever looks like a searchlight on a screen, so
+   these open over the first stride and a half and then run PARALLEL — which
+   is also what Marcelo asked for: out to four of its own radii, and no
+   further. Because the cap is measured in the pellet's own size, making the
+   voxels bigger makes the pattern bigger with them, and it stays one number
+   to tune instead of two that have to agree. */
+const PEL_N     = 18;
+const PEL_SIZE  = BLOCK*0.032;      // a voxel, and deliberately a tiny one
+const PEL_RADII = 4;                // ...and it opens to four of its own
+const PEL_OPEN  = 1.4;              // metres it takes to get there
+const PEL_SPD   = 44;               // m/s: fast, but you can see it leave
+const pellets   = [];
+function addPellets(ox,oy,oz, dx,dy,dz, reach){
+  /* Two axes across the shot to scatter on. Pick the seed axis away from the
+     shot direction or the cross product collapses when you fire straight up. */
+  const sx = Math.abs(dy) < 0.9 ? 0 : 1, sy = Math.abs(dy) < 0.9 ? 1 : 0;
+  let ux = sy*dz - 0*dy, uy = 0*dx - sx*dz, uz = sx*dy - sy*dx;
+  const ul = Math.hypot(ux,uy,uz) || 1; ux/=ul; uy/=ul; uz/=ul;
+  const vx = dy*uz - dz*uy, vy = dz*ux - dx*uz, vz = dx*uy - dy*ux;
+  const rmax = PEL_RADII * PEL_SIZE;
+  for(let i=0;i<PEL_N && pellets.length<240;i++){
+    const a = wrnd()*6.2832;
+    /* sqrt, so they land evenly across the disc instead of piling into the
+       middle of it — without it half the pattern is one bright dot. */
+    const rr = rmax*Math.sqrt(wrnd());
+    const ca = Math.cos(a), sa = Math.sin(a);
+    pellets.push({ox,oy,oz, dx,dy,dz,
+                  ax: ux*ca + vx*sa, ay: uy*ca + vy*sa, az: uz*ca + vz*sa,
+                  r: rr, t: 0, reach, spd: PEL_SPD*(0.90+wrnd()*0.20)});
+  }
+}
+function updatePellets(dt){
+  for(let i=pellets.length-1;i>=0;i--){
+    const p = pellets[i];
+    p.t += p.spd*dt;                       // metres down the barrel line
+    if(p.t >= p.reach) pellets.splice(i,1);
+  }
 }
 function seedDust(){
   dust.length=0;
@@ -3470,9 +3516,31 @@ const STAFF = [
   [0.02,-0.62, 0.02,  0,0,0,          0.36,0.26,0.35, [0.31,0.22,0.20],  0], // wrist
   [0.06,-1.02, 0.06,  0,0,0,          0.34,0.62,0.34, [0.23,0.16,0.15],  0]  // forearm
 ];
-const STAFF_TILT = [-0.12, 0.15, -0.705];   // rx, ry, rz — shaft tilt
+const STAFF_TILT = [-0.12, 0.15, -0.705];   // rx, ry, rz — the STAFF's shaft tilt
 const STAFF_DIR  = [0.648, 0.762];          // axis direction, already projected
 const STAFF_Z    = -0.90;
+/* THE GUN HAS TO POINT FORWARD, and until now it pointed at your face.
+
+   The staff is a +Y model: a shaft standing up, tilted into the lower left by
+   STAFF_TILT. The shotgun is a +Z model: a barrel lying along the view axis,
+   muzzle ring at z=+1.05, stock at z=-1.30. It was being placed with the
+   STAFF's tilt, and rotating a barrel with a stick's angles does not give you
+   a barrel at an angle — it gives you a barrel pointing somewhere else
+   entirely. Measured off the matrices the GPU actually gets: the barrel sat
+   169 degrees away from forward and the muzzle rendered NEARER the camera
+   than the stock. The gun was held backwards, and the 31-degree swing recoil
+   put on top of that is what read as chopping downwards.
+
+   ry = PI turns the model to face down -Z, which is where the camera looks.
+   The rest is small: about 5 degrees of yaw so the barrel angles in towards
+   the middle of the screen, 2 of pitch, and a little roll. */
+const GUN_TILT = [0.035, Math.PI + 0.09, -0.10];
+/* Where the barrel ENDS, in camera space, refreshed every frame from the
+   matrix the muzzle ring was actually drawn with. The shot comes out of
+   here. Seeded with a plausible value so that a shot fired on the very first
+   frame, before anything has been drawn, still leaves from roughly the right
+   place instead of from the middle of your forehead. */
+const MUZZLE = [0.30, -0.22, -1.30];
 
 let recoil=0, swayX=0, swayY=0;
 const _S=new Float32Array(16), _L=new Float32Array(16);
@@ -3492,16 +3560,21 @@ function buildViewModel(t, speed, aspect){
   const bx = Math.sin(P.bob)*0.026*speed;
   const by = Math.abs(Math.cos(P.bob))*0.020*speed;
 
-  // the tip aims at the lower center-left; the center follows from that
-  const tipX = -0.34*hw, tipY = -0.34*hh;
-  const cx = tipX - STAFF_DIR[0]*hh + (bx + br2 + swayX)*hh;
-  const cy = tipY - STAFF_DIR[1]*hh + (by + br - recoil*0.11)*hh;
-  const cz = STAFF_Z - recoil*0.17;
+  /* Low and to the right, barrel down the view axis.
+
+     RECOIL IS BACKWARD. A gun going off shoves the shooter; it does not swing
+     at anything. So the body travels towards the camera (+z is towards you
+     here), lifts a little, and the barrel rises about three degrees. It never
+     stops pointing where you are aiming, which is the whole difference
+     between firing a weapon and swinging one. */
+  const cx =  0.30*hw + (bx + br2 + swayX)*hh;
+  const cy = -0.34*hh + (by + br + recoil*0.045)*hh;
+  const cz = STAFF_Z + recoil*0.16;
 
   compose(_S,0, cx, cy, cz,
-          STAFF_TILT[0] + brR + swayY*0.5 - recoil*0.55,
-          STAFF_TILT[1] + swayX*1.6,
-          STAFF_TILT[2],
+          GUN_TILT[0] + brR*0.5 + swayY*0.4 - recoil*0.10,
+          GUN_TILT[1] + swayX*1.2,
+          GUN_TILT[2],
           hh, hh, hh);
 
   /* The shotgun, always. It used to appear only for the finale and the wizard's
@@ -3519,6 +3592,14 @@ function buildViewModel(t, speed, aspect){
     d[o+23]=d[o+24]=d[o+25]=0;
   }
   viewB.count=VIEW.length;
+  /* Part 5 is the muzzle ring. Read its translation straight back out of the
+     buffer rather than recomputing it: this is the matrix that gets drawn, so
+     the flash cannot drift away from the gun no matter what happens above. */
+  const mo = 5*CUBE_STRIDE;
+  const bl = Math.hypot(d[mo+8], d[mo+9], d[mo+10]) || 1;
+  MUZZLE[0] = d[mo+12] + d[mo+8]/bl*0.06;
+  MUZZLE[1] = d[mo+13] + d[mo+9]/bl*0.06;
+  MUZZLE[2] = d[mo+14] + d[mo+10]/bl*0.06;
 }
 
 /* ==========================================================================
@@ -3621,13 +3702,25 @@ function shoot(){
      way is not a target, so the shot passes it and hits the wall behind. */
   const hit = raycast(r.ox,r.oy,r.oz, r.dx,r.dy,r.dz, REACH, false);
   const dist = hit.hit ? hit.t : REACH;
-  const mx = P.x + r.dx*1.6, my = P.y+EYE + r.dy*1.6 - 0.22, mz = P.z + r.dz*1.6;
-  addS(mx,my,mz, 0,0,0, 0.62, 0.09, [1.0,0.86,0.45], T_GLOW, 0.55);
-  const n = 10, t0 = 2.4;
-  if(dist > t0) for(let i=0;i<n;i++){
-    const t = t0 + (dist-t0)*(i/(n-1));
-    addS(P.x+r.dx*t, P.y+EYE+r.dy*t, P.z+r.dz*t, 0,0,0,
-         0.34+0.20*(1-i/(n-1)), 0.11+0.05*rnd(), [0.86,0.62,1.0], T_GLOW, 0.40);
+  /* OUT OF THE BARREL, not out of your forehead. MUZZLE is in camera space —
+     the view model is drawn with an identity view matrix — so rebuild the
+     camera's basis and put it back in the world.
+       right   is horizontal, so it needs no pitch
+       up      is right x forward
+       forward is the aim itself, and camera -Z is in front, hence the minus */
+  const cyw = Math.cos(P.yaw), syw = Math.sin(P.yaw), cpw = Math.cos(P.pitch);
+  const mx = P.x       + cyw*MUZZLE[0] + syw*r.dy*MUZZLE[1] - r.dx*MUZZLE[2];
+  const my = P.y + EYE +                     cpw*MUZZLE[1] - r.dy*MUZZLE[2];
+  const mz = P.z       - syw*MUZZLE[0] + cyw*r.dy*MUZZLE[1] - r.dz*MUZZLE[2];
+  addS(mx,my,mz, 0,0,0, 0.52, 0.07, [1.0,0.86,0.45], T_GLOW, 0.55);
+  /* The pellets leave the muzzle but they land on the CROSSHAIR, because the
+     ray does. A barrel sitting off to one side of your eye and firing exactly
+     parallel to it is what a real gun does and it looks like a miss. */
+  {
+    const tx = P.x + r.dx*dist, ty = P.y+EYE + r.dy*dist, tz = P.z + r.dz*dist;
+    let px = tx-mx, py = ty-my, pz = tz-mz;
+    const pl = Math.hypot(px,py,pz) || 1;
+    addPellets(mx,my,mz, px/pl, py/pl, pz/pl, pl);
   }
   /* Enemies come first, but only if one is genuinely nearer than whatever
      block the ray would otherwise have hit — otherwise you would shoot
@@ -7114,6 +7207,7 @@ function frame(now){
     p.rx+=p.vrx*sim; p.ry+=p.vry*sim; p.rz+=p.vrz*sim;
     if(p.y < 0.1 && p.vy<0){ p.y=0.1; p.vy*=-0.32; p.vx*=0.7; p.vz*=0.7; }
   }
+  updatePellets(sim);
   for(let i=sprites.length-1;i>=0;i--){
     const s=sprites[i]; s.l-=sim;
     if(s.l<=0){ sprites.splice(i,1); continue; }
@@ -7235,6 +7329,25 @@ function frame(now){
       compose(d,o, p.x,p.y,p.z, p.rx,p.ry,p.rz, p.s*k,p.s*k,p.s*k);
       d[o+16]=p.c[0]; d[o+17]=p.c[1]; d[o+18]=p.c[2];
       d[o+19]=(i*0.137)%1; d[o+20]=p.e; d[o+21]=0; d[o+22]=0;
+      d[o+23]=d[o+24]=d[o+25]=0;
+      n++;
+    }
+    /* The buckshot rides in the same batch as the debris: same cubes, same
+       pass, no second draw call for eighteen voxels. */
+    for(let i=0;i<pellets.length && n<debris.max;i++){
+      const p = pellets[i], o = n*CUBE_STRIDE;
+      const k = Math.min(1, p.t/PEL_OPEN);      // how far the cone has opened
+      const off = p.r*k;
+      composeAA(d,o, p.ox + p.dx*p.t + p.ax*off,
+                     p.oy + p.dy*p.t + p.ay*off,
+                     p.oz + p.dz*p.t + p.az*off,
+                     PEL_SIZE, PEL_SIZE, PEL_SIZE);
+      /* Bright at the barrel, cooling as it goes, and emissive throughout —
+         the cave is dark on purpose now and unlit pellets would be invisible
+         two metres out. */
+      const heat = 1 - 0.45*Math.min(1, p.t/Math.max(1, p.reach));
+      d[o+16]=1.00*heat; d[o+17]=0.86*heat; d[o+18]=0.52*heat;
+      d[o+19]=(i*0.213)%1; d[o+20]=1; d[o+21]=0; d[o+22]=0;
       d[o+23]=d[o+24]=d[o+25]=0;
       n++;
     }
