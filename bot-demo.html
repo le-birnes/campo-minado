@@ -2498,19 +2498,27 @@ function genWorld(d){
      It was every ROCK cell, which in a dungeon is 6601 of 7776 — so you could
      stand and chew straight through eleven of them, and "breakable walls"
      turned into "the whole cave is soft".
-     It has to be settled ONCE, now, at generation: a cell is coat if it has a
-     face on the open air TODAY. Deciding it live would be no different from
-     before, because breaking the skin exposes the next layer and that would
-     become skin in its turn, all the way to the far side.
-     So: one block of cinderstone over everything, and solid rock behind it
-     for good. */
+     It has to be settled ONCE, now, at generation. Deciding it live would be
+     no different from before, because breaking the skin exposes the next
+     layer and that would become skin in its turn, all the way to the far
+     side.
+
+     THE TEST IS "TOUCHING ANYTHING THAT IS NOT WALL", not "touching air".
+     Air alone was wrong and would have bitten later: most of the structure a
+     player ever stands against is buried behind a cluster of sand and mines
+     TODAY, and every one of those blocks is going to be dug out. The moment
+     it is, the rock behind it becomes the first layer of wall you can see —
+     and it would have been permanent stone, because at generation it happened
+     to be touching sand rather than open space. So the coat is the boundary
+     between structure and everything else, whether that else is air now or
+     air later. */
   G.coat = new Uint8Array(N);
   for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
     const ci = idx(x,y,z);
     if(G.st[ci]!==ROCK) continue;
     for(const [dx,dy,dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]){
       const X=x+dx,Y=y+dy,Z=z+dz;
-      if(inside(X,Y,Z) && G.st[idx(X,Y,Z)]===AIR){ G.coat[ci]=1; break; }
+      if(inside(X,Y,Z) && G.st[idx(X,Y,Z)]!==ROCK){ G.coat[ci]=1; break; }
     }
   }
   G.lampCell = -1;
