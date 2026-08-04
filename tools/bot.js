@@ -119,7 +119,7 @@ const stats = { walked:0, jumps:0, shots:0, flags:0, noEffect:0,
                 flagAim:0, flagBlocked:0, aimBlind:0, wallSteps:0, futile:0,
                 routes:0, routeWon:0, routeStuck:0, routeNone:0, routeSaved:0,
                 bored:0, reroutes:0, kills1:0,
-                goals:0, goalDone:0, goalLost:0, goalDrop:0 };
+                goals:0, goalDone:0, goalLost:0, goalDrop:0, hunts:0 };
 
 /* ---------------- audit ---------------- */
 let baseAir = 0, baseRock = 0;
@@ -730,6 +730,9 @@ function newRun(){
        get, how many steps it has failed to get closer, and the ones it has
        given up on. See pickGoal. */
     goal: null, goalD: 1e9, goalAge: 0, dropped: new Set(),
+    /* Steps spent walking at a creature it cannot see. Bounded, so one that
+       cannot be reached at all does not stop the run for good. */
+    hunt: 0,
     counted: new Set(),        // a cell is counted as a guess once, not once per step
     wander: 0,                 // steps spent walking without finding work
     stuck: 0,                  // consecutive failures to travel
@@ -790,6 +793,7 @@ const EX = {
   route:  1,     // 0 = straight lines only, the old behaviour
   farFirst: 0,   // 1 = always head for the FARTHEST work (pure exploration)
   patience: 14,  // steps it will keep walking at one objective without closing
+  hunt:  16,     // steps it will spend going to find a creature it cannot see
   kill:  30,     // most shots poured into one enemy before breaking off
   killHell: 90   // and into a finale creature, which has real hit points
 };
@@ -1102,6 +1106,7 @@ function climb(R){
   }
 
   /* --- 1. STAY ALIVE. Everything else assumes there is a player left. --- */
+  if (!enemies.length) R.hunt = 0;
   if (G.boss && enemies.length){
     R.peak = Math.max(R.peak, enemies.length);
     if (dodge()) R.note = 'dodging';
@@ -1110,9 +1115,41 @@ function climb(R){
     if (fightBack()){
       /* "shot at something" is not a fight. It said that while jumping at a
          wall. Only a kill or a real change in the field counts as an action. */
-      if (stats.killed > kills0) return A('killed one, '+enemies.length+' left', 'kill');
+      if (stats.killed > kills0){ R.hunt = 0; return A('killed one, '+enemies.length+' left', 'kill'); }
       R.note = 'fighting ('+foes0+' up)';
       return true;
+    }
+    /* NOTHING ELSE HAPPENS WHILE SOMETHING IS ALIVE.
+
+       fightBack only engages what it can SEE. Everything else it did — the
+       chase, the walk at the nearest one — used a straight line, so a creature
+       round a corner or one floor down produced a shrug: it returned false,
+       the ladder fell through, and the bot went back to doing sums while
+       being shot at. That is how it died at 41% of a full dungeon, six runs
+       out of six, at exactly the same step.
+
+       So: route to the nearest one, with the same BFS the puzzle work uses,
+       and stop as soon as it comes into view — fightBack takes it from there
+       next step. Bounded by EX.hunt, because a creature that genuinely cannot
+       be reached must not hold the whole run hostage. */
+    if (R.hunt < EX.hunt){
+      let near = null;
+      for (const e of enemies){
+        const d = Math.hypot(e.x-P.x, e.y-P.y, e.z-P.z);
+        if (!near || d < near.d) near = {e, d};
+      }
+      const ex = Math.floor(near.e.x/BLOCK),
+            ey = Math.floor(near.e.y/BLOCK),
+            ez = Math.floor(near.e.z/BLOCK);
+      if (inside(ex,ey,ez)){
+        R.hunt++;
+        const cell = idx(ex,ey,ez);
+        stats.hunts++;
+        if (EX.route && routeTo(cell, ()=>seeEnemy(near.e)) > BLOCK*0.5)
+          return W('hunting one down, '+near.d.toFixed(0)+' m off ('+foes0+' up)');
+        if (closeOn(cell))
+          return W('closing on one, '+near.d.toFixed(0)+' m off ('+foes0+' up)');
+      }
     }
   }
 
@@ -1636,10 +1673,27 @@ else {
   plan.push([0,MODE_DUNGEON,'Dungeon']);
 }
 
+/* DIFFERENT BOARDS. The world seed starts at 1 and only ever advances through
+   rnd(), so headless the bot played the SAME dungeon every single time — six
+   identical runs reported as six results, which is one result wearing a
+   disguise. ?runs=N replays the plan N times from a different seed each time,
+   and ?seed=N picks where that starts. A completion RATE needs this; without
+   it every number this bot produces is a sample of one. */
+const RUNS  = (function(){ const m=/[?&]runs=(\d+)/.exec(location.search);
+                           return m ? Math.max(1, +m[1]) : 1; })();
+const SEED0 = (function(){ const m=/[?&]seed=(\d+)/.exec(location.search);
+                           return m ? +m[1] : 1; })();
 let games=0, wins=0, totalMoves=0;
-for (const [d,mode,label] of plan){
+const tally = {};
+for (let rep=0; rep<RUNS; rep++)
+for (const [d,mode,label0] of plan){
+  /* 7919 is just a prime stride: consecutive seeds give boards that are far
+     more alike than the generator's own spread suggests. */
+  seed = (SEED0 + rep*7919) >>> 0;
+  const label = RUNS>1 ? label0+' seed '+seed : label0;
   const r=playGame(d,mode,label);
   games++; totalMoves+=r.moves; if (r.won) wins++;
+  tally[r.why] = (tally[r.why]||0) + 1;
   log(`${label}: ${r.won?'FINISHED':'stopped'} after ${r.steps} steps / ${r.moves} actions — ${r.why}`);
   log(`   opened ${r.opened}/${r.of} (${(100*r.opened/r.of).toFixed(0)}%), `+
       `flags ${r.flags}/${r.mines}, ${r.left} blocks still shut, peakFoes ${r.peak}`);
@@ -1647,6 +1701,8 @@ for (const [d,mode,label] of plan){
 }
 
 log(`games=${games} finished=${wins} actions=${totalMoves}`);
+if (RUNS > 1)
+  log('outcomes: ' + Object.keys(tally).map(k => tally[k]+' x '+k).join(' | '));
 log(`cost: ${stats.scans} scans, ${stats.rays} rays, ${stats.ticks} physics ticks, `+
     `${stats.follows} straight runs (${stats.blocked} blocked)`);
 log(`on foot: ${stats.walked.toFixed(0)} m, ${stats.jumps} jumps, `+
@@ -1662,6 +1718,7 @@ log(`worked THROUGH a number, reaching blocks it could not hit: `+
     `${stats.numFlags} flagged, ${stats.numOpens} opened`);
 log(`clue-led digs: ${stats.clueWork} (shots aimed at an unfinished number's own blocks)`);
 log(`solver rules: ${Object.keys(stats.byRule).map(k=>k+' '+stats.byRule[k]).join(', ')||'none'}`);
+log(`hunting: ${stats.hunts} steps spent going to find something it could not see`);
 log(`combat: killed ${stats.killed} in ${stats.bursts} engagements, ${stats.shotAt} shots `+
     `(${stats.killed?(stats.shotAt/stats.killed).toFixed(1):'-'} per kill), ${stats.dodged} dodges, `+
     `${stats.nudges} nudges, ${stats.chases} chases, ${stats.climbs} climbs, `+

@@ -2674,7 +2674,12 @@ const SHOT_LIFT = Math.sqrt(2*GRAV*BLOCK/3);
    backward kick and a target of almost nothing arrive together, you stop
    going anywhere, and then the target ramps back and you carry on. */
 const STAG_T   = 0.18;         // seconds
-const STAG_MIN = 0.18;         // ...at its worst, this share of your speed
+/* ...at its worst, this share of your speed. On a knob because it is the one
+   thing here that can make a fight unwinnable: every shot re-arms it, so
+   anything firing a long burst is pinned in place for the whole burst.
+   ?stagger=1 turns it off. */
+const STAG_MIN = (function(){ const m=/[?&]stagger=([\d.]+)/.exec(location.search);
+                              return m ? parseFloat(m[1]) : 0.18; })();
 /* AND THE VIEW PUNCHES. The gun kicking on its own is a puppet show — what
    sells a shot is the ROOM moving. This rides on `recoil`, which is already
    1 at the trigger and 0 about a sixth of a second later.
@@ -5927,8 +5932,12 @@ function syncCustom(){
   $('cde').value=pct; $('cdeV').textContent=pct+'%';
   /* Custom is a board you dimension yourself, so its sliders only mean
      anything in the plain puzzle: the dungeon brings its own geometry. */
+  /* !! again, and for the same reason as below: with G.modePicked undefined
+     this was toggle(name, undefined), which does not force the class off — it
+     falls back to plain toggling. So the Custom sliders flipped themselves on
+     over a menu where no mode had been picked yet. */
   $('customBox').classList.toggle('on',
-      G.modePicked && G.diff===CUSTOM && G.mode===MODE_SWEEP);
+      !!G.modePicked && G.diff===CUSTOM && G.mode===MODE_SWEEP);
   /* !! IS NOT DECORATION. classList.toggle(name, undefined) does not force
      the class off — it falls back to plain toggling, so with G.modePicked
      still undefined both mode buttons flipped on every sync and the "nothing
@@ -6624,7 +6633,22 @@ const MAXL       = 48;        // most lights in one frame; the shader matches
 /* Zero. Not nearly zero — zero. Anywhere no torch reaches and the player is
    not standing is BLACK, and that is the design: this is not a room with the
    lights low, it is a place you cannot see. */
-const LIT_DARK   = litQ('dark')    !== null ? litQ('dark')    : 0.03;
+const LIT_DARK_Q = litQ('dark');
+const LIT_DARK   = LIT_DARK_Q !== null ? LIT_DARK_Q : 0.03;
+/* APPRENTICE IS LIT. The dark is a design pillar everywhere else — a cave you
+   are kept in, where a flag you planted is a landmark because it is the only
+   thing you can see by. None of that teaches anybody the rules. Apprentice is
+   the board you learn on, so it gets ambient light you can read a number by
+   and the atmosphere starts at Sorcerer.
+
+   Sweep only. The dungeon currently offers Apprentice and nothing else, so
+   keying this on difficulty alone would light the whole descent and delete
+   the thing the relight was for. One condition to change if that is wanted. */
+const DARK_LEARN = 0.50;
+function darkNow(){
+  if (LIT_DARK_Q !== null) return LIT_DARK;      // an explicit ?dark wins outright
+  return (!G.dungeon && G.diff === 0) ? DARK_LEARN : LIT_DARK;
+}
 /* What the staff throws. It is the only light you carry and the only reason a
    block under your nose is readable at all, so it cannot be zero — but it was
    0.20 and reaching fifteen metres, which is a torch, not a wand. */
@@ -7531,7 +7555,7 @@ function frame(now){
   else gl.uniform3f(uC.hover, 1e9,1e9,1e9);
   /* THE LIGHTS. Gathered once and used by every cube pass in the frame, so a
      creature standing in the glow of a flag is lit by that flag. */
-  gl.uniform1f(uC.dark, LIT_DARK);
+  gl.uniform1f(uC.dark, darkNow());
   gl.uniform1f(uC.lantern, LIT_LANTERN);
   gl.uniform1f(uC.lanternR,  LIT_LANTR*BLOCK);
   gl.uniform1f(uC.lanternR2, LIT_LANTR2*BLOCK);
