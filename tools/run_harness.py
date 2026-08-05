@@ -163,13 +163,15 @@ def run(html_path, budget=8000, shot=None, size=None, cap=CAP_DEFAULT, profile=N
     shutil.rmtree(prof, ignore_errors=True)
 
     if timed_out:
-        return ("TIMED OUT after %.0fs. RUN IT AGAIN before concluding anything: "
-                "the first run after index.html changes pays a cold start that "
-                "measured 120 s where the second took 0.8 s. If it times out "
-                "twice, the next suspect is a harness identifier colliding with "
-                "one the game already declares — a parse error, so nothing runs "
-                "and Chrome waits out its budget in silence. Only after both of "
-                "those go looking for a real loop." % secs, secs, True)
+        return ("TIMED OUT after %.0fs at this cap. Use escalate() rather than "
+                "run() and the retry happens for you: it tries twice at twelve "
+                "seconds before it waits at all, because a cold start costs two "
+                "minutes ONCE and the attempt straight after it costs nothing. "
+                "If escalate itself came back timed out, the retry has already "
+                "been done — so the next suspect is a harness identifier "
+                "colliding with one the game declares, which is a parse error: "
+                "nothing runs and Chrome sits out its budget in silence. Only "
+                "after that go looking for a real loop." % secs, secs, True)
     if shot:
         return ("screenshot written", secs, False)
     m = re.search(r'data-r="([^"]*)"', out or "")
@@ -179,25 +181,59 @@ def run(html_path, budget=8000, shot=None, size=None, cap=CAP_DEFAULT, profile=N
             "blocked before its first write" % len(out or ""), secs, False)
 
 
-def escalate(html_path, budget=8000, start=30, profile=None, shot=None, size=None,
+def escalate(html_path, budget=8000, start=12, profile=None, shot=None, size=None,
              query=None):
-    """Start impatient and grow. Most runs either answer in a second or are
-    broken; waiting five minutes to learn that is wasted time. So try 30 s, and
-    on a timeout give it half as long again — 30, 45, 67, 101, 152, 228, 300 —
-    stopping at the ceiling. A run that survives the whole ladder is not slow,
-    it is wrong.
+    """Start impatient, RETRY ONCE AT THE SAME LENGTH, then grow.
+
+    THE PROTOCOL, and the observation behind it (Marcelo, 2026-08-05: "even if
+    the thing is working, it is better to kill it and start again at 10 seconds
+    rather than spend 120 to discover only the next attempt would work
+    incredibly fast").
+
+    He is right, and the old ladder was too patient to act on what this file
+    already knew: a cold start costs about two minutes ONCE, on the first run
+    after index.html changes, and every run after it against the same build is
+    instant. Measured here: 120.3 s, then 0.8 s, same bytes. So the cheapest
+    possible way to tell a cold start from a real fault is to give it twelve
+    seconds, kill it, and immediately try again — because the second attempt is
+    the one that pays nothing.
+
+    The ladder is therefore 12, 12, 18, 27, 40, 61, 91, 137, 205, 300:
+
+      * rung 1 catches everything healthy, which is most runs
+      * rung 2 is the SAME LENGTH on purpose. It is not patience, it is the
+        retry, and it is what turns a 120-second discovery into a 24-second one
+      * from there it grows by half, for work that is genuinely long
+      * anything that survives the whole ladder is not slow, it is wrong
+
+    Best case — which is the common case — is a fault found in 24 seconds
+    instead of 280.
+
+    AND THE TOTAL IS CAPPED, which the first version of this got wrong: rungs
+    that each stop at CAP_MAX still add up, and a ladder that ran all ten of
+    them spent 913 seconds proving a run was broken where a single long attempt
+    would have taken 300. A ladder is only cheaper if the whole ladder is
+    cheaper. So the budget is the SUM, every rung is trimmed to what is left,
+    and the worst case is now the same 300 seconds a single run costs — with
+    the common case still answered in twelve.
 
     Returns (result, seconds, timed_out, attempts)."""
-    cap, n = float(start), 0
+    cap, n, total = float(start), 0, 0.0
     while True:
         n += 1
+        left = CAP_MAX - total
+        if left < 1:
+            return res, total, True, n - 1
         res, secs, bad = run(html_path, budget=budget, shot=shot, size=size,
-                             cap=int(cap), profile=profile, query=query)
+                             cap=int(min(cap, left)), profile=profile, query=query)
+        total += secs
         if not bad:
-            return res, secs, False, n
-        if cap >= CAP_MAX:
-            return res, secs, True, n
-        cap = min(CAP_MAX, cap * 1.5)
+            return res, total, False, n
+        if total >= CAP_MAX:
+            return res, total, True, n
+        # rung 2 repeats rung 1: that IS the cold-start retry, not more waiting
+        if n > 1:
+            cap = min(CAP_MAX, cap * 1.5)
 
 
 def main():

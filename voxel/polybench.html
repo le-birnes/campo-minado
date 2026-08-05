@@ -1,0 +1,141 @@
+<!doctype html><meta charset="utf-8"><title>pyramid debris bench</title>
+<body style="background:#111;color:#ddd;font:13px ui-monospace,monospace;padding:12px">
+<pre id="out">running…</pre>
+<script src="poly.js"></script>
+<script>
+const L=[], log=s=>L.push(s);
+const ms = f => { const t=performance.now(); f(); return performance.now()-t; };
+const fx = (n,d=1) => n.toLocaleString('en-US',{maximumFractionDigits:d});
+const DT = 1/60;
+
+/* The pyramid is sized against the game: BLOCK/16 = 0.175 m is the voxel we
+   settled on, so a piece of debris that reads as "a chunk of the wall" is a
+   couple of those across. */
+const BLOCK = 2.8, VOX = BLOCK/16;
+const A = VOX, H = VOX*1.6;                 // half-base, height
+const SHAPE = pyramid(A, H);
+
+log('=== PYRAMID DEBRIS — finding the MVQ ===');
+log('');
+log(`  shape: square pyramid, 5 vertices, 5 faces, 8 edges`);
+log(`  size : base ${(A*2).toFixed(3)} m, height ${H.toFixed(3)} m  (the BLOCK/16 voxel is ${VOX.toFixed(3)} m)`);
+log(`  SAT  : up to 5+5 face axes and 8x8 edge-pair axes = 74 axes per pair`);
+log('');
+
+/* A dropped heap: they land, collide, topple, and settle. The settling is the
+   part that matters, because a pile that never sleeps is a pile you pay for
+   for the rest of the level. */
+function heap(n, spread){
+  const w = new Debris({g:20, floor:0, wall:spread, cell:SHAPE.r*2});
+  let seed = 20260805;
+  const rnd = () => ((seed = (seed*1664525 + 1013904223)>>>0) / 4294967296);
+  for (let i=0;i<n;i++){
+    const b = new Body(SHAPE,
+      v3((rnd()*2-1)*spread, H + rnd()*spread*2.2, (rnd()*2-1)*spread),
+      1);
+    b.q = qnorm({w:rnd()*2-1, x:rnd()*2-1, y:rnd()*2-1, z:rnd()*2-1});
+    b.w = v3((rnd()*2-1)*3, (rnd()*2-1)*3, (rnd()*2-1)*3);
+    w.add(b);
+  }
+  return w;
+}
+
+log('--- 1. THE COST CURVE: how long one tick takes, against how many bodies ---');
+log('');
+log('    n      falling ms   settled ms   contacts   SAT axes/tick   ticks to sleep');
+const rows = [];
+const T_ALL = performance.now();
+for (const n of [50, 100, 200, 400, 800]){
+  if (performance.now()-T_ALL > 20000){ log('  (stopped here: the bench itself ran out of its own budget)'); break; }
+  const spread = Math.max(1.2, Math.cbrt(n)*A*3.2);
+  const w = heap(n, spread);
+  /* the busy part: everything in the air, everything hitting everything */
+  let t=0; for (let i=0;i<25;i++) t += ms(()=>w.step(DT));
+  const busy = t/25, axes = w.stats.axes, hits = w.stats.hits;
+  /* now let it come to rest, and find out whether it ever does */
+  /* Bounded by wall clock as well as ticks: a settle loop allowed to take as
+     long as it likes turns the benchmark into the thing it is measuring. */
+  let quiet = -1;
+  const tq = performance.now();
+  for (let i=0;i<600 && performance.now()-tq < 2500;i++){
+    w.step(DT);
+    if (w.awake() === 0){ quiet = i; break; }
+  }
+  let t2=0; for (let i=0;i<25;i++) t2 += ms(()=>w.step(DT));
+  const rest = t2/25;
+  rows.push({n, busy, rest, hits, axes, quiet});
+  log(`  ${String(n).padStart(5)}   ${busy.toFixed(2).padStart(9)}   ${rest.toFixed(2).padStart(9)}   `+
+      `${String(hits).padStart(8)}   ${fx(axes,0).padStart(13)}   `+
+      (quiet>=0 ? String(quiet).padStart(8) : '   never'));
+}
+log('');
+
+/* ---- the answer ---- */
+log('--- 2. THE MVQ ---');
+log('');
+{
+  /* Two budgets worth naming: a physics slice of a 60 Hz frame, and the whole
+     frame. The game already spends most of a frame on itself, so the honest
+     number is the slice. */
+  const fit = budget => {
+    let best = 0;
+    for (const r of rows) if (r.busy <= budget) best = r.n;
+    // straight-line interpolation between the last row that fit and the first that did not
+    for (let i=0;i<rows.length-1;i++){
+      const a=rows[i], b=rows[i+1];
+      if (a.busy <= budget && b.busy > budget){
+        const f = (budget-a.busy)/(b.busy-a.busy);
+        return Math.round(a.n + f*(b.n-a.n));
+      }
+    }
+    return best;
+  };
+  const slice = fit(4.0), frame = fit(16.6);
+  log(`  all of them in the air, colliding — the worst case:`);
+  log(`     within a 4 ms physics slice of a 60 Hz frame : ~${fx(slice,0)} pyramids`);
+  log(`     within a whole 16.6 ms frame                 : ~${fx(frame,0)} pyramids`);
+  log('');
+  log(`  once settled they sleep and cost nothing, so the standing population can`);
+  log(`  be far larger than that — the budget is what is MOVING, not what exists.`);
+}
+log('');
+
+log('--- 3. WHAT THE BROAD PHASE IS WORTH ---');
+log('');
+{
+  const n = 400, spread = Math.cbrt(n)*A*3.2;
+  const w = heap(n, spread);
+  for (let i=0;i<25;i++) w.step(DT);
+  let a=0; for (let i=0;i<25;i++) a += ms(()=>w.step(DT));
+  const pairs = w.stats.pairs, naive = n*(n-1)/2;
+  log(`  ${n} bodies: the hash offered ${fx(pairs,0)} pairs to the narrow phase,`);
+  log(`  where testing everything against everything would be ${fx(naive,0)} — ${(naive/Math.max(pairs,1)).toFixed(0)}x more.`);
+  log(`  ${a/40 > 0 ? (a/40).toFixed(2) : '0'} ms/tick with it.`);
+}
+log('');
+
+log('--- 4. DOES THE SHAPE ACTUALLY MATTER? ---');
+log('');
+{
+  /* If pyramids behave exactly like spheres there is no reason to pay for SAT.
+     The test: drop a heap and measure how FLAT it ends up. Bodies that can
+     rest on a face stack; bodies that cannot, roll out into a puddle. */
+  const n = 200, spread = 1.4;
+  const w = heap(n, spread);
+  const th=performance.now();
+  for (let i=0;i<600 && performance.now()-th<3000;i++){ w.step(DT); if (w.awake()===0) break; }
+  let hi=0, lo=1e9, sum=0;
+  for (const b of w.b){ hi=Math.max(hi,b.p.y); lo=Math.min(lo,b.p.y); sum+=b.p.y; }
+  const r = SHAPE.r;
+  log(`  ${n} pyramids dropped into a ${(spread*2).toFixed(1)} m box:`);
+  log(`     heap height ${hi.toFixed(2)} m = ${(hi/(r*2)).toFixed(1)} bodies deep, mean ${(sum/n).toFixed(2)} m`);
+  log(`     a puddle one body deep would be ${(r*2).toFixed(2)} m — anything taller is the faces holding.`);
+  const upright = w.b.filter(b => qrot(b.q, v3(0,1,0)).y > 0.8).length;
+  log(`     ${upright} of ${n} came to rest sitting on their base (apex up)`);
+}
+log('');
+log('=== done ===');
+document.getElementById('out').textContent = L.join('\n');
+document.body.dataset.r = L.join('~');
+</script>
+</body>

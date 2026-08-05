@@ -158,3 +158,53 @@ budget=900000,cap=240,profile=r'E:\Claude\CampoMinado3D\tools\cdata_bot')[0].rep
 
 `data-r` is joined with `~` rather than newlines: the harness reads that
 attribute with a regex, and a newline inside it reads as no attribute at all.
+
+---
+
+# Pyramid debris — the MVQ run, and why it is not the answer yet
+
+`voxel/poly.js` + `voxel/polybench.html`. Five-vertex square pyramids as rigid
+bodies: real pose, real spin, real separating-axis contact against each other
+(5+5 face normals, up to 8x8 edge pairs = **74 axes per pair**), per-vertex
+ground contact so they topple onto a face instead of hovering on a sphere.
+
+## What the run says
+
+```
+   n    falling ms  settled ms  contacts  SAT axes/tick  ticks to sleep
+   50      0.51        0.12          2          201        never
+  100      0.20        0.28          6          642        never
+  200      0.37        0.64          4          485        never
+  400      0.78        1.83         10        1,134        never
+  800      1.56        5.85         25        2,715        never
+```
+
+**The broad phase is worth 155x**: at 400 bodies the spatial hash offered 515
+pairs to the narrow phase where everything-against-everything is 79,800.
+
+## What is wrong with it, plainly
+
+The MVQ it printed — 800 for both budgets — is **not a real answer**, and the
+table says why:
+
+1. **Nothing ever sleeps.** Same shape of bug as the sand engine's missing
+   world edges, not yet diagnosed. Until bodies sleep, "settled" costs more
+   than "falling" (5.85 ms against 1.56 at n=800), which is backwards and makes
+   every number in the right-hand columns suspect.
+2. **They are barely touching.** 25 contacts among 800 bodies. The drop box
+   scales as `cbrt(n)`, so the heap gets wider as fast as it gets bigger and
+   the bodies never crowd. A cost curve for *non-interacting* pyramids is not
+   the curve we need.
+3. **The heap is one body deep.** 0.51 m of pile from 200 pyramids, which is
+   exactly the "puddle" case — so section 4 cannot yet tell us whether the
+   faces hold, which was the entire reason for choosing a shape with faces.
+
+So: the engine runs, the geometry is right, the broad phase earns its place,
+and **the quantity question is still open**. Next, in order: fix sleeping;
+drop them into a fixed narrow shaft so they actually stack; push n until a tick
+crosses 4 ms with real contact counts; only then read the MVQ off the curve.
+
+Worth keeping in view: 800 pyramids is *three orders of magnitude* below the
+sand grid's 65,536-voxels-at-4.84 ms. Bodies and material are not competing
+designs — the likely answer is material for the bulk and a few hundred bodies
+for the chunks that read as debris.

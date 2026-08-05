@@ -32,8 +32,12 @@ def main():
     if not lit:
         q += ("&" if q != "?" else "") + "lights=0"
     page = os.path.join(R.HERE, "bot_index.html") + q
-    res, secs, bad = R.run(page, budget=900000, cap=cap,
-                           profile=os.path.join(R.HERE, "cdata_bot"))
+    # escalate, not run: two twelve-second attempts before any real waiting, so
+    # a cold start costs 24 s to rule out instead of the full cap.
+    res, secs, bad, tries = R.escalate(page, budget=900000,
+                                       profile=os.path.join(R.HERE, "cdata_bot"))
+    if tries > 1:
+        print("(%d attempts - the first was almost certainly the cold start)" % tries)
     print("[%.0fs] %s" % (secs, "QUICK Apprentice" if quick else "full suite"))
     print(res)
     sys.exit(1 if bad else 0)
