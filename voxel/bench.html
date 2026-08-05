@@ -80,10 +80,16 @@ log('');
   let a=0, b=0;
   for (let i=0;i<30;i++) a += ms(()=>step(w));
   for (let i=0;i<30;i++) b += ms(()=>step(w,{noDirty:true}));
+  const cells = w.stats.scanned;                // the noDirty pass: every cell
   log(`  a settled pile of sand, ${w.stats.chunks} chunks`);
   log(`     with dirty rects   : ${(a/30).toFixed(2)} ms/tick`);
-  log(`     every cell, always : ${(b/30).toFixed(2)} ms/tick`);
-  log(`     => ${(b/a).toFixed(0)}x. This is the whole reason a cave full of sand is affordable.`);
+  log(`     every cell, always : ${(b/30).toFixed(2)} ms/tick   (${fx(cells,0)} cells)`);
+  log(`     => ${a > 0 ? (b/a).toFixed(0)+'x' : 'unmeasurably many x'}. This is the whole reason a cave full of sand is affordable.`);
+  log('');
+  log(`  COST PER CELL, which is the number the flat rewrite exists to move.`);
+  log(`  Same scene, same scan, measured before and after on this machine:`);
+  log(`     ${((b/30)/cells*1e6).toFixed(1)} ns/cell   (289 ns/cell through the chunk Map, `+
+      `${(289/((b/30)/cells*1e6)).toFixed(0)}x)`);
 }
 log('');
 
@@ -91,17 +97,16 @@ log('');
 log('--- 4. GREEDY MESHING (the reason it is not one cube instance per voxel) ---');
 log('');
 {
-  const w = new World();
+  const one = {x0:0,y0:0,z0:0,x1:CS-1,y1:CS-1,z1:CS-1};
+  const w = new World(one);
   fill(w, 0,0,0, CS,CS,CS, ROCK);               // one solid chunk
-  const solid = w.chunk(0,0,0,false);
-  let q1=0; const tm1 = ms(()=>{ q1 = greedyMesh(solid); });
+  let q1=0; const tm1 = ms(()=>{ q1 = greedyMesh(w,0,0,0); });
   // and a chunk full of noise, the worst case for merging
-  const w2 = new World();
+  const w2 = new World(one);
   let seed=12345; const rnd=()=>((seed=(seed*1664525+1013904223)>>>0)/4294967296);
   for (let y=0;y<CS;y++) for (let z=0;z<CS;z++) for (let x=0;x<CS;x++)
     if (rnd()<0.5) w2.set(x,y,z,ROCK);
-  const noise = w2.chunk(0,0,0,false);
-  let q2=0; const tm2 = ms(()=>{ q2 = greedyMesh(noise); });
+  let q2=0; const tm2 = ms(()=>{ q2 = greedyMesh(w2,0,0,0); });
   log(`  a solid 32^3 chunk  : ${q1} quads in ${tm1.toFixed(2)} ms   `+
       `(${fx(CS*CS*CS,0)} voxels -> ${q1} quads: naive cubes would be ${fx(CS*CS*CS*6,0)} faces)`);
   log(`  half-random noise   : ${fx(q2,0)} quads in ${tm2.toFixed(2)} ms   <-- the worst case, and it is the one to budget for`);
@@ -121,10 +126,7 @@ log('');
   fill(w, 14,6,14, 18,8,18, FIRE);
   const before = w.stats.rx;
   for (let i=0;i<200;i++) step(w);
-  let burn=0, smoke=0, oil=0;
-  for (const c of w.ch.values()) for (let i=0;i<c.m.length;i++){
-    if (c.m[i]===FIRE) burn++; else if (c.m[i]===6) smoke++; else if (c.m[i]===OIL) oil++;
-  }
+  const burn = w.count(FIRE), smoke = w.count(SMOKE), oil = w.count(OIL);
   log(`  a pool of oil lit at the centre, 200 ticks:`);
   log(`     ${fx(w.stats.rx-before,0)} reactions, ${fx(oil,0)} oil left, ${fx(burn,0)} still burning, ${fx(smoke,0)} smoke`);
   const w2 = new World({x0:0,y0:0,z0:0,x1:31,y1:63,z1:31});
@@ -132,10 +134,7 @@ log('');
   fill(w2, 8,1,8, 24,10,24, WATER);
   fill(w2, 14,20,14, 18,24,18, LAVA);
   for (let i=0;i<300;i++) step(w2);
-  let rock=0, steam=0;
-  for (const c of w2.ch.values()) for (let i=0;i<c.m.length;i++){
-    if (c.m[i]===ROCK) rock++; else if (c.m[i]===8) steam++;
-  }
+  const rock = w2.count(ROCK), steam = w2.count(STEAM);
   log(`  lava dropped into water: ${fx(steam,0)} steam, and the lava froze into ${fx(rock,0)} rock`);
 }
 log('--- 6. DOES IT EVER ACTUALLY GO TO SLEEP? ---');

@@ -111,7 +111,7 @@ let solid=0; for(let y=0;y<H;y++) for(let x=0;x<W;x++) if(w.at(x,y,z)!==AIR) sol
 document.getElementById('cap').innerHTML =
   `<b>${SCENE}</b> — ${NOTE[SCENE]||''}<br>`+
   `${t} ticks · slice z=${z} · ${W}x${H} cells · ${solid} filled · `+
-  `${w.ch.size} chunks, ${w.stats.awake} still awake`;
+  `${w.stats.chunks} chunks, ${w.stats.awake} still awake`;
 document.getElementById('leg').innerHTML =
   [...seen].map(m=>`<span><i class="sw" style="background:rgb(${MAT[m].c.map(v=>Math.round(v*255)).join(',')})"></i>${MAT[m].n}</span>`).join('');
 document.body.dataset.r = `${SCENE} ticks=${t} filled=${solid} awake=${w.stats.awake}`;

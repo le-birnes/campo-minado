@@ -33,20 +33,44 @@ log('--- 2. BUT YOU ONLY EVER SEE PART OF THE FRONT ---');
 log('');
 log('  The front of a 5 km sea is still 2.7 billion cells. What is VISIBLE is a');
 log('  patch of it near the player, and that is the only part that has to be');
-log('  particles. Measured on the real engine:');
+log('  particles. Measured on the real engine.');
 log('');
-log('     visible patch     cells        ms/tick (measured)');
+log('  HOW THIS IS MEASURED, because the first version of it was wrong twice.');
+log('');
+log('  It divided the measured time by w.stats.scanned, which is the LAST tick\'s');
+log('  scan — and by then most of the interface has already turned to rock and');
+log('  gone quiet, so the denominator was a fraction of the work and the answer');
+log('  came out several times too large. Then, correcting that, it warmed up for');
+log('  a tick before timing — and a flat lava/water interface CONVERTS ENTIRELY');
+log('  IN ONE TICK, so the warm-up consumed the very thing being measured and');
+log('  the timed ticks recorded nothing but steam drifting upward.');
+log('');
+log('  So: one throwaway world absorbs the JIT, and the tick that converts the');
+log('  whole interface is timed on a second, identical one. Cost scales with the');
+log('  AREA of the interface, which is the ratio used to reach the real figure.');
+log('  It is a worst case on purpose: a perfectly flat front, every cell of it');
+log('  reacting on the same tick.');
+log('');
+log('     visible patch    interface cells    convert it    then per tick');
 for(const R of [10,25,50,100]){
   const n=Math.min(96,Math.round(2*R/GRAIN/8));      // sampled grid, kept runnable
-  const w=new World({x0:0,y0:0,z0:0,x1:n-1,y1:n-1,z1:n-1});
-  for(let y=0;y<n;y++)for(let z=0;z<n;z++)for(let x=0;x<n;x++)
-    w.set(x,y,z, y<n/2 ? WATER : LAVA);
-  let t=0; for(let i=0;i<6;i++) t+=ms(()=>step(w));
-  const real=(2*R)*(2*R)*3/(GRAIN*GRAIN);
-  const per=(t/6)/Math.max(w.stats.scanned,1);
-  log(`     ${String(R).padStart(4)} m radius  ${fx(real).padStart(11)}   ${(per*real).toFixed(1).padStart(8)} ms`+
-      `   (sampled ${n}^3, ${fx(w.stats.rx)} reactions)`);
+  const mk=()=>{
+    const w=new World({x0:0,y0:0,z0:0,x1:n-1,y1:n-1,z1:n-1});
+    for(let y=0;y<n;y++)for(let z=0;z<n;z++)for(let x=0;x<n;x++)
+      w.set(x,y,z, y<n/2 ? WATER : LAVA);
+    return w;
+  };
+  step(mk());                                         // a throwaway takes the JIT cost
+  const w=mk();
+  const t1=ms(()=>step(w));                           // THE tick: the whole front reacts
+  let t2=0; for(let i=0;i<8;i++) t2+=ms(()=>step(w)); // and what it leaves behind
+  const sampled=n*n, real=(2*R)*(2*R)/(GRAIN*GRAIN), k=real/sampled;
+  log(`     ${String(R).padStart(4)} m radius  ${fx(real).padStart(14)}  ${(t1*k).toFixed(1).padStart(9)} ms  `+
+      `${((t2/8)*k).toFixed(1).padStart(9)} ms   (${n}^3, ${fx(w.stats.rx)} rx)`);
 }
+log('');
+log('  The left-hand column is paid ONCE, when the two seas meet. The right-hand');
+log('  one is the aftermath — steam rising off it — and it fades as that clears.');
 log('');
 
 log('--- 3. THE TWO TIERS ---');
