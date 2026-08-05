@@ -264,3 +264,38 @@ tetrahedron has 4 faces and a cube has 6, so per element the neighbour work is
 two thirds, and per unit of space there are six times as many elements.
 Everything else in that comparison is confounded and a fair version needs the
 same rule set on both lattices.
+
+## The fair fight — same rule, same code, both lattices
+
+The comparison I said was missing, now run. `CubeGrid` in `tet.js` is the cube
+written exactly like `TetGrid`: same flat array, same scan order, same one rule,
+each lattice using the downhill moves it actually has — cube: down plus four
+diagonals; tetrahedron: the face neighbours whose centroid is lower.
+
+**(a) Same spacing** — each tet is a sixth of a cube, so six times as many:
+
+```
+cube      64,000 cells   0.54 ms
+tet      384,000 cells   1.81 ms    3.3x the cost for 6x the cells
+                                    per cell: 0.56x
+```
+
+**(b) Same element size** — tet spacing 22 against cube spacing 40, so one
+tetrahedron occupies the volume of one cube and the counts match:
+
+```
+cube      64,000 cells   0.54 ms
+tet       63,888 cells   0.32 ms    => 1.67x FASTER for the same material
+                                       at the same grain
+```
+
+And the reason is not the neighbour count, which is the part I had wrong.
+Tetrahedra do *more* tests per element, not fewer — 1.47 against the cube's
+1.00 — and are still faster. It is **memory layout**: the six cells of one cube
+are contiguous, and most of a tetrahedron's face neighbours live in that same
+cube, so the common move is a cache hit. A cube's downhill moves are all
+diagonals that cross rows and planes.
+
+So: **smaller and lighter, both**. Six times finer at 3.3x the cost, or the same
+grain for 0.6x the cost. The earlier "15.31x" line stays retracted — this is the
+number that replaces it.

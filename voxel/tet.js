@@ -133,3 +133,55 @@ class TetGrid {
           }
   }
 }
+
+
+/* ============================================================================
+   THE SAME RULE ON A CUBE LATTICE, so the comparison is about the SHAPE
+   ============================================================================
+   The first tetrahedral benchmark printed "15.31x the cube" and it was not
+   true: it compared this file — a flat typed-array scan with one rule — against
+   sand.js, which carries chunk Map lookups, reactions, randomised tie-breaks
+   and liquid spread. That measured two inner loops, not two lattices.
+
+   So here is the cube, written the same way, scanned the same way, with the
+   moves ITS lattice offers going downhill: straight down, then the four
+   diagonals. The tetrahedron gets the moves its own lattice offers: the face
+   neighbours whose centroid is lower. Identical code around both, so whatever
+   is left over IS the shape.
+   ========================================================================== */
+class CubeGrid {
+  constructor(nx,ny,nz){
+    this.nx=nx; this.ny=ny; this.nz=nz;
+    this.n = nx*ny*nz;
+    this.m = new Uint8Array(this.n);
+    this.stats = {moves:0, scanned:0, tests:0};
+  }
+  idx(x,y,z){ return (y*this.nz + z)*this.nx + x; }
+  inside(x,y,z){ return x>=0 && y>=0 && z>=0 && x<this.nx && y<this.ny && z<this.nz; }
+  set(x,y,z,v){ if (this.inside(x,y,z)) this.m[this.idx(x,y,z)] = v; }
+  fill(x0,y0,z0,x1,y1,z1,v){
+    for (let y=y0;y<y1;y++) for (let z=z0;z<z1;z++) for (let x=x0;x<x1;x++) this.set(x,y,z,v);
+  }
+  count(v){ let n=0; for (let i=0;i<this.n;i++) if (this.m[i]===v) n++; return n; }
+  step(){
+    const S = this.stats;
+    S.moves=0; S.scanned=0; S.tests=0;
+    const D = [[0,-1,0],[1,-1,0],[-1,-1,0],[0,-1,1],[0,-1,-1]];
+    for (let y=0;y<this.ny;y++) for (let z=0;z<this.nz;z++) for (let x=0;x<this.nx;x++){
+      const i = this.idx(x,y,z);
+      const v = this.m[i];
+      if (v === T_AIR || v === T_ROCK) continue;
+      S.scanned++;
+      for (let k=0;k<5;k++){
+        const X=x+D[k][0], Y=y+D[k][1], Z=z+D[k][2];
+        S.tests++;
+        if (!this.inside(X,Y,Z)) continue;
+        const j = this.idx(X,Y,Z);
+        if (this.m[j] !== T_AIR) continue;
+        this.m[j]=v; this.m[i]=T_AIR;
+        S.moves++;
+        break;
+      }
+    }
+  }
+}

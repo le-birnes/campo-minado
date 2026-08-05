@@ -86,6 +86,51 @@ log('');
   log(`  cube spacing about ${Math.cbrt(6*cubeRate/rate).toFixed(2)}x larger, and still resolves finer,`);
   log(`  because the CELL is a sixth of that cube rather than the whole of it.`);
 }
+log('--- 4. THE FAIR FIGHT: same rule, same code, both lattices ---');
+log('');
+{
+  /* Two ways to ask it, and they give opposite answers, so both get asked.
+
+     (a) SAME SPACING: each tetrahedron is a sixth of the cube, so there are six
+         times as many of them in the same space. Finer material, more work.
+     (b) SAME ELEMENT SIZE: a tet at spacing d has volume d^3/6, so to make one
+         tetrahedron the same size as one cube the spacing grows by cbrt(6)=1.82.
+         Same number of elements for the same space - and the question becomes
+         purely whether 4 faces beat 6. */
+  const S = 40;
+  const cg = new CubeGrid(S,S,S);
+  cg.fill(0,0,0,S,1,S,T_ROCK); cg.fill(0,Math.floor(S*0.45),0,S,S,S,T_SAND);
+  let tc=0; for(let i=0;i<12;i++) tc += ms(()=>cg.step());
+  const cubeCells = S*S*S, cubeMs = tc/12;
+
+  const Ts = S;                                   // same spacing
+  const tg = new TetGrid(Ts,Ts,Ts);
+  tg.fill(0,0,0,Ts,1,Ts,T_ROCK); tg.fill(0,Math.floor(Ts*0.45),0,Ts,Ts,Ts,T_SAND);
+  let tt=0; for(let i=0;i<12;i++) tt += ms(()=>tg.step());
+  const tetCells = Ts*Ts*Ts*6, tetMs = tt/12;
+
+  const Tm = Math.max(4, Math.round(S/Math.cbrt(6)));   // matched element size
+  const tm = new TetGrid(Tm,Tm,Tm);
+  tm.fill(0,0,0,Tm,1,Tm,T_ROCK); tm.fill(0,Math.floor(Tm*0.45),0,Tm,Tm,Tm,T_SAND);
+  let t3=0; for(let i=0;i<12;i++) t3 += ms(()=>tm.step());
+  const matchCells = Tm*Tm*Tm*6, matchMs = t3/12;
+
+  log(`  (a) SAME SPACING, a ${S}^3 world:`);
+  log(`        cube   ${fx(cubeCells).padStart(10)} cells   ${cubeMs.toFixed(2)} ms`);
+  log(`        tet    ${fx(tetCells).padStart(10)} cells   ${tetMs.toFixed(2)} ms   `+
+      `= ${(tetMs/cubeMs).toFixed(1)}x the cost for 6x the cells`);
+  log(`        per cell: ${(tetMs/tetCells)/(cubeMs/cubeCells) < 1 ? '' : ''}`+
+      `${((tetMs/tetCells)/(cubeMs/cubeCells)).toFixed(2)}x   (1.00 would be a dead heat)`);
+  log('');
+  log(`  (b) SAME ELEMENT SIZE - tet spacing ${Tm} against cube ${S}, so one`);
+  log(`      tetrahedron occupies the same volume as one cube:`);
+  log(`        cube   ${fx(cubeCells).padStart(10)} cells   ${cubeMs.toFixed(2)} ms`);
+  log(`        tet    ${fx(matchCells).padStart(10)} cells   ${matchMs.toFixed(2)} ms`);
+  log(`        => ${(cubeMs/matchMs).toFixed(2)}x  for the same material at the same grain`);
+  log('');
+  log(`  neighbour tests per element: cube ${(cg.stats.tests/Math.max(cg.stats.scanned,1)).toFixed(2)}, `+
+      `tet ${(tm.stats.tests/Math.max(tm.stats.scanned,1)).toFixed(2)}`);
+}
 log('');
 log('=== done ===');
 document.getElementById('out').textContent = L.join('\n');
