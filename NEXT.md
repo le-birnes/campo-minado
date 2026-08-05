@@ -15,6 +15,7 @@ whoever is reading; the prompt itself is self-contained.
 | `voxel/shape.js` | fractal roughness (log-spaced octaves, amplitude ∝ λ^H) + `h_max = σ/ρg` |
 | `voxel/lattice.js` | discrete bodies: integer position, 24 orientations, **no narrow phase** |
 | `voxel/view.html` | vertical cross-section renderer, 5 scenes |
+| `voxel/front.html` | the reaction-front measurement — why a sea meeting a sea is affordable |
 | `tools/eyes_voxel.py` | photographs the sim and reviews it. Needs a key; skips cleanly without one |
 | `tools/eyes.py` | the same for the game itself, 5 poses |
 
@@ -25,6 +26,76 @@ their recipe.
 
 **Verified visually:** powders slump to an angle of repose; oil floats on water;
 sand sinks through both; no chunk-seam artifacts.
+
+---
+
+## The three rules the world rests on
+
+These are settled and measured. Anything that contradicts one of them is wrong.
+
+### 1. The world is a LATTICE OF WHOLE RECORDS, not a field of particles
+
+Nothing is stored as particles until something happens to it. A 5 km sea, a
+mountain, the sun — one record each: a volume, a recipe, a wear counter.
+
+> **Break a portion and *that portion* becomes molecules in front of you, while
+> the source diminishes a tiny bit.** Interaction is on demand, everywhere, and
+> costs nothing until demanded.
+
+A four-level dungeon is 486 KB this way against 191 MB as a particle field — 384×,
+and it scales with what *happens* rather than with what *exists*.
+
+### 2. A REACTION IS A SURFACE, not a volume
+
+Two seas thrown together react only where they touch. Volume grows as L³ and the
+interface as L², so the bigger they are, the smaller the fraction that is busy:
+
+```
+sea edge        volume          interface       front cells    fraction busy
+   10 m         1,000 m³           100 m²            32,552       0.29%
+5,000 m  125,000,000,000 m³  25,000,000 m²  8,138,020,833       0.0058%
+```
+
+At 5 km the front is six thousandths of one percent of the material.
+
+**So it runs in two tiers** — chunk-level that *looks* like particle-level:
+
+- **NEAR the player** — real particles, real reactions, the front advancing cell
+  by cell. The only part the eye is ever looking at.
+- **FAR from it** — one number. The front has an area and a rate, so how much has
+  been consumed is an **integral**, not a simulation.
+
+**The join is the whole trick.** Walk toward a distant front and the bookkeeping
+says where it has got to, and particles are spawned *at that position*. It looks
+like it was simulating all along, because the only claim it ever has to honour is
+**where the boundary is**. Nobody can check the middle of a sea.
+
+1,000 sea-pairs as bookkeeping: **47 KB and 1,000 multiplications a tick**. The
+same thing as particles at 5 km: 2.7 billion cells.
+
+### 3. VISIBLE DEBRIS IS A BUDGET, not a consequence
+
+Marcelo: *"sometimes visually if possible to arrange, because some hits are
+powerful."*
+
+A hit may spawn at most **N visible grains**. Past N the source simply diminishes
+by the rest and no particles are made. **A big hit looks big without costing more
+than a small one**, and the cost of a fight stops depending on how hard anyone
+swings. Tune N to the frame, not to the physics.
+
+---
+
+## The one thing blocking all of it
+
+**`sand.js` is roughly 400× more expensive per cell than `tet.js`'s flat scan** —
+chunk `Map` lookups, per-cell reaction tests, RNG in the inner loop. Extrapolated
+from a real run, even the *visible* patch of a reaction front costs **246 ms/tick
+at a 10 m radius**, where the same cell count through the flat typed-array scan
+is **0.63 ms**.
+
+The design above is sound; the material grid's implementation is not. Give it the
+flat typed-array treatment `tet.js` already has *before* anything else needs a
+frame budget. It is a known quantity, not a research problem.
 
 ---
 
@@ -52,7 +123,17 @@ face is a region.
 
 There is a sun. There is a sea. Everything Noita has, in kind if not in count.
 
+Everything in it is a lattice of whole records — see "The three rules" above.
+Nothing is particles until something breaks it, a reaction is a surface simulated
+only where the player can see it, and visible debris is a budget rather than a
+consequence.
+
 WHAT THAT ASKS OF THE ENGINE, in the order it has to be built
+
+0. MAKE sand.js FLAT. It is ~400x more expensive per cell than tet.js's typed
+   array scan, and that gap is what stops a reaction front fitting in a frame.
+   Nothing else on this list is worth doing until it is fixed, and it is a known
+   fix rather than a research problem.
 
 1. GRAVITY AS A VECTOR, not −Y. This is the load-bearing one and it must come
    first, because everything reads it: the player controller, the falling
