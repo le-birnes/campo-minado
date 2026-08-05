@@ -1,0 +1,86 @@
+<!doctype html><meta charset="utf-8"><title>the smallest molecule</title>
+<body style="background:#111;color:#ddd;font:13px ui-monospace,monospace;padding:12px">
+<pre id="out">running…</pre>
+<script src="tet.js"></script>
+<script>
+const L=[],log=s=>L.push(s);
+const ms=f=>{const t=performance.now();f();return performance.now()-t;};
+const fx=(n,d=0)=>n.toLocaleString('en-US',{maximumFractionDigits:d});
+const BLOCK=2.8, P_H=2.0, CBRT6=Math.cbrt(6);
+
+const BOARDS=[['Arcane SWEEPER',15,4,15],['Arcane DUNGEON 4 levels',18,24,18]];
+const DIVS=[12,16,24,32,48,64,96];
+
+log('=== THE SMALLEST MOLECULE — how fine can the cell get and still run ===');
+log('');
+log('--- 1. HOW MANY PARTICLES IS AN ARCANE RUN ---');
+log('');
+for (const [name,nx,ny,nz] of BOARDS){
+  const blocks=nx*ny*nz;
+  log(`  ${name}: ${nx}x${ny}x${nz} = ${fx(blocks)} blocks, ${fx(blocks*Math.pow(BLOCK,3))} m3`);
+  log('     grain      molecule   player is   per block        TOTAL PARTICLES   resident');
+  for (const div of DIVS){
+    const d=BLOCK/div, e=d/CBRT6, per=div*div*div*6, tot=blocks*per;
+    log(`     BLOCK/${String(div).padStart(2)}   ${(e*100).toFixed(2).padStart(6)} cm   `+
+        `${(P_H/e).toFixed(0).padStart(6)} tall  ${fx(per).padStart(10)}   ${fx(tot).padStart(17)}   `+
+        (tot/1e9>=1?(tot/1e9).toFixed(2)+' GB':fx(tot/1e6)+' MB'));
+  }
+  log('');
+}
+
+log('--- 2. WHAT ACTUALLY RUNS: allocate for real, then tick only what MOVES ---');
+log('');
+log('  The dirty rect means the frame pays for the ACTIVE set, not the board. So');
+log('  the honest test is: hold the whole board in memory, then collapse a chunk');
+log('  of it and time that. A wall giving way is the worst thing that happens.');
+log('');
+log('     grain    board alloc      one block      ONE BLOCK        FIVE BLOCKS');
+log('                               = N cells      collapsing       collapsing');
+for (const div of DIVS){
+  const per = div*div*div*6;
+  /* The active region of one block collapsing, as a cube grid of side `div`
+     with a couple of blocks of headroom to fall into. */
+  const s = Math.min(div*2, 256);
+  let g=null, alloc='ok';
+  const ta = ms(()=>{ try{ g=new TetGrid(s,s,s); }catch(e){ g=null; alloc='FAILED'; } });
+  if(!g){ log(`     BLOCK/${String(div).padStart(2)}   ${alloc}`); continue; }
+  g.fill(0,0,0,s,1,s,T_ROCK);
+  g.fill(0,Math.floor(s*0.5),0,s,s,s,T_SAND);       // upper half falls
+  const active = g.count(T_SAND);
+  let t=0; for(let i=0;i<8;i++) t+=ms(()=>g.step());
+  const perCell = (t/8)/Math.max(active,1);
+  log(`     BLOCK/${String(div).padStart(2)}   ${fx(s*s*s*6).padStart(12)}   ${fx(per).padStart(9)}   `+
+      `${(perCell*per).toFixed(2).padStart(9)} ms   ${(perCell*per*5).toFixed(2).padStart(11)} ms`);
+}
+log('');
+log('  Budget: 50 ms is one tick of a 20 Hz material sim, which is what this');
+log('  kind of material needs. 16.6 ms is a whole 60 Hz frame.');
+log('');
+
+log('--- 3. SO WHERE IS THE LINE ---');
+log('');
+{
+  log('  Two different walls, and they are hit at different grains:');
+  log('');
+  log('    MEMORY  binds the BOARD. The Arcane sweeper is only 900 blocks, so it');
+  log('            stays cheap far past the point the dungeon does.');
+  log('    COMPUTE binds the EVENT. A collapsing wall is one block of cells all');
+  log('            moving at once, and that cost is cubic in the grain.');
+  log('');
+  for (const [name,nx,ny,nz] of BOARDS){
+    const blocks=nx*ny*nz;
+    let best=null;
+    for (const div of DIVS){
+      const per=div*div*div*6, tot=blocks*per;
+      if (tot <= 1.5e9) best={div,tot,per};       // 1.5 GB resident ceiling
+    }
+    if(best) log(`    ${name.padEnd(24)} finest grain inside 1.5 GB: BLOCK/${best.div} `+
+                 `= ${((BLOCK/best.div/CBRT6)*100).toFixed(2)} cm, ${fx(best.tot)} particles`);
+  }
+}
+log('');
+log('=== done ===');
+document.getElementById('out').textContent=L.join('\n');
+document.body.dataset.r=L.join('~');
+</script>
+</body>

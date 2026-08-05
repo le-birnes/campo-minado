@@ -343,3 +343,59 @@ class of bug about when a block becomes voxels and what happens at the seam.
 **And the constraint that comes with it:** at 80.6 M cells a full scan is
 **0.39 s**. The dirty rect stops being an optimisation and becomes mandatory.
 Anything that wakes the whole world is not a slowdown, it is a hang.
+
+---
+
+# THE SMALLEST MOLECULE, and the reversal (voxel/molecule.html)
+
+## An Arcane run, in particles
+
+Arcane SWEEPER, 900 blocks:  BLOCK/16 22 M | BLOCK/24 75 M | BLOCK/32 177 M | BLOCK/64 1.42 G
+Arcane DUNGEON, 7,776 blocks: BLOCK/16 191 M | BLOCK/24 645 M | BLOCK/32 1.53 G | BLOCK/48 5.16 G
+
+## What a collapsing wall costs
+
+  grain      one block cells   ONE block     FIVE blocks
+  BLOCK/16          24,576      0.23 ms         1.13 ms
+  BLOCK/24          82,944      0.74 ms         3.69 ms
+  BLOCK/32         196,608      1.71 ms         8.56 ms
+  BLOCK/48         663,552      5.92 ms        29.59 ms
+  BLOCK/64       1,572,864     13.70 ms        68.50 ms   over budget
+
+## THE REVERSAL
+
+The arena-ceiling test made COMPUTE the wall - 805 MB allocated in 1 ms, 5 s to
+scan. With the dirty rect in, that flips: at BLOCK/24 a five-block collapse costs
+3.69 ms of a 50 ms tick while the board costs 645 MB. **Compute stops binding and
+memory starts.**
+
+  MEMORY  binds the board - cubic in grain, paid always
+  COMPUTE binds the event - also cubic, but only while something falls
+
+Finest grain inside 1.5 GB: Arcane SWEEPER BLOCK/64 (2.41 cm, player 83 tall);
+Arcane DUNGEON BLOCK/24 (6.42 cm, player 31 tall - exactly Noita's granularity).
+
+## The recommendation, superseding BLOCK/12
+
+  safe        BLOCK/16 = 9.6 cm   player 21 tall   dungeon 191 MB   1.13 ms
+  ambitious   BLOCK/24 = 6.4 cm   player 31 tall   dungeon 645 MB   3.69 ms
+
+BLOCK/12 was chosen before the EVENT cost was measured, on the assumption compute
+would bind sooner than it does. BLOCK/24 reaches Noita's grain on the full
+four-level dungeon and is affordable; BLOCK/16 is what to build on first, because
+it has 5x the headroom and the difference is 9.6 cm against 6.4 cm.
+
+## A NEW ENGINE WOULD NOT HELP
+
+The wall is memory, and a rewrite does not conjure address space - in a browser
+it is the same 1-2 GB whatever you write. What a rewrite buys is COMPUTE, and
+compute is exactly the resource not binding: 3.69 ms of a 50 ms budget.
+
+Building an engine to fix the wrong wall is the expensive kind of mistake.
+
+The material layer is already host-agnostic: sand.js, tet.js and lattice.js have
+no WebGL in them. Native or WebGPU earns its cost at exactly one threshold -
+grain finer than ~6 cm across a full dungeon - and on that day the job is porting
+two small files, not a game. The cheap upgrade to do first is WASM + SIMD128 on
+the inner loop: same deployment, same URL, single-digit multiples on a byte-array
+scan.
