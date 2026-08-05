@@ -280,3 +280,32 @@ The hell sprites have never been seen at game scale. The sheet is correct — 16
 tiles, nothing clipped, nothing empty, palette swaps reading right — but the
 size of the quad in the world is exactly the thing the sheet cannot show. Reach
 it by flagging every mine in Dungeon Mode.
+
+## 5. TOMORROW: the cluster release rules (Marcelo, 2026-08-04)
+
+The bot can now HOLD a cluster (`?ex=cluster:1`, off by default). It cannot yet
+LET GO of one, which is why holding it grinds. Marcelo gave two release rules
+and they are the whole of tomorrow's job:
+
+1. **It is complete** — fully marked and dug. Written, in `pickGoal`: counts the
+   cells of `R.clust` still SOLID and releases at zero. Deliberately separate
+   from "no work left I can reach", which is counted as `clStuck`, because the
+   two need opposite fixes and used to be the same line.
+
+2. **It has gone 50/50** — the clues no longer determine an answer, so it must
+   dig around and RESUME THE SAME CLUSTER FROM ANOTHER SIDE. Not written.
+   Marcelo's framing matters here: this is the only honest reason a perfect
+   logician ever stops working a group, and it means the clues themselves are
+   insufficient — so the response is to go get more clues from a different
+   face, not to abandon the group for a nearer one somewhere else.
+
+Combat stays rung 1 throughout: "except in combat" is already satisfied by the
+ladder and needs no new rule.
+
+Still open behind it: the four-zone ceiling of 147/356, identical in every
+build old and new, with work left on every level from y=0 to y=10 and standable
+cells near all of it. The perch (`?ex=perch:1`, off) is the thread that leads
+there — choosing where to stand by ray instead of by blind sidestep. It is the
+only thing in the file that answers "why can it not open the block it is
+standing next to", and as written the chosen spot moves as the map moves, so
+the bot walks between two of them and never shoots.

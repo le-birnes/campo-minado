@@ -121,7 +121,7 @@ const stats = { walked:0, jumps:0, shots:0, flags:0, noEffect:0,
                 bored:0, reroutes:0, kills1:0,
                 goals:0, goalDone:0, goalLost:0, goalDrop:0, hunts:0,
                 busted:0, bustOpen:0, crawlUp:0, passWon:0, passBad:0,
-                settled:0, arrived:0, perched:0, clNew:0, clDone:0 };
+                settled:0, arrived:0, perched:0, clNew:0, clDone:0, clStuck:0 };
 
 /* ---------------- audit ---------------- */
 let baseAir = 0, baseRock = 0;
@@ -1412,9 +1412,22 @@ function pickGoal(R, M){
      nothing left to offer. */
   if (EX.cluster && list.length){
     if (R.clust){
-      const stay = list.filter(w => R.clust.has(w.cell));
-      if (stay.length) list = stay;
-      else { stats.clDone++; R.clust = null; }      // resolved, or nothing left reachable in it
+      /* RELEASE 1: IT IS FINISHED. Every cell of it opened or flagged - nothing
+         in the group is still sand. This is the condition Marcelo named and it
+         is worth testing on its own rather than inferring it from an empty work
+         list, because "done" and "I cannot reach the rest of it" want opposite
+         fixes and used to be the same line. */
+      let shut = 0;
+      for (const c of R.clust) if (G.st[c] === SOLID) shut++;
+      if (!shut){ stats.clDone++; R.clust = null; }
+      else {
+        const stay = list.filter(w => R.clust.has(w.cell));
+        /* RELEASE 2: it still has sand in it but none of that sand can be
+           worked from anywhere it can stand. Not the same thing as finished,
+           and counted separately. */
+        if (stay.length) list = stay;
+        else { stats.clStuck++; R.clust = null; }
+      }
     }
     if (!R.clust){
       const c = clusterAt(list, list[0].cell);
@@ -2141,7 +2154,8 @@ if (/[?&]floors/.test(location.search)){
     if (shut||stand||mines) log(`  y=${y}  shut ${shut}  standable ${stand}  mines left ${mines}`);
   }
 }
-log(`clusters: ${stats.clNew} taken up, ${stats.clDone} worked out to nothing`);
+log(`clusters: ${stats.clNew} taken up, ${stats.clDone} fully marked and dug, `+
+    `${stats.clStuck} left with sand in them it could not reach`);
 log(`the perch: ${stats.perched} routes aimed at a spot that could SEE the target`);
 log(`landing: ${stats.settled} ticks spent putting its feet down before deciding anything, `+
     `${stats.arrived} objectives reached but impossible to open`);
