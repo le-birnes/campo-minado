@@ -208,3 +208,59 @@ Worth keeping in view: 800 pyramids is *three orders of magnitude* below the
 sand grid's 65,536-voxels-at-4.84 ms. Bodies and material are not competing
 designs — the likely answer is material for the bulk and a few hundred bodies
 for the chunks that read as debris.
+
+---
+
+# The tetrahedron AS the voxel — how many fit in a live frame
+
+Marcelo, 2026-08-05: "lets consider voxel from now on the smallest tetrahedron;
+how many can fit in a live play simulation".
+
+**Which** tetrahedron matters: most do not tile space, and a unit cell that
+leaves gaps is not a unit cell. The one that does is the **Kuhn simplex** —
+walk a cube corner to opposite corner along the three axes in some order, and
+the four points you touch are a tetrahedron. Six orderings, six tetrahedra,
+filling the cube exactly. `tet.js` derives the neighbour table by shared-face
+test rather than writing it down, which also checks the decomposition: every
+cell comes out with exactly **4 face-neighbours** where a cube has 6.
+
+## The answer
+
+```
+scanning everything: 207,360,000 tetrahedra/second
+
+   4 ms  — a physics slice of a 60 Hz frame        829,440 tets
+  16.6 ms — a whole 60 Hz frame                  3,442,176 tets
+  50 ms  — the sim at 20 Hz, what material needs 10,368,000 tets
+```
+
+**~10 million in motion at once**, at 20 Hz. Standing material is skipped by
+the dirty rect (measured at 11,405x in `sand.js`), so the frame budget buys
+what is *falling* and the resident world is bounded by memory instead:
+
+| board at | tets | bytes |
+|---|---|---|
+| BLOCK/8  | 31,948,800 | 32 MB |
+| BLOCK/16 | 255,590,400 | 256 MB |
+| BLOCK/32 | 2,044,723,200 | 2,045 MB |
+
+## Sizing it, now that the cell is a sixth of a cube
+
+A tet at cube spacing *d* has volume *d³/6*, so to keep an element the same
+size as the old BLOCK/16 cube the spacing grows by ∛6 = 1.82:
+
+> **cube spacing BLOCK/9, six tetrahedra per cube.** Element volume matches the
+> BLOCK/16 cube we sized before, the full board is ~45 M tets ≈ 45 MB resident,
+> and the *shape* of the element is a tetrahedron rather than a brick.
+
+## One number in the bench output is not real
+
+It printed "per cell the tetrahedron is 15.31x the cube". **It is not.** That
+compares `tet.js` — a flat typed-array scan, one rule, no reactions, no RNG, no
+chunk indirection — against `sand.js`, which carries chunk Map lookups,
+reactions, randomised tie-breaks and liquid spread. It measures the two inner
+loops, not the two shapes. The honest structural claim is only this: a
+tetrahedron has 4 faces and a cube has 6, so per element the neighbour work is
+two thirds, and per unit of space there are six times as many elements.
+Everything else in that comparison is confounded and a fair version needs the
+same rule set on both lattices.

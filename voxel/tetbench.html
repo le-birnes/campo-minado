@@ -1,0 +1,94 @@
+<!doctype html><meta charset="utf-8"><title>tetrahedral voxel bench</title>
+<body style="background:#111;color:#ddd;font:13px ui-monospace,monospace;padding:12px">
+<pre id="out">running…</pre>
+<script src="tet.js"></script>
+<script>
+const L=[], log=s=>L.push(s);
+const ms = f => { const t=performance.now(); f(); return performance.now()-t; };
+const fx = (n,d=0) => n.toLocaleString('en-US',{maximumFractionDigits:d});
+const BLOCK = 2.8;
+
+log('=== THE TETRAHEDRON AS THE VOXEL — how many fit in a live frame ===');
+log('');
+log(`  decomposition: 6 Kuhn tetrahedra per cube, ${ADJ.bad === 0
+      ? 'every cell has exactly 4 face-neighbours (checked, not assumed)'
+      : 'BROKEN: '+ADJ.bad+' cells do not have 4 neighbours'}`);
+log('');
+
+/* ---- 1. raw throughput ---- */
+log('--- 1. RAW THROUGHPUT (no dirty rects: this is cost PER ELEMENT) ---');
+log('');
+log('     cubes        tets     falling ms   tets/second   moves/tick');
+const rows=[];
+const T0=performance.now();
+for (const s of [16, 24, 32, 40, 48]){
+  if (performance.now()-T0 > 30000) break;
+  const g = new TetGrid(s,s,s);
+  g.fill(0,0,0,s,1,s,T_ROCK);
+  g.fill(0,Math.floor(s*0.45),0,s,s,s,T_SAND);        // top half is sand
+  const live = g.count(T_SAND);
+  let t=0; for (let i=0;i<12;i++) t += ms(()=>g.step());
+  const per = t/12;
+  rows.push({cells:s*s*s*6, live, per});
+  log(`  ${fx(s*s*s).padStart(8)}  ${fx(s*s*s*6).padStart(11)}   ${per.toFixed(2).padStart(9)}   `+
+      `${fx(s*s*s*6/(per/1000)).padStart(12)}   ${fx(g.stats.moves).padStart(9)}`);
+}
+log('');
+
+/* ---- 2. the answer ---- */
+log('--- 2. HOW MANY FIT IN A LIVE FRAME ---');
+log('');
+{
+  const r = rows[rows.length-1];
+  const rate = r.cells/(r.per/1000);            // tets per second, whole-grid scan
+  log(`  scanning everything, this machine sustains ${fx(rate)} tetrahedra/second.`);
+  log('');
+  for (const [name, budget] of [['4 ms — a physics slice of a 60 Hz frame', 0.004],
+                                ['16.6 ms — a whole 60 Hz frame', 0.0166],
+                                ['50 ms — the sim at 20 Hz, which is what material needs', 0.050]]){
+    log(`     ${name.padEnd(52)} ${fx(rate*budget).padStart(12)} tets`);
+  }
+  log('');
+  log('  But NOTHING IS SCANNED THAT IS NOT MOVING. sand.js measured the dirty');
+  log('  rect at 11,405x on settled material, and it applies here unchanged, so');
+  log('  the frame budget is spent on what is FALLING and the standing world is');
+  log('  free. The honest pair of numbers:');
+  log('');
+  const live = Math.round(rate*0.050);
+  log(`     in motion at once, sim at 20 Hz   ~${fx(live)} tetrahedra`);
+  log(`     standing still, costing nothing    as many as there is memory for`);
+  log('');
+  /* memory: one byte a cell */
+  for (const div of [8, 16, 32]){
+    const cubes = 20*26*20 * div*div*div;
+    log(`     a full 20x26x20 board at BLOCK/${String(div).padStart(2)} = ${fx(cubes*6).padStart(15)} tets `+
+        `= ${fx(cubes*6/1e6,0).padStart(6)} MB at a byte each`);
+  }
+}
+log('');
+
+/* ---- 3. against the cube ---- */
+log('--- 3. AGAINST THE CUBE, WHICH IS THE POINT ---');
+log('');
+{
+  const r = rows[rows.length-1];
+  const rate = r.cells/(r.per/1000);
+  /* sand.js, measured earlier: 65,536 falling voxels in 4.84 ms */
+  const cubeRate = 65536/0.00484;
+  log(`  cube lattice  (sand.js, 6 neighbours) : ${fx(cubeRate).padStart(12)} cells/second`);
+  log(`  tet lattice   (this file, 4 neighbours): ${fx(rate).padStart(12)} cells/second`);
+  log('');
+  log(`  per CELL the tetrahedron is ${(rate/cubeRate).toFixed(2)}x the cube.`);
+  log(`  per unit of SPACE it is six times as many cells, so the same volume at`);
+  log(`  the same cube size costs ${(6*cubeRate/rate).toFixed(1)}x — and buys 6x the resolution.`);
+  log('');
+  log(`  Which means: to hold the frame cost equal, a tetrahedral world uses a`);
+  log(`  cube spacing about ${Math.cbrt(6*cubeRate/rate).toFixed(2)}x larger, and still resolves finer,`);
+  log(`  because the CELL is a sixth of that cube rather than the whole of it.`);
+}
+log('');
+log('=== done ===');
+document.getElementById('out').textContent = L.join('\n');
+document.body.dataset.r = L.join('~');
+</script>
+</body>
