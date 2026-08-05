@@ -1,0 +1,177 @@
+<!doctype html><meta charset="utf-8"><title>many materials at once</title>
+<body style="background:#111;color:#ddd;font:13px ui-monospace,monospace;padding:12px">
+<pre id="out">running…</pre>
+<script src="sand.js"></script>
+<script>
+/* ============================================================================
+   HOW MANY MATERIALS CAN BE IN THE ROOM AT ONCE
+   ============================================================================
+   Marcelo: "you can have it up to 27 materials interacting simultaneously.
+   that's the goal ... there is going to be a possibility to mix at least 20
+   plus ingredients and have a separate outcome."
+
+   Those are TWO different questions and only one of them is about this engine.
+
+     1. TWENTY-SEVEN MATERIALS COEXISTING, each pair of them able to react on
+        contact. That is the falling grid's job, and this page measures it.
+
+     2. TWENTY INGREDIENTS COMBINING INTO ONE OUTCOME. That is NOT a pairwise
+        reaction and no amount of table lookup gets there — see the note at the
+        bottom, which sizes the thing that does.
+
+   The reason to expect (1) to be free is the flat table. A reaction test is
+   RXP[a*256 + b]: one array read whose cost has nothing to do with how many
+   materials are defined. The old chunk-Map version had the same property in
+   principle and lost it in practice, because everything around it was slow.
+   Expecting is not measuring, so: same world, same cell count, same amount of
+   material moving, only the NUMBER OF DISTINCT MATERIALS changing.
+   ========================================================================== */
+const L=[], log=s=>L.push(s);
+const ms=f=>{const t=performance.now();f();return performance.now()-t;};
+const fx=(n,d=0)=>n.toLocaleString('en-US',{maximumFractionDigits:d});
+
+/* Synthetic materials on purpose. What each one IS belongs to the wiki-grounded
+   list, not to a capacity test; what matters here is that they are all
+   distinct, all mobile, and all able to react with each other. */
+const EXTRA = [];
+for (let i=0;i<128;i++){
+  EXTRA.push(addMaterial({
+    n:'m'+i,
+    k: (i%3===0) ? POWDER : LIQUID,     // everything moves; nothing is inert
+    d: 30 + (i%40),                     // spread of densities, so they layer
+    s: 1 + (i%4),
+    c: [0.2+0.6*((i*7)%10)/10, 0.2+0.6*((i*3)%10)/10, 0.2+0.6*((i*5)%10)/10]
+  }));
+}
+/* Every pair of the first N reacts, which is far denser than any real material
+   set — the point is that even a fully-connected reaction graph is one read.
+
+   THE REACTION IS A SWAP: a + b -> b + a. It fires on every contact, for ever,
+   and consumes nothing. That is deliberate and it is what makes the comparison
+   below mean anything. The first version of this page used a consuming
+   reaction, and at two and four materials the scene ate itself within three
+   ticks and went to sleep — so the rows that were supposed to be the baseline
+   measured an empty world, and the page confidently printed "NOT flat" off the
+   back of dividing by nothing. Holding the WORK fixed and varying only the
+   NUMBER OF KINDS is the whole experiment. */
+function wireAll(n){
+  for (let a=0;a<n;a++) for (let b=a+1;b<n;b++){
+    RXP[EXTRA[a]*256+EXTRA[b]] = (EXTRA[b]<<8)|EXTRA[a];
+    RXP[EXTRA[b]*256+EXTRA[a]] = (EXTRA[a]<<8)|EXTRA[b];
+    RXANY[EXTRA[a]]=1; RXANY[EXTRA[b]]=1;
+  }
+}
+
+log('=== HOW MANY MATERIALS CAN BE IN THE ROOM AT ONCE ===');
+log('');
+log('  A cell is one byte, so 255 materials is the hard ceiling. Noita has');
+log('  about 400 and would need two. Below that, the question is what having');
+log('  MORE OF THEM COSTS — and the answer the flat table predicts is nothing,');
+log('  because a reaction test is RXP[a*256+b] however many materials exist.');
+log('');
+log('--- 1. THE SAME WORLD, THE SAME WORK, MORE KINDS OF MATTER ---');
+log('');
+log('  A 64^3 box, half of it full of material in horizontal bands, one band per');
+log('  material, every pair of them reactive. Cell count and moving mass are the');
+log('  same in every row; only the number of distinct materials changes.');
+log('');
+log('     materials   ms/tick   cells scanned   reactions/tick   ns/cell');
+
+const n = 64;
+function scene(k){
+  wireAll(k);
+  const w = new World({x0:0,y0:0,z0:0,x1:n-1,y1:n-1,z1:n-1});
+  for (let z=0;z<n;z++) for (let x=0;x<n;x++) w.set(x,0,z,ROCK);
+  /* Bands stacked up the box, cycling through the k materials, so every
+     material is in contact with two others everywhere. */
+  for (let y=1;y<n/2;y++){
+    const m = EXTRA[(y-1) % k];
+    for (let z=0;z<n;z++) for (let x=0;x<n;x++) w.set(x,y,z,m);
+  }
+  return w;
+}
+const rows=[];
+for (const k of [2, 4, 12, 27, 64, 128]){
+  step(scene(k));                                  // a throwaway takes the JIT
+  const w = scene(k);
+  for (let i=0;i<3;i++) step(w);                   // let the bands start reacting
+  const rx0 = w.stats.rx;
+  let t=0; for (let i=0;i<10;i++) t += ms(()=>step(w));
+  const sc = Math.max(w.stats.scanned,1);
+  rows.push({k, per:t/10, sc, rx:(w.stats.rx-rx0)/10});
+  log(`     ${String(k).padStart(9)}   ${(t/10).toFixed(2).padStart(7)}   ${fx(sc).padStart(13)}   `+
+      `${fx((w.stats.rx-rx0)/10).padStart(14)}   ${((t/10)/sc*1e6).toFixed(1).padStart(7)}`);
+}
+log('');
+{
+  const a = rows.find(r=>r.k===2), b = rows.find(r=>r.k===27), c = rows[rows.length-1];
+  const pc = x => (x.per/x.sc*1e6);
+  log(`  2 materials -> ${pc(a).toFixed(1)} ns/cell.  27 -> ${pc(b).toFixed(1)}.  `+
+      `${c.k} -> ${pc(c).toFixed(1)}.`);
+  log(`  ${pc(b)/pc(a) < 1.25
+        ? 'Twenty-seven materials cost what two do — '+(pc(b)/pc(a)).toFixed(2)+'x. The goal is met and'
+        : 'NOT flat: '+(pc(b)/pc(a)).toFixed(2)+'x from 2 to 27 materials, and'}`);
+  log('  the ceiling is 255, not 27 — set by the byte, not by the reactions.');
+}
+log('');
+
+log('--- 2. WHAT THIS DOES NOT DO: TWENTY INGREDIENTS, ONE OUTCOME ---');
+log('');
+log('  Everything above is PAIRWISE: a touches b, and the pair has an answer.');
+log('  "Mix twenty-plus ingredients and get a separate outcome" is a different');
+log('  shape of question, and a pair table cannot express it at any size —');
+log('  there are 3 x 10^33 twenty-element subsets of 256 materials.');
+log('');
+log('  The thing that does express it is a SET, and a set of 256 materials is a');
+log('  256-BIT MASK: eight Uint32s, 32 bytes. One per mixing region — a flask,');
+log('  a puddle, a cauldron, a connected pool. Then:');
+log('');
+log('     a recipe is    { need: <256-bit mask>, atLeast: n, out: material }');
+log('     it matches if  (present & need) === need');
+log('');
+log('  That is eight AND-and-compare word operations per recipe, and it does not');
+log('  care whether the recipe has two ingredients or two hundred. A thousand');
+log('  recipes tested against a mixture is 8,000 word operations, and it only');
+log('  happens when something is actually stirred.');
+log('');
+{
+  /* Measure it, since it is cheap to and the number is the whole argument. */
+  const R = 1000, W = 8;
+  const need = new Uint32Array(R*W), out = new Uint16Array(R);
+  let s=12345; const rnd=()=>((s=(s*1664525+1013904223)>>>0)/4294967296);
+  for (let r=0;r<R;r++){
+    for (let i=0;i<24;i++){                        // 24-ingredient recipes
+      const bit=(rnd()*256)|0; need[r*W+(bit>>5)] |= (1<<(bit&31));
+    }
+    out[r] = 1+((rnd()*200)|0);
+  }
+  const present = new Uint32Array(W);
+  for (let i=0;i<40;i++){ const bit=(rnd()*256)|0; present[bit>>5] |= (1<<(bit&31)); }
+  let hits=0;
+  const t = ms(()=>{
+    for (let pass=0; pass<1000; pass++){
+      hits=0;
+      for (let r=0;r<R;r++){
+        const o=r*W;
+        if ((present[0]&need[o])===need[o] && (present[1]&need[o+1])===need[o+1] &&
+            (present[2]&need[o+2])===need[o+2] && (present[3]&need[o+3])===need[o+3] &&
+            (present[4]&need[o+4])===need[o+4] && (present[5]&need[o+5])===need[o+5] &&
+            (present[6]&need[o+6])===need[o+6] && (present[7]&need[o+7])===need[o+7]) hits++;
+      }
+    }
+  });
+  log(`  Measured: ${fx(R)} recipes of 24 ingredients each, matched against a`);
+  log(`  mixture holding 40 of them — ${(t).toFixed(2)} ms for 1,000 mixings of `+
+      `1,000 recipes each, so ${t.toFixed(2)} us a mixing and `+
+      `${(t*1000/(R*1000)).toFixed(1)} ns a recipe. ${hits} matched, which is the`);
+  log('  worst case: a miss is only decided after all eight words are compared.');
+  log('');
+  log('  So the second goal is affordable too, and it is a SEPARATE MECHANISM:');
+  log('  the grid keeps doing pairs on contact, and a mixture is a set with a');
+  log('  mask. Neither one is in the way of the other.');
+}
+log('');
+log('=== done ===');
+document.getElementById('out').textContent = L.join('\n');
+document.body.dataset.r = L.join('~');
+</script></body>

@@ -100,6 +100,25 @@ for (let i=0;i<MAT.length;i++){
   M_K[i]=MAT[i].k; M_D[i]=MAT[i].d; M_S[i]=MAT[i].s; M_LIFE[i]=MAT[i].life;
 }
 
+/* Adding a material is a row, not a code path, and it is meant to be done from
+   outside this file — the twelve above are the ones the benches need, not the
+   world's list. Noita has about four hundred; the ceiling here is 255, because
+   a cell is one byte and that is the whole reason the grid is affordable.
+
+   Nothing in the tick loop is sized by how many materials exist: the kind,
+   density and spread are array reads, and so is the reaction test. Twenty-seven
+   materials in the same room cost exactly what two do. voxel/many.html
+   measures that rather than asserting it. */
+function addMaterial(spec){
+  const id = MAT.length;
+  if (id > 255) throw new Error('a material id is one byte: 256 is the ceiling');
+  const m = {n:spec.n, k:spec.k, d:spec.d, s:spec.s|0,
+             life:spec.life|0, burn:spec.burn|0, c:spec.c||[0.5,0.5,0.5]};
+  MAT.push(m);
+  M_K[id]=m.k; M_D[id]=m.d; M_S[id]=m.s; M_LIFE[id]=m.life;
+  return id;
+}
+
 /* Reactions: what happens when a touches b. Order-independent — written both
    ways — so "water puts out fire" is one row, not two.
 

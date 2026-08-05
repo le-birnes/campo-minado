@@ -1919,10 +1919,28 @@ function playGame(diff, mode, label){
    so it is counted instead. */
 function autopsy(){
   const N=G.nx*G.ny*G.nz;
-  let shut=0, orphan=0, deducible=0, unclear=0, forced=0, half=0;
+  /* REACH IS NOW MEASURED, NOT ASSERTED. The old version of this line said
+     "provable and it just could not get to them" about every deducible block
+     still shut, having never once tested whether the bot could get to them —
+     and that phrase sent the hunt for the Arcane endgame straight at the
+     router, which was not where the problem was. One last flood from where it
+     stopped answers it properly: a block is in reach if the flood arrived at a
+     cell touching it.
+
+     And the two kinds of shut block are separated, because they mean opposite
+     things. Winning needs every SAFE block opened. An unflagged MINE costs
+     nothing at all — Sorcerer finished 55/56 flagged. Counting them together
+     made a finished board look like a stuck one. */
+  const {dist} = mapNow(true);
+  const inReach = i => { for (const c of nbrsOf(i)) if (dist[c] >= 0) return true; return false; };
+
+  const S={n:0,orphan:0,proven:0,unclear:0,far:0};
+  const M={n:0,orphan:0,proven:0,unclear:0,far:0};
   for (let i=0;i<N;i++){
     if (G.st[i]!==SOLID) continue;
-    shut++;
+    const B = G.mine[i] ? M : S;
+    B.n++;
+    if (!inReach(i)) B.far++;
     let touched=false, proven=false;
     for (const c of nbrsOf(i)){
       if (G.st[c]!==AIR || G.cnt[c]===0) continue;
@@ -1932,14 +1950,19 @@ function autopsy(){
       const need=G.cnt[c]-f;
       if (need===0 || need===hid) proven=true;      // all safe, or all mine
     }
-    if (!touched) orphan++;
-    else if (proven) deducible++;
-    else unclear++;
+    if (!touched) B.orphan++;
+    else if (proven) B.proven++;
+    else B.unclear++;
   }
+  let forced=0, half=0;
   for (const u of forcedClues()) forced++;
   for (const u of unfinished()) half++;
-  return `left shut: ${shut} — ${orphan} touch no number at all, ${deducible} are already `+
-         `provable and it just could not get to them, ${unclear} need more digging first. `+
+  const say = (t,B) => `${t}: ${B.n} left, ${B.proven} provable, ${B.unclear} need more `+
+                       `digging, ${B.orphan} touch no number at all, ${B.far} OUT OF REACH`;
+  return `${say('safe blocks (winning needs every one of these)', S)}
+   `+
+         `${say('mines (flags; not needed to win)', M)}
+   `+
          `Clues on the board: ${forced} forced (flag now), ${half} half-read.`;
 }
 
@@ -2076,6 +2099,12 @@ if (/[?&]watch/.test(location.search)){
 const plan=[];
 if (/[?&]dungeon/.test(location.search))    plan.push([0,MODE_DUNGEON,'Dungeon']);
 else if (/[?&]quick/.test(location.search)) plan.push([0,MODE_SWEEP,'Apprentice']);
+/* One difficulty on its own. The full suite is 250 s and three quarters of that
+   is spent re-proving what already works; ?diff=2 is Arcane by itself. */
+else if (/[?&]diff=(\d)/.test(location.search)){
+  const d = Math.max(0, Math.min(2, +/[?&]diff=(\d)/.exec(location.search)[1]));
+  plan.push([d,MODE_SWEEP,DIFFS[d].name]);
+}
 else {
   for (let d=0; d<3; d++) plan.push([d,MODE_SWEEP,DIFFS[d].name]);
   plan.push([0,MODE_DUNGEON,'Dungeon']);
