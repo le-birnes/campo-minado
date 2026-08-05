@@ -1,0 +1,120 @@
+<!doctype html><meta charset="utf-8"><title>voxel scale + arena ceiling</title>
+<body style="background:#111;color:#ddd;font:13px ui-monospace,monospace;padding:12px">
+<pre id="out">running…</pre>
+<script src="tet.js"></script>
+<script>
+const L=[], log=s=>L.push(s);
+const ms=f=>{const t=performance.now();f();return performance.now()-t;};
+const fx=(n,d=0)=>n.toLocaleString('en-US',{maximumFractionDigits:d});
+
+/* The game, measured (tools/h_dims.js), not assumed. */
+const BLOCK=2.8, P_H=2.0, P_R=0.52;
+const BOARDS = [
+  ['SWEEPER Apprentice',10,3,10], ['SWEEPER Sorcerer',12,3,12], ['SWEEPER Arcane',15,4,15],
+  ['DUNGEON 1 level',18,6,18], ['DUNGEON 2 levels',18,12,18], ['DUNGEON 4 levels',18,24,18]
+];
+const DIVS = [6,8,9,12,16,20,24,32];
+/* A Kuhn tet at cube spacing d has volume d^3/6, so the side of the cube with
+   the SAME volume — which is the only fair way to say "how big is a voxel" when
+   the voxel is not a cube — is d / cbrt(6). */
+const CBRT6 = Math.cbrt(6);
+const elem = d => d/CBRT6;
+/* The body is a capsule: a cylinder of the player's radius and height. */
+const PLAYER_VOL = Math.PI*P_R*P_R*P_H;
+
+log('=== VOXEL SCALE — the pixel, the player, and how big an arena fits ===');
+log('');
+log(`  BLOCK ${BLOCK} m | player ${P_H} m tall, ${P_R} m radius, ${PLAYER_VOL.toFixed(2)} m3 of body`);
+log(`  the cell is a Kuhn tetrahedron: 6 per cube, volume d^3/6`);
+log('');
+log('--- 1. WHAT ONE VOXEL IS, AT EACH SPACING ---');
+log('');
+log('  spacing        voxel      player is    player =     per BLOCK    a 2.8 m wall');
+log('                 (equiv)    N tall       N voxels                  is N across');
+for (const div of DIVS){
+  const d = BLOCK/div, e = elem(d), ev = d*d*d/6;
+  log(`  BLOCK/${String(div).padStart(2)} ${d.toFixed(3)}m  ${e.toFixed(4)}m   `+
+      `${(P_H/e).toFixed(1).padStart(6)}       ${fx(PLAYER_VOL/ev).padStart(9)}     `+
+      `${fx(div*div*div*6).padStart(9)}    ${(BLOCK/e).toFixed(1).padStart(6)}`);
+}
+log('');
+log('  For reference: a Noita pixel is ~1/30 of a character, so "player is 30 tall"');
+log('  is the row that matches its feel — BLOCK/24.');
+log('');
+
+log('--- 2. EVERY BOARD THE GAME BUILDS, FULLY RESIDENT (1 byte a cell) ---');
+log('');
+{
+  let head = '  board                blocks       m3   ';
+  for (const div of DIVS) head += ('B/'+div).padStart(9);
+  log(head);
+  for (const [name,nx,ny,nz] of BOARDS){
+    const cells = nx*ny*nz, vol = cells*BLOCK*BLOCK*BLOCK;
+    let row = `  ${name.padEnd(19)}${String(cells).padStart(6)} ${String(Math.round(vol)).padStart(8)}   `;
+    for (const div of DIVS){
+      const tets = cells*div*div*div*6;
+      const mb = tets/1e6;
+      row += (mb >= 1000 ? (mb/1000).toFixed(1)+'G' : Math.round(mb)+'M').padStart(9);
+    }
+    log(row);
+  }
+}
+log('');
+
+log('--- 3. THE ARENA CEILING, MEASURED ---');
+log('');
+{
+  /* Allocate for real and tick for real. A table of megabytes is a guess about
+     what the machine will accept; this is the machine answering. */
+  log('  allocating and ticking real grids until it stops being viable:');
+  log('');
+  log('     cube grid      tets        MB    alloc ms   full scan ms');
+  let lastOK = null;
+  for (const s of [64, 128, 192, 256, 320, 400, 512]){
+    let g=null;
+    const ta = ms(()=>{ try{ g = new TetGrid(s,s,s); }catch(e){ g=null; } });
+    if (!g){ log(`  ${String(s).padStart(6)}^3   -- allocation FAILED, this is the ceiling`); break; }
+    g.fill(0,0,0,s,1,s,T_ROCK);
+    g.fill(0,Math.floor(s*0.45),0,s,s,s,T_SAND);
+    const tt = ms(()=>g.step());
+    const tets = s*s*s*6;
+    log(`  ${String(s).padStart(6)}^3 ${fx(tets).padStart(12)} ${fx(tets/1e6).padStart(6)}  `+
+        `${ta.toFixed(0).padStart(8)}   ${tt.toFixed(0).padStart(11)}`);
+    lastOK = {s, tets, tt};
+    if (tets/1e6 > 1600) break;                 // past any sane resident budget
+  }
+  log('');
+  if (lastOK){
+    log(`  Largest grid that allocated and ticked: ${lastOK.s}^3 cubes = ${fx(lastOK.tets)} tets.`);
+    log(`  A FULL scan of it costs ${lastOK.tt.toFixed(0)} ms, which is the point: brute force is`);
+    log(`  finished long before memory is. The dirty rect is not an optimisation`);
+    log(`  at this scale, it is the only reason the engine runs at all.`);
+  }
+}
+log('');
+
+log('--- 4. SO HOW BIG AN ARENA, IN BLOCKS? ---');
+log('');
+{
+  /* Turn a memory budget into a board size, at each spacing. Blocks, and then
+     what that board is in the game's own terms. */
+  for (const budget of [256, 512, 1024, 2048]){
+    log(`  with ${budget} MB of resident material:`);
+    for (const div of [8,12,16,24]){
+      const perBlock = div*div*div*6;
+      const blocks = Math.floor(budget*1e6/perBlock);
+      /* keep the dungeon's shape: footprint square, height 4/3 of the side */
+      const side = Math.floor(Math.cbrt(blocks*3/4));
+      log(`     BLOCK/${String(div).padStart(2)}  ${fx(blocks).padStart(9)} blocks  `+
+          `= about ${side}x${Math.round(side*4/3)}x${side}  `+
+          `(${(side*BLOCK).toFixed(0)}x${(side*4/3*BLOCK).toFixed(0)}x${(side*BLOCK).toFixed(0)} m)  `+
+          `| the 4-level dungeon is 18x24x18`);
+    }
+    log('');
+  }
+}
+log('=== done ===');
+document.getElementById('out').textContent = L.join('\n');
+document.body.dataset.r = L.join('~');
+</script>
+</body>
