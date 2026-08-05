@@ -1,0 +1,118 @@
+<!doctype html><html><head><meta charset="utf-8"><title>voxel view</title>
+<style>
+ html,body{margin:0;background:#0b0c10;color:#dfe2ea;font:13px ui-monospace,Menlo,monospace}
+ #wrap{padding:10px}
+ canvas{image-rendering:pixelated;border:1px solid #2a2d38;background:#05060a;display:block}
+ .cap{padding:6px 2px 8px;color:#8d93a3}
+ .cap b{color:#ffb347}
+ .legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px}
+ .legend span{display:flex;align-items:center;gap:5px}
+ .sw{width:11px;height:11px;border:1px solid #333;display:inline-block}
+</style></head><body><div id="wrap">
+<div class="cap" id="cap">building…</div>
+<canvas id="c"></canvas>
+<div class="legend" id="leg"></div>
+</div>
+<script src="sand.js"></script>
+<script>
+/* ============================================================================
+   VIEW — a picture of the simulation, so something can LOOK at it
+   ============================================================================
+   Every bench in this folder prints numbers, and a falling-everything sim fails
+   in ways no number catches: sand standing in a column it could never hold,
+   water that never finds its level, material quietly deleted at a chunk seam,
+   a density order that is upside down. Counters pass through all of it.
+
+   So: a vertical cross-section, drawn honestly, one pixel block per cell. A
+   slice is the right view rather than a 3D render because the failures are
+   about SHAPE - the angle a pile settles at, whether a surface is flat, whether
+   a layer sits above or below another - and a slice shows shape without a
+   camera to argue about.
+
+   ?scene=pile|level|float|seam|burn   ?ticks=N   ?px=N   ?z=N
+   ========================================================================== */
+const Q = new URLSearchParams(location.search);
+const SCENE = Q.get('scene') || 'pile';
+const TICKS = +(Q.get('ticks') || 240);
+const PX    = +(Q.get('px') || 6);
+const W = 64, H = 64, D = 16;
+
+function mk(){ return new World({x0:0,y0:0,z0:0,x1:W-1,y1:H-1,z1:D-1}); }
+function box(w,x0,y0,z0,x1,y1,z1,m){
+  for(let y=y0;y<y1;y++) for(let z=z0;z<z1;z++) for(let x=x0;x<x1;x++) w.set(x,y,z,m);
+}
+
+/* Each scene isolates ONE thing that can be wrong, so a reviewer is never
+   asked to judge five behaviours in one picture. */
+const SCENES = {
+  pile: w => {            // a powder must SLUMP. A standing column is the bug.
+    box(w,0,0,0,W,2,D,ROCK);
+    box(w,29,20,0,35,60,D,SAND);
+  },
+  level: w => {           // a liquid must find ONE level across a joined basin
+    box(w,0,0,0,W,2,D,ROCK);
+    box(w,0,2,0,4,40,D,ROCK); box(w,60,2,0,W,40,D,ROCK);
+    box(w,30,2,0,34,26,D,ROCK);                       // a divider with a gap under it
+    box(w,4,2,0,30,3,D,ROCK);
+    box(w,6,24,0,28,44,D,WATER);
+  },
+  float: w => {           // density order: oil ABOVE water, sand THROUGH both
+    box(w,0,0,0,W,2,D,ROCK);
+    box(w,0,2,0,8,40,D,ROCK); box(w,56,2,0,W,40,D,ROCK);
+    box(w,8,2,0,56,20,D,WATER);
+    box(w,8,20,0,56,28,D,OIL);
+    box(w,26,50,0,38,58,D,SAND);
+  },
+  seam: w => {            // material crossing x=32 (a chunk edge) must not shelf
+    box(w,0,0,0,W,2,D,ROCK);
+    box(w,24,30,0,44,52,D,SAND);
+  },
+  burn: w => {            // a reaction that must spread and then stop
+    box(w,0,0,0,W,2,D,ROCK);
+    box(w,0,2,0,6,30,D,ROCK); box(w,58,2,0,W,30,D,ROCK);
+    box(w,6,2,0,58,10,D,OIL);
+    box(w,30,10,0,34,14,D,FIRE);
+  }
+};
+const NOTE = {
+  pile : 'SAND dropped as a tall column. It must SLUMP into a pile with sloping sides and a flat-ish base. A column still standing straight up is the failure.',
+  level: 'WATER poured into one side of a basin joined underneath. It must flow through and settle at ONE flat level on both sides.',
+  float: 'OIL (dark) over WATER (blue), SAND dropped from above. Oil must stay ABOVE water; sand must sink THROUGH both to the floor.',
+  seam : 'SAND falling across x=32, which is a chunk boundary. The pile must be symmetric. A step, shelf or vertical crack at the middle is the failure.',
+  burn : 'FIRE lit in the middle of a pool of OIL. It must spread along the slick, make smoke, and consume the oil rather than burning for ever.'
+};
+
+const w = mk();
+(SCENES[SCENE] || SCENES.pile)(w);
+let t = 0;
+for (; t < TICKS; t++) step(w);
+
+/* Draw the slice at z, one block per cell, y up. */
+const z = +(Q.get('z') || (D>>1));
+const c = document.getElementById('c');
+c.width = W*PX; c.height = H*PX;
+const g = c.getContext('2d');
+g.fillStyle = '#05060a'; g.fillRect(0,0,c.width,c.height);
+const seen = new Set();
+for (let y=0;y<H;y++) for (let x=0;x<W;x++){
+  const m = w.at(x,y,z);
+  if (m === AIR) continue;
+  seen.add(m);
+  const col = MAT[m].c;
+  g.fillStyle = `rgb(${col.map(v=>Math.round(v*255)).join(',')})`;
+  g.fillRect(x*PX, (H-1-y)*PX, PX, PX);
+}
+/* A faint rule on the chunk boundary, so a seam bug is unmistakable rather
+   than something a reviewer has to take on trust. */
+g.strokeStyle = 'rgba(255,255,255,0.18)'; g.lineWidth = 1;
+for (let x=32; x<W; x+=32){ g.beginPath(); g.moveTo(x*PX+.5,0); g.lineTo(x*PX+.5,c.height); g.stroke(); }
+
+let solid=0; for(let y=0;y<H;y++) for(let x=0;x<W;x++) if(w.at(x,y,z)!==AIR) solid++;
+document.getElementById('cap').innerHTML =
+  `<b>${SCENE}</b> — ${NOTE[SCENE]||''}<br>`+
+  `${t} ticks · slice z=${z} · ${W}x${H} cells · ${solid} filled · `+
+  `${w.ch.size} chunks, ${w.stats.awake} still awake`;
+document.getElementById('leg').innerHTML =
+  [...seen].map(m=>`<span><i class="sw" style="background:rgb(${MAT[m].c.map(v=>Math.round(v*255)).join(',')})"></i>${MAT[m].n}</span>`).join('');
+document.body.dataset.r = `${SCENE} ticks=${t} filled=${solid} awake=${w.stats.awake}`;
+</script></body></html>
