@@ -1,0 +1,102 @@
+<!doctype html><meta charset="utf-8"><title>the world as particles</title>
+<body style="background:#111;color:#ddd;font:13px ui-monospace,monospace;padding:12px">
+<pre id="out">running…</pre>
+<script src="world.js"></script>
+<script>
+const L=[],log=s=>L.push(s);
+const ms=f=>{const t=performance.now();f();return performance.now()-t;};
+const fx=(n,d=0)=>n.toLocaleString('en-US',{maximumFractionDigits:d});
+const BLOCK=2.8, DIV=16, DT=1/60;
+const GRAIN=(BLOCK/DIV)/Math.cbrt(6);
+
+log('=== THE WORLD AS PARTICLES — BLOCK/16, dungeon and sweeper ===');
+log('');
+log(`  grain ${(GRAIN*100).toFixed(2)} cm | ${DIV}^3 x 6 = ${fx(DIV*DIV*DIV*6)} particles a block`);
+log(`  a pellet is ONE tetrahedron and burns a 2-particle radius`);
+log(`  a destroyed block becomes debris, and debris is air after 3 s`);
+log('');
+
+/* Both real boards. The sweeper is dense puzzle; the dungeon is mostly rock. */
+const BOARDS=[['SWEEPER Arcane',15,4,15,0.75],['DUNGEON 4 levels',18,24,18,0.90]];
+for(const [name,bx,by,bz,fill] of BOARDS){
+  log(`--- ${name}: ${bx}x${by}x${bz} blocks ---`);
+  let w=null;
+  const tb = ms(()=>{ try{ w=new VoxWorld(bx,by,bz,DIV); }catch(e){ w=null; log('  ALLOCATION FAILED: '+e.message); } });
+  if(!w){ log(''); continue; }
+  log(`  allocated ${fx(w.n)} particles = ${fx(w.n/1e6)} MB in ${tb.toFixed(0)} ms`);
+  /* Build it: a fraction of blocks solid, like the real board. */
+  let seed=20260805; const rnd=()=>((seed=(seed*1664525+1013904223)>>>0)/4294967296);
+  const tf = ms(()=>{
+    for(let y=0;y<by;y++) for(let z=0;z<bz;z++) for(let x=0;x<bx;x++)
+      if(rnd()<fill) w.fillBlock(x,y,z, rnd()<0.25?W_SAND:W_ROCK);
+  });
+  log(`  built in ${fx(tf)} ms`);
+
+  /* A shot: 18 pellets, each one tetrahedron, each burning radius 2. */
+  const cx=(bx*DIV)>>1, cy=(by*DIV)>>1, cz=(bz*DIV)>>1;
+  const shot = () => {
+    for(let p=0;p<18;p++)
+      w.burn(cx+((rnd()*9)|0)-4, cy+((rnd()*9)|0)-4, cz+((rnd()*9)|0)-4, 2);
+  };
+  const t1 = ms(shot);
+  log(`  one 18-pellet shot: ${t1.toFixed(2)} ms, burned ${fx(w.stats.burned)} particles`);
+
+  /* Now collapse the blocks around the hit and watch the cost. */
+  const bxi=(cx/DIV)|0, byi=(cy/DIV)|0, bzi=(cz/DIV)|0;
+  let made=0;
+  const t2 = ms(()=>{
+    for(let dy=0;dy<=1;dy++) for(let dz=-1;dz<=1;dz++) for(let dx=-1;dx<=1;dx++){
+      const X=bxi+dx,Y=byi+dy,Z=bzi+dz;
+      if(X<0||Y<0||Z<0||X>=bx||Y>=by||Z>=bz) continue;
+      made += w.collapse(X,Y,Z);
+    }
+  });
+  log(`  18 blocks collapse: ${t2.toFixed(0)} ms to convert, ${fx(made)} particles of debris`);
+
+  /* The player stands at the hit. Tick with and without an active radius. */
+  const px=(cx/DIV)*BLOCK, py=(cy/DIV)*BLOCK, pz=(cz/DIV)*BLOCK;
+  for(const R of [0, 20, 40]){
+    w.wakeAll();
+    /* One tick at unlimited radius is the whole point of the comparison and it
+       is deliberately the most expensive thing in this file - 191 million cells
+       on the dungeon. It gets sampled once; the useful radii get three. */
+    const N = R===0 ? 1 : 3;
+    let t=0; for(let i=0;i<N;i++) t += ms(()=>w.step(DT,px,py,pz,R,BLOCK));
+    log(`  tick, active radius ${R? R+' m':'UNLIMITED'}: ${(t/N).toFixed(1)} ms   `+
+        `chunks awake ${fx(w.stats.awake)}, simulated ${fx(w.stats.inRange)}, `+
+        `cells scanned ${fx(w.stats.scanned)}`);
+  }
+  /* And once the dust settles: what a quiet world costs. */
+  for(let i=0;i<30;i++) w.step(DT,px,py,pz,40,BLOCK);
+  let t3=0; for(let i=0;i<10;i++) t3 += ms(()=>w.step(DT,px,py,pz,40,BLOCK));
+  log(`  once settled: ${(t3/10).toFixed(2)} ms/tick, ${w.debris.length} debris still on the clock`);
+  log('');
+}
+
+log('--- SITUATIONAL COMPUTING: how big could the world get? ---');
+log('');
+{
+  /* The active radius decides the FRAME. Memory decides the WORLD. So the two
+     questions separate cleanly, which is the whole point. */
+  const perBlock=DIV*DIV*DIV*6;
+  log('  frame cost depends only on the active radius, not on the world size:');
+  const rBlocks = r => Math.pow(2*r/BLOCK,3);
+  for(const R of [20,40,80]){
+    log(`     radius ${String(R).padStart(3)} m  =  ${fx(rBlocks(R))} blocks alive  =  `+
+        `${fx(rBlocks(R)*perBlock/1e6)} M particles in the simulated shell`);
+  }
+  log('');
+  log('  world size is then bounded only by MEMORY, at 1 byte a particle:');
+  for(const mb of [512,1024,2048,4096]){
+    const blocks=Math.floor(mb*1e6/perBlock);
+    const side=Math.floor(Math.cbrt(blocks*3/4));
+    log(`     ${String(mb).padStart(5)} MB  =  ${fx(blocks).padStart(7)} blocks  =  about ${side}x${Math.round(side*4/3)}x${side}  `+
+        `(${(side*BLOCK).toFixed(0)}x${(side*4/3*BLOCK).toFixed(0)}x${(side*BLOCK).toFixed(0)} m)`);
+  }
+}
+log('');
+log('=== done ===');
+document.getElementById('out').textContent=L.join('\n');
+document.body.dataset.r=L.join('~');
+</script>
+</body>
