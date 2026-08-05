@@ -1,0 +1,123 @@
+<!doctype html><meta charset="utf-8"><title>matter</title>
+<body style="background:#111;color:#ddd;font:13px ui-monospace,monospace;padding:12px">
+<pre id="out">running…</pre>
+<script src="matter.js"></script>
+<script>
+const L=[],log=s=>L.push(s);
+const fx=(n,d=0)=>n.toLocaleString('en-US',{maximumFractionDigits:d});
+const ms=f=>{const t=performance.now();f();return performance.now()-t;};
+const BLOCK=2.8, BV=BLOCK*BLOCK*BLOCK;
+
+log('=== MATTER — molecules sized by material, objects kept whole ===');
+log('');
+log('--- 1. THE MOLECULE OF EACH MATERIAL ---');
+log('');
+log('  material    molecule   hardness   bind      per 2.8 m BLOCK    /visible grain');
+for(const k in MAT){
+  const m=MAT[k], per=BV/((m.mol**3)/6);
+  const st=['grain','liquid','soft','gas'][m.state];
+  log(`  ${k.padEnd(10)}  ${(m.mol*100).toFixed(0).padStart(4)} cm   `+
+      `${m.hard.toFixed(1).padStart(6)}   ${(m.bind>=1e6?'huge':m.bind).toString().padStart(5)}   `+
+      `${fx(per).padStart(16)}   ${fx(PER_GRAIN).padStart(8)}`);
+}
+log('');
+log('  Bigger molecules are CHEAPER, and the bulk of a cavern is rock. The');
+log('  fine-grained materials - water, flesh, hydrogen - are the ones there is');
+log('  not much of. The cost inverts in the useful direction.');
+log('');
+
+log('--- 2. THE MEMORY INVERSION ---');
+log('');
+{
+  const blocks=7776;                                   // the 4-level dungeon
+  const field = blocks*16*16*16*6;                     // BLOCK/16 particle field
+  log(`  a 4-level dungeon, 18x24x18 = ${fx(blocks)} blocks`);
+  log('');
+  log(`  as a PARTICLE FIELD at BLOCK/16 : ${fx(field)} cells = ${fx(field/1e6)} MB,`);
+  log(`     paid the moment it is built, whether or not a shot is ever fired`);
+  const rec = 64;                                      // bytes per Body record
+  log(`  as OBJECTS                      : ${fx(blocks)} records x ~${rec} B = ${fx(blocks*rec/1024)} KB`);
+  log(`     plus one grain per molecule ACTUALLY liberated`);
+  log('');
+  log(`  => ${fx(field/(blocks*rec))}x less, and it scales with what HAPPENS, not with what exists.`);
+  const w=new Body('wall','cavernWall',BV);
+  log(`  one cavern wall block is ${fx(w.molecules())} molecules but ONE record until hit.`);
+}
+log('');
+
+log('--- 3. THE SWORD PARRY, played out ---');
+log('');
+{
+  /* Marcelo's example: an iron sword (with some copper and bronze) parries a
+     steel blade. Steel is harder, so it scratches iron and fine material comes
+     off - in proportion to what the sword is made of. */
+  const sword=new Body('iron sword','ironSword',0.0006);     // ~0.6 litre of blade, ~4.7 kg
+  const steel=new Body('steel blade','steelBlade',0.0006);
+  const grains=new Grains();
+  log(`  iron sword : hardness ${sword.hard.toFixed(2)}, ${fx(sword.molecules())} molecules`);
+  log(`  steel blade: hardness ${steel.hard.toFixed(2)}, ${fx(steel.molecules())} molecules`);
+  log('');
+  let parries=0;
+  for(let i=0;i<40;i++){
+    const shed=strike(steel,sword,'slash',90);
+    for(const [m,n] of shed) grains.add(m,n,0,0,0);
+    parries++;
+    if(i===0||i===9||i===39){
+      const bits=Object.keys(sword.lost).map(k=>`${k} ${sword.lost[k]}`).join(', ');
+      log(`  after ${String(parries).padStart(2)} parries: sword ${(sword.intact()*100).toFixed(3)}% intact, `+
+          `shed [${bits}], blade ${(steel.intact()*100).toFixed(3)}%`);
+    }
+  }
+  log('');
+  log(`  ${fx(grains.molecules)} molecules came off, becoming ${grains.g.length} visible grains on the ground. They sit for 5 s unless walked over.`);
+  grains.step(0.1, 0,0,0, 0.8);
+  log(`  player walks over them: picked up ${JSON.stringify(grains.picked)}`);
+}
+log('');
+
+log('--- 4. WET AND DRY: the same shot into different things ---');
+log('');
+{
+  const targets=[['cavern wall','cavernWall',BV],['cinderstone','cinderWall',BV],
+                 ['iron mine','mine',BV],['organic foe','organicFoe',0.08],
+                 ['construct foe','constructFoe',0.08],['the player','player',0.075]];
+  const gun=new Body('buckshot','steelBlade',1e-6);
+  log('  target          hardness  wet    molecules      after ONE 18-pellet shot');
+  for(const [name,rec,vol] of targets){
+    const b=new Body(name,rec,vol);
+    const before=b.molecules();
+    let shed=[];
+    for(let p=0;p<18;p++) shed=shed.concat(strike(gun,b,'shot',60));
+    const tally={};
+    for(const [m,n] of shed) tally[m]=(tally[m]||0)+n;
+    log(`  ${name.padEnd(14)}  ${b.hard.toFixed(2).padStart(5)}   ${(b.wet*100).toFixed(0).padStart(3)}%  `+
+        `${fx(before).padStart(11)}   ${(b.intact()*100).toFixed(4)}% left, shed ${JSON.stringify(tally)}`);
+  }
+}
+log('');
+
+log('--- 5. THE SUN TEST ---');
+log('');
+{
+  /* Nothing special: the sun is an object like any other. Its molecule count is
+     astronomical and hydrogen binds at 1e7, so a shotgun draws out a few grains
+     and the blob does not notice. */
+  const sun=new Body('the sun','sun', 1.41e27);
+  const gun=new Body('buckshot','steelBlade',1e-6);
+  log(`  the sun: ${sun.molecules().toExponential(2)} molecules of hydrogen`);
+  let shed=[];
+  const t=ms(()=>{ for(let s=0;s<100;s++) for(let p=0;p<18;p++) shed=shed.concat(strike(gun,sun,'shot',60)); });
+  log(`  100 shotgun blasts (1,800 pellets), ${t.toFixed(1)} ms:`);
+  let hm=0; for(const [m,n] of shed) hm+=n;
+  log(`     ${fx(hm)} molecules of hydrogen drawn out = ${fx(hm/PER_GRAIN)} visible grains of sand`);
+  log(`     the sun is ${(sun.intact()*100).toFixed(12)}% intact`);
+  log('');
+  log('  No special case anywhere. The same three numbers that let a rock crumble');
+  log('  - molecule size, hardness, bind - are what make a star ignore you.');
+}
+log('');
+log('=== done ===');
+document.getElementById('out').textContent=L.join('\n');
+document.body.dataset.r=L.join('~');
+</script>
+</body>
