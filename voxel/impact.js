@@ -325,3 +325,105 @@ function facePush(E, r, mass, area, eff){
   const share = E * (area||0.5) / (w*w);
   return Math.sqrt(2*Math.min(share, E)*(eff===undefined?0.25:eff)/mass);
 }
+
+/* ============================================================================
+   DISASSEMBLY — destroying a structure is a SURFACE, not a volume
+   ============================================================================
+   Marcelo: "destroy means disassemble when threshold is met ... RAW rock are
+   pellets of 3 to 400 grams ... Explosion on shotgun is enough to disassemble
+   a rock in 2 shots."
+
+   THIS IS WHERE THE LAST COMMIT WAS WRONG, and wrong by 240x. It priced
+   destroying a rock block as bind x volume — the energy to liberate every
+   molecule in it — and came out at 1,193 shots, then offered three ways to
+   fudge the number. All three were wrong, because the question was wrong.
+
+   Breaking a block into PELLETS is not pulverising it. It only breaks the
+   bonds on the surfaces where it comes apart, and the inside of every fragment
+   is untouched. So the cost is a FRACTURE AREA times a surface energy:
+
+     E = gamma * (new area created)
+
+   and the new area is set by how FINE the fragments are, not by how big the
+   block was. That is the same shape as the reaction front and the same shape
+   as the blast: the work is on the boundary, and the bulk goes along for the
+   ride. Same insight, third time, which is a good sign it is the real one.
+
+   THE LADDER, from Marcelo's own framing. One structure, four thresholds, and
+   which one a hit reaches is the whole of what "destroy" means:
+
+     below scratch    NOTHING HAPPENS, however long you swing. This is Noita's
+                      durability and matter.js could not express it — the model
+                      could only ever make things slow, never impossible.
+     scratch          surface wear, the existing wear counter
+     DISASSEMBLE      the structure comes apart into RAW fragments
+     pulverise        keep going and the fragments become powder: now you ARE
+                      paying bind x volume, which is why it costs so much more
+     melt             past that, energy stops breaking and starts heating —
+                      "some day it will almost turn sand to glass"
+   ========================================================================== */
+
+/* Effective fracture surface energy, J/m^2. Not the pristine cleavage energy of
+   a perfect crystal (which is ~1) but what it actually costs to make new
+   surface in a real material, which is one to three orders higher because the
+   crack does work either side of itself as it runs. */
+const GAMMA = {
+  sand:1, coal:20, rock:140, cinder:90, mineral:200, iron:12000, steel:20000, bedrock:1e9
+};
+/* RAW: what a structure comes apart INTO. A range, because how fine it breaks
+   depends on how hard it was hit. */
+const RAW = {
+  rock:[3,400], cinder:[3,300], coal:[2,250], mineral:[3,400],
+  iron:[5,600], steel:[5,600], sand:[0.001,0.01], bedrock:[10,900]
+};
+/* Thermal, for the far end of the ladder: J/(kg K), melting point C, latent
+   heat of fusion J/kg. */
+const THERM = {
+  sand:{c:700,  melt:1700, L:1.4e5},
+  rock:{c:790,  melt:1215, L:4.0e5},
+  iron:{c:450,  melt:1538, L:2.7e5}
+};
+
+/* New surface made by breaking mass M into fragments of mass m. Each fragment
+   is a cube of side (m/rho)^(1/3) with 6 faces, and every face is shared with
+   a neighbour, so the area CREATED is half the total. */
+function fractureArea(mat, massKg, pelletG){
+  const rho = IMAT[mat].dens;
+  const m = pelletG/1000;
+  const n = massKg/m;
+  const side = Math.cbrt(m/rho);
+  return n * 6*side*side / 2;
+}
+/* What it costs to disassemble a volume into fragments of a given size. */
+function disassembleEnergy(mat, volumeM3, pelletG){
+  const massKg = volumeM3*IMAT[mat].dens;
+  return GAMMA[mat] * fractureArea(mat, massKg, pelletG);
+}
+/* And backwards, which is the interesting direction: given the energy actually
+   delivered, HOW FINE does it come apart? More energy buys more surface buys
+   smaller pieces, and that is one continuous knob from boulders to powder. */
+function fragmentSize(mat, volumeM3, E){
+  const rho = IMAT[mat].dens, massKg = volumeM3*rho;
+  /* E = gamma * (M/m) * 3*(m/rho)^(2/3)  =>  m^(1/3) = 3*gamma*M/(E*rho^(2/3)) */
+  const root = 3*GAMMA[mat]*massKg / (E*Math.pow(rho, 2/3));
+  return Math.pow(root, 3)*1000;                     // grams
+}
+/* Does this hit take the structure apart at all? The threshold is the energy
+   to break it into the COARSEST raw it has — the cheapest way it can come
+   apart. Anything less is a scratch. */
+function disassembleThreshold(mat, volumeM3){
+  return disassembleEnergy(mat, volumeM3, RAW[mat][1]);
+}
+function hitVerdict(mat, volumeM3, E){
+  const th = disassembleThreshold(mat, volumeM3);
+  if (E < th*0.02) return {what:'nothing',  th};     // below durability: no effect
+  if (E < th)      return {what:'scratch',  th, frac:E/th};
+  const g = Math.max(fragmentSize(mat, volumeM3, E), RAW[mat][0]);
+  const pulv = E >= disassembleEnergy(mat, volumeM3, RAW[mat][0]);
+  return {what: pulv ? 'powder' : 'disassemble', th, grams:g};
+}
+/* The far end: energy stops breaking and starts heating. */
+function meltEnergyPerKg(mat){
+  const t = THERM[mat]; return t.c*(t.melt-20) + t.L;
+}
+function meltedKg(mat, E){ return E/meltEnergyPerKg(mat); }

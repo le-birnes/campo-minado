@@ -177,48 +177,101 @@ for (const mat of ['sand','coal','rock','cinder','iron']){
 }
 log('');
 
-log('--- 6. "5 SHOTS SHOULD BE ENOUGH TO DESTROY ROCK" — THE BILL ---');
+log('--- 6. DISASSEMBLY: DESTROYING IS A SURFACE, NOT A VOLUME ---');
 log('');
-log(`  Five shots is ${5*PELLETS_PER_SHOT*PELLET_TNT_G} g of TNT, ${fx(5*shotEnergy(),0)} J. A block of rock at`);
-log(`  BLOCK/16 is ${fx(16*16*16)} cells and each costs ${fx(cellBreakCost('rock'),0)} J to free, so taking`);
-log(`  one apart is ${fx(16*16*16*cellBreakCost('rock')/0.5,0)} J — ${fx(shotsForBlock('rock'),0)} shots, not 5.`);
+log('  The last version of this page said 5 shots could not destroy a rock');
+log('  block because pulverising one is 131.7 MJ, and offered three ways to');
+log('  fudge it. All three were wrong: the QUESTION was wrong. Breaking a block');
+log('  into pellets is not pulverising it — it only breaks the bonds on the');
+log('  surfaces where it comes apart, and the inside of every fragment is');
+log('  untouched. Cost is gamma x new area, and area is set by how FINE it');
+log('  breaks, not by how big the block was.');
 log('');
-log('  So the two do not meet, and it is worth being exact about WHERE. Run it');
-log('  backwards: what would a material have to be bound at for 5 shots to take');
-log('  a block, and what is actually that soft?');
+const V = BLOCK_M*BLOCK_M*BLOCK_M;
+log(`  One block is ${V.toFixed(1)} m3. Rock at ${IMAT.rock.dens} kg/m3 is ${fx(V*IMAT.rock.dens)} kg.`);
 log('');
-const need5 = bindForShots(5);
-log(`     5 shots takes a block if bind = ${fx(need5,0)} J/m3`);
-log('');
-log('     material   bind (J/m3)    shots for a block at that bind');
-for (const mat of ['sand','coal','rock','cinder','iron']){
-  log(`     ${mat.padEnd(9)} ${fx(IMAT[mat].bind).padStart(13)}    ${fx(shotsForBlock(mat),1).padStart(12)}`);
+log('     fragment size    pieces      new area      energy      shots');
+for (const g of [400, 100, 20, 3, 0.1]){
+  const E = disassembleEnergy('rock', V, g);
+  log(`     ${String(g).padStart(8)} g   ${fx(V*IMAT.rock.dens/(g/1000)).padStart(10)}   `+
+      `${fx(fractureArea('rock',V*IMAT.rock.dens,g)).padStart(9)} m2   ${fx(E,0).padStart(11)} J   `+
+      `${(E/shotEnergy()).toFixed(1).padStart(6)}`);
 }
 log('');
-log(`  ${fx(need5,0)} J/m3 is softer than the SAND in this table. Nothing that could be`);
-log('  called rock is that weak, so the spec and the physics are pointing at');
-log('  different things and only one of three answers is available:');
+log(`  For comparison, pulverising the same block to molecules is `+
+    `${fx(V*IMAT.rock.dens/IMAT.rock.dens*IMAT.rock.bind/0.5,0)} J,`);
+log(`  or ${fx(V*IMAT.rock.bind/0.5/shotEnergy(),0)} shots. Coming apart into 400 g lumps is `+
+    `${fx((V*IMAT.rock.bind/0.5)/disassembleEnergy('rock',V,400),0)}x cheaper than`);
+log('  coming apart into dust, and THAT is why two shots can do it.');
 log('');
-log(`     A. THE CHARGE IS BIGGER. 5 shots takes a rock block at `+
-    `${fx(16*16*16*cellBreakCost('rock')/0.5/5/(TNT_J_PER_KG/1000)/PELLETS_PER_SHOT,0)} g`);
-log('        a pellet instead of 3 — a stick of dynamite per pellet, and then');
-log('        one shot into sand vaporises everything for a block around.');
+log('--- 6b. "TWO SHOTS DISASSEMBLES A ROCK" — CHECKED ---');
 log('');
-log('     B. ROCK IS A GAME MATERIAL, NOT A ROCK. Give the diggable stuff its');
-log(`        own bind of ${fx(need5,0)} and keep 3 g. Real rock stays at 3e6 and`);
-log('        stays undiggable, which is what makes it a wall. This is the one');
-log('        that costs nothing elsewhere, because it changes a number in the');
-log('        material table rather than the weapon everything else is sized to.');
+{
+  const th = disassembleThreshold('rock', V);
+  const two = 2*shotEnergy();
+  log(`     threshold (coarsest raw, ${RAW.rock[1]} g lumps)   ${fx(th,0).padStart(12)} J`);
+  log(`     two shots at ${PELLETS_PER_SHOT}x${PELLET_TNT_G} g                    ${fx(two,0).padStart(12)} J`);
+  log(`     ratio                                ${(two/th).toFixed(2).padStart(12)}`);
+  log('');
+  const v = hitVerdict('rock', V, two);
+  /* No '~' in log text, ever: the page joins its lines with it for data-r,
+     so a tilde here comes back out of the harness as a line break. */
+  log(`  Verdict: ${v.what.toUpperCase()}`+(v.grams?`, into roughly ${v.grams.toFixed(0)} g pieces`:''));
+  log('');
+  const gammaNeeded = GAMMA.rock * th/two;
+  log(`  gamma is set at ${GAMMA.rock} J/m2 for rock, which is inside the real range for`);
+  log(`  effective fracture energy (tens to hundreds). For two shots to land`);
+  log(`  EXACTLY on the threshold it would be ${gammaNeeded.toFixed(0)} — the same order, not a`);
+  log('  fudge factor. The spec and the physics agree once the physics is asked');
+  log('  the right question.');
+}
 log('');
-log('     C. "DESTROY" IS NOT "REMOVE THE WHOLE BLOCK". 5 shots at 3 g bites');
-log(`        ${(faceBlast('rock', 5*shotEnergy()).depth*100).toFixed(0)} cm into a ${BLOCK_M*100} cm block — a real hole, not a hole`);
-log('        through. If the block should FALL once it is bitten deep enough,');
-log('        that is a structural rule and the depth is already the trigger.');
+log('--- 6c. THE LADDER: WHAT ONE STRUCTURE DOES AS THE HIT GROWS ---');
 log('');
-log('  B is the cheapest and C is the most interesting; A breaks everything');
-log('  else. This is a design call, not a measurement, so it is left open.');
+log('     energy        shots      verdict        comes apart into');
+for (const E of [2e3, 2e4, 1.1e5, 2.2e5, 1e6, 1e7, 1e8]){
+  const v = hitVerdict('rock', V, E);
+  log(`     ${fx(E,0).padStart(11)} J ${(E/shotEnergy()).toFixed(1).padStart(9)}   `+
+      `${v.what.padEnd(13)}  ${v.grams ? (v.what==='powder'
+          ? fragmentSize('rock',V,E).toFixed(3)+' g grains'
+          : v.grams.toFixed(1)+' g pieces')
+        : (v.frac?(v.frac*100).toFixed(0)+'% of the way':'-')}`);
+}
 log('');
-
+log('  Below 2% of the threshold NOTHING happens, however long you swing. That');
+log('  is Noita\'s durability and matter.js could not express it — the old model');
+log('  could only make things slow, never impossible. Above it you scratch,');
+log('  then you disassemble, then the pieces get finer, then it is powder.');
+log('');
+log('--- 6d. SAND TO GLASS: THE FAR END OF THE LADDER ---');
+log('');
+log('  "Some day it will almost turn sand to glass, for all energy will be');
+log('  contained in a small area." That is computable rather than aspirational:');
+log('  past breaking, energy heats, and glass is just sand that got there.');
+log('');
+for (const mat of ['sand','rock','iron']){
+  const t = THERM[mat];
+  log(`     ${mat.padEnd(6)} ${t.c} J/kg/K to ${t.melt} C, +${fx(t.L/1000)} kJ/kg latent  `+
+      `= ${fx(meltEnergyPerKg(mat)/1e6,2)} MJ/kg`);
+}
+log('');
+{
+  const one = meltedKg('sand', shotEnergy()), five = meltedKg('sand', 5*shotEnergy());
+  const lump = Math.cbrt(one/IMAT.sand.dens)*100;
+  log(`  One shot, if ALL of it went to heat: ${(one*1000).toFixed(0)} g of sand fused —`);
+  log(`  a lump about ${lump.toFixed(1)} cm across. Five shots: ${(five*1000).toFixed(0)} g.`);
+  log('');
+  log('  So "almost" is exactly right, and it is the containment that makes it');
+  log('  possible at all: a spreading blast heats a wide thin skin and nothing');
+  log('  reaches melting, while no-spread puts the whole charge through one');
+  log('  face. Glass is what happens when the energy has nowhere to go.');
+  log('');
+  log('  It is not free, though, and the honest caveat is that this assumes ALL');
+  log('  the energy becomes heat. Real shares go to breaking, throwing and');
+  log('  sound, so a real shot fuses a fraction of that — which is why it is a');
+  log('  glazed crust on the crater rather than a marble.');
+}
+log('');
 log('--- 7. THE STIR, END TO END, WITH THE REAL ROUND ---');
 log('');
 {
