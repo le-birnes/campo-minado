@@ -1,0 +1,167 @@
+<!doctype html><meta charset="utf-8"><title>voxel bench</title>
+<body style="background:#111;color:#ddd;font:13px ui-monospace,monospace;padding:12px">
+<pre id="out">running…</pre>
+<script src="sand.js"></script>
+<script>
+
+const L = [];
+const log = s => L.push(s);
+const ms  = f => { const t=performance.now(); f(); return performance.now()-t; };
+const fx  = (n,d=1) => n.toLocaleString('en-US',{maximumFractionDigits:d});
+
+/* The question this whole file exists to answer: at a given voxel size, how
+   much of the CAVE can be alive at once and still fit in a frame. Everything
+   is reported per 16.6 ms because that is the only budget that matters. */
+const BLOCK = 2.8;                       // metres, the game's block today
+const BOARD = [20,26,20];                // the largest board it builds
+
+log('=== FALLING EVERYTHING — sizing the voxel ===');
+log('');
+log('The game today: block '+BLOCK+' m, board '+BOARD.join('x')+
+    ' = '+fx(BOARD[0]*BOARD[1]*BOARD[2],0)+' blocks, drawn as '+
+    fx(BOARD[0]*BOARD[1]*BOARD[2],0)+' cube instances (cap 10,464).');
+log('');
+log('--- 1. WHAT EACH VOXEL SIZE COSTS IF THE WHOLE BOARD WERE VOXELS ---');
+log('    (nobody can afford this: it is here to show why the design is sparse)');
+log('');
+for (const div of [2,4,8,16,32,42]){
+  const v = BLOCK/div;
+  const per = div*div*div;
+  const tot = BOARD[0]*BOARD[1]*BOARD[2]*per;
+  log(`  BLOCK/${String(div).padStart(2)}  voxel ${v.toFixed(3)} m  ${fx(per,0).padStart(7)} per block  `+
+      `${fx(tot,0).padStart(15)} on the board  ${fx(tot/1e6,1).padStart(8)} MB of material`);
+}
+log('');
+log('  For scale: a Noita pixel is about 1/30 of a character. The player is 2.0 m,');
+log('  so the same feel in 3D is a '+(2.0/30).toFixed(3)+' m voxel — BLOCK/42 — and that is');
+log('  the '+fx(BOARD[0]*BOARD[1]*BOARD[2]*42*42*42/1e9,1)+' billion cell row above. 2D gets that thousandfold for free.');
+log('');
+
+/* ---- 2. how fast does the simulation actually run ---- */
+log('--- 2. SIMULATION THROUGHPUT (this machine, one thread, no GPU) ---');
+log('');
+
+function fill(w, x0,y0,z0, x1,y1,z1, m){
+  for (let y=y0;y<y1;y++) for (let z=z0;z<z1;z++) for (let x=x0;x<x1;x++) w.set(x,y,z,m);
+}
+/* A floor, so falling material has somewhere to land and settle — settling is
+   the state we are trying to prove is cheap. */
+function scene(n, mat){
+  const w = new World({x0:0,y0:0,z0:0, x1:n-1, y1:127, z1:n-1});
+  fill(w, 0,0,0, n,1,n, ROCK);
+  fill(w, 0,8,0, n,8+Math.ceil(n/4),n, mat);
+  return w;
+}
+
+for (const [name, mat] of [['sand',SAND], ['water',WATER]]){
+  for (const n of [32, 64]){
+    const w = scene(n, mat);
+    const live = n*n*Math.ceil(n/4);
+    let t = 0;
+    for (let i=0;i<60;i++) t += ms(()=>step(w));
+    const settle = w.stats.awake;
+    // and again once it has come to rest
+    for (let i=0;i<240;i++) step(w);
+    let t2 = 0;
+    for (let i=0;i<60;i++) t2 += ms(()=>step(w));
+    log(`  ${name.padEnd(6)} ${n}x${n} column (${fx(live,0)} live voxels, ${w.stats.chunks} chunks)`);
+    log(`     falling : ${(t/60).toFixed(2)} ms/tick   ${w.stats.awake} chunks awake`);
+    log(`     settled : ${(t2/60).toFixed(2)} ms/tick   ${w.stats.awake} chunks awake   <-- the dirty rect earning its keep`);
+  }
+}
+log('');
+
+/* ---- 3. what the dirty rect is worth ---- */
+log('--- 3. WHAT THE DIRTY RECT IS WORTH ---');
+log('');
+{
+  const w = scene(64, SAND);
+  for (let i=0;i<300;i++) step(w);              // let it come to rest
+  let a=0, b=0;
+  for (let i=0;i<30;i++) a += ms(()=>step(w));
+  for (let i=0;i<30;i++) b += ms(()=>step(w,{noDirty:true}));
+  log(`  a settled pile of sand, ${w.stats.chunks} chunks`);
+  log(`     with dirty rects   : ${(a/30).toFixed(2)} ms/tick`);
+  log(`     every cell, always : ${(b/30).toFixed(2)} ms/tick`);
+  log(`     => ${(b/a).toFixed(0)}x. This is the whole reason a cave full of sand is affordable.`);
+}
+log('');
+
+/* ---- 4. meshing ---- */
+log('--- 4. GREEDY MESHING (the reason it is not one cube instance per voxel) ---');
+log('');
+{
+  const w = new World();
+  fill(w, 0,0,0, CS,CS,CS, ROCK);               // one solid chunk
+  const solid = w.chunk(0,0,0,false);
+  let q1=0; const tm1 = ms(()=>{ q1 = greedyMesh(solid); });
+  // and a chunk full of noise, the worst case for merging
+  const w2 = new World();
+  let seed=12345; const rnd=()=>((seed=(seed*1664525+1013904223)>>>0)/4294967296);
+  for (let y=0;y<CS;y++) for (let z=0;z<CS;z++) for (let x=0;x<CS;x++)
+    if (rnd()<0.5) w2.set(x,y,z,ROCK);
+  const noise = w2.chunk(0,0,0,false);
+  let q2=0; const tm2 = ms(()=>{ q2 = greedyMesh(noise); });
+  log(`  a solid 32^3 chunk  : ${q1} quads in ${tm1.toFixed(2)} ms   `+
+      `(${fx(CS*CS*CS,0)} voxels -> ${q1} quads: naive cubes would be ${fx(CS*CS*CS*6,0)} faces)`);
+  log(`  half-random noise   : ${fx(q2,0)} quads in ${tm2.toFixed(2)} ms   <-- the worst case, and it is the one to budget for`);
+  log('');
+  log(`  A frame can rebuild roughly ${Math.floor(16.6/Math.max(tm2,0.01))} noisy chunks, or `+
+      `${Math.floor(16.6/Math.max(tm1,0.01))} clean ones.`);
+}
+log('');
+
+/* ---- 5. reactions, because they are the point ---- */
+log('--- 5. THE MATERIALS ACTUALLY REACTING ---');
+log('');
+{
+  const w = new World({x0:0,y0:0,z0:0,x1:31,y1:63,z1:31});
+  fill(w, 0,0,0, 32,1,32, ROCK);
+  fill(w, 0,1,0, 32,6,32, OIL);
+  fill(w, 14,6,14, 18,8,18, FIRE);
+  const before = w.stats.rx;
+  for (let i=0;i<200;i++) step(w);
+  let burn=0, smoke=0, oil=0;
+  for (const c of w.ch.values()) for (let i=0;i<c.m.length;i++){
+    if (c.m[i]===FIRE) burn++; else if (c.m[i]===6) smoke++; else if (c.m[i]===OIL) oil++;
+  }
+  log(`  a pool of oil lit at the centre, 200 ticks:`);
+  log(`     ${fx(w.stats.rx-before,0)} reactions, ${fx(oil,0)} oil left, ${fx(burn,0)} still burning, ${fx(smoke,0)} smoke`);
+  const w2 = new World({x0:0,y0:0,z0:0,x1:31,y1:63,z1:31});
+  fill(w2, 0,0,0, 32,1,32, ROCK);
+  fill(w2, 8,1,8, 24,10,24, WATER);
+  fill(w2, 14,20,14, 18,24,18, LAVA);
+  for (let i=0;i<300;i++) step(w2);
+  let rock=0, steam=0;
+  for (const c of w2.ch.values()) for (let i=0;i<c.m.length;i++){
+    if (c.m[i]===ROCK) rock++; else if (c.m[i]===8) steam++;
+  }
+  log(`  lava dropped into water: ${fx(steam,0)} steam, and the lava froze into ${fx(rock,0)} rock`);
+}
+log('--- 6. DOES IT EVER ACTUALLY GO TO SLEEP? ---');
+log('');
+{
+  /* The claim the whole architecture rests on is that settled material costs
+     nothing. That is only true if chunks really do fall asleep, so measure it
+     rather than assert it: drop a pile and wait for the last one to go quiet. */
+  for (const [nm, mat] of [['sand',SAND],['water',WATER]]){
+    const w = scene(32, mat);
+    let t = 0, quiet = -1;
+    for (; t<4000; t++){
+      step(w);
+      if (w.stats.awake === 0){ quiet = t; break; }
+    }
+    log(`  ${nm.padEnd(6)}: ` + (quiet >= 0
+        ? `everything asleep after ${quiet} ticks`
+        : `STILL AWAKE after 4000 ticks - ${w.stats.awake} chunks never settle`));
+  }
+}
+log('');
+log('=== done ===');
+document.getElementById('out').textContent = L.join('\n');
+/* one line, because the harness reads data-r with a regex and a newline
+   inside it reads as no attribute at all */
+document.body.dataset.r = L.join('~');
+for (const s of L) console.log(s);
+</script>
+</body>
