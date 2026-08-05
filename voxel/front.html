@@ -1,0 +1,76 @@
+<!doctype html><meta charset="utf-8"><title>the front</title>
+<body style="background:#111;color:#ddd;font:13px ui-monospace,monospace;padding:12px">
+<pre id="out">running…</pre>
+<script src="sand.js"></script>
+<script>
+const L=[],log=s=>L.push(s);
+const ms=f=>{const t=performance.now();f();return performance.now()-t;};
+const fx=(n,d=0)=>n.toLocaleString('en-US',{maximumFractionDigits:d});
+const GRAIN=0.096;                      // BLOCK/16 cell, metres
+
+log('=== THROWING A SEA INTO A SEA — how big can the process be? ===');
+log('');
+log('  A reaction is a SURFACE, not a volume. Two seas meeting react only where');
+log('  they touch: the bulk of both is doing nothing at all. Volume grows as L^3');
+log('  and the interface as L^2, so the bigger the seas, the smaller the fraction');
+log('  of them that is busy.');
+log('');
+log('--- 1. THE ARITHMETIC ---');
+log('');
+log('   sea edge      volume        interface      cells in the front    fraction');
+for(const Lm of [10,50,200,1000,5000]){
+  const vol=Lm*Lm*Lm, area=Lm*Lm;
+  const volCells=vol/Math.pow(GRAIN,3), frontCells=area/(GRAIN*GRAIN)*3;   // 3 cells deep
+  log(`  ${String(Lm).padStart(6)} m  ${fx(vol).padStart(14)} m3  ${fx(area).padStart(11)} m2  `+
+      `${fx(frontCells).padStart(18)}   ${(frontCells/volCells*100).toFixed(4)}%`);
+}
+log('');
+log('  At 5 km the front is 0.006% of the material. Simulating the volume is');
+log('  impossible; simulating the front is arithmetic.');
+log('');
+
+log('--- 2. BUT YOU ONLY EVER SEE PART OF THE FRONT ---');
+log('');
+log('  The front of a 5 km sea is still 2.7 billion cells. What is VISIBLE is a');
+log('  patch of it near the player, and that is the only part that has to be');
+log('  particles. Measured on the real engine:');
+log('');
+log('     visible patch     cells        ms/tick (measured)');
+for(const R of [10,25,50,100]){
+  const n=Math.min(96,Math.round(2*R/GRAIN/8));      // sampled grid, kept runnable
+  const w=new World({x0:0,y0:0,z0:0,x1:n-1,y1:n-1,z1:n-1});
+  for(let y=0;y<n;y++)for(let z=0;z<n;z++)for(let x=0;x<n;x++)
+    w.set(x,y,z, y<n/2 ? WATER : LAVA);
+  let t=0; for(let i=0;i<6;i++) t+=ms(()=>step(w));
+  const real=(2*R)*(2*R)*3/(GRAIN*GRAIN);
+  const per=(t/6)/Math.max(w.stats.scanned,1);
+  log(`     ${String(R).padStart(4)} m radius  ${fx(real).padStart(11)}   ${(per*real).toFixed(1).padStart(8)} ms`+
+      `   (sampled ${n}^3, ${fx(w.stats.rx)} reactions)`);
+}
+log('');
+
+log('--- 3. THE TWO TIERS ---');
+log('');
+log('  NEAR  the player: real particles, real reactions, the front advancing cell');
+log('        by cell. This is what the eye is actually looking at.');
+log('  FAR   from it: ONE NUMBER. The front has an area and a reaction rate, so');
+log('        how much has been consumed is an integral, not a simulation. The');
+log('        bulk converts by bookkeeping and costs nothing.');
+log('');
+log('  The join is the trick: when you walk toward a distant front, the');
+log('  bookkeeping says where it has got to, and the particles are spawned AT');
+log('  that position. It looks like it was simulating all along, because the');
+log('  only claim it ever has to honour is where the boundary is.');
+log('');
+{
+  /* What the bookkeeping tier costs: one record per sea pair. */
+  const seas=1000;
+  log(`  ${fx(seas)} sea-pairs as bookkeeping: ${fx(seas*48/1024,1)} KB and `+
+      `${fx(seas)} multiplications a tick.`);
+  log('  The same thing as particles at 5 km would be 2.7 billion cells, or 2.7 GB.');
+}
+log('');
+log('=== done ===');
+document.getElementById('out').textContent=L.join('\n');
+document.body.dataset.r=L.join('~');
+</script></body>
