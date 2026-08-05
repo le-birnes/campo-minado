@@ -158,38 +158,99 @@ log('');
 }
 log('');
 
-/* ---- 5. the stir itself ---- */
-log('--- 5. THE STIR: ONE HIT, END TO END ---');
+/* ---- 5. OUR GUN ---- */
+log('--- 5. OUR GUN: A 3 g CHARGE PER PELLET, 8 AT A TIME, NO SPREAD ---');
+log('');
+log(`  A pellet carries ${PELLET_TNT_G} g of TNT and ${PELLETS_PER_SHOT} land together, so a shot is`);
+log(`  ${PELLETS_PER_SHOT*PELLET_TNT_G} g = ${fx(shotEnergy(),0)} J. The pellet's own kinetic energy is ${PELLETS[1].E.toFixed(0)} J,`);
+log('  which is kept in the model and is visibly nothing beside the charge.');
+log('');
+log('  NO SPREAD: the force is contained in the face that was shot, so it eats');
+log(`  DEPTH out of one ${BLOCK_M} m block face (${16*16} cells) and never touches the`);
+log('  blocks either side. Depth is therefore the number that matters, not radius.');
+log('');
+log('     material   one shot: cells   depth      shots to take a whole block');
+for (const mat of ['sand','coal','rock','cinder','iron']){
+  const f = faceBlast(mat, shotEnergy());
+  log(`     ${mat.padEnd(9)} ${fx(f.cells).padStart(13)}   ${(f.depth*100).toFixed(1).padStart(6)} cm   `+
+      `${fx(shotsForBlock(mat),1).padStart(14)}`);
+}
+log('');
+
+log('--- 6. "5 SHOTS SHOULD BE ENOUGH TO DESTROY ROCK" — THE BILL ---');
+log('');
+log(`  Five shots is ${5*PELLETS_PER_SHOT*PELLET_TNT_G} g of TNT, ${fx(5*shotEnergy(),0)} J. A block of rock at`);
+log(`  BLOCK/16 is ${fx(16*16*16)} cells and each costs ${fx(cellBreakCost('rock'),0)} J to free, so taking`);
+log(`  one apart is ${fx(16*16*16*cellBreakCost('rock')/0.5,0)} J — ${fx(shotsForBlock('rock'),0)} shots, not 5.`);
+log('');
+log('  So the two do not meet, and it is worth being exact about WHERE. Run it');
+log('  backwards: what would a material have to be bound at for 5 shots to take');
+log('  a block, and what is actually that soft?');
+log('');
+const need5 = bindForShots(5);
+log(`     5 shots takes a block if bind = ${fx(need5,0)} J/m3`);
+log('');
+log('     material   bind (J/m3)    shots for a block at that bind');
+for (const mat of ['sand','coal','rock','cinder','iron']){
+  log(`     ${mat.padEnd(9)} ${fx(IMAT[mat].bind).padStart(13)}    ${fx(shotsForBlock(mat),1).padStart(12)}`);
+}
+log('');
+log(`  ${fx(need5,0)} J/m3 is softer than the SAND in this table. Nothing that could be`);
+log('  called rock is that weak, so the spec and the physics are pointing at');
+log('  different things and only one of three answers is available:');
+log('');
+log(`     A. THE CHARGE IS BIGGER. 5 shots takes a rock block at `+
+    `${fx(16*16*16*cellBreakCost('rock')/0.5/5/(TNT_J_PER_KG/1000)/PELLETS_PER_SHOT,0)} g`);
+log('        a pellet instead of 3 — a stick of dynamite per pellet, and then');
+log('        one shot into sand vaporises everything for a block around.');
+log('');
+log('     B. ROCK IS A GAME MATERIAL, NOT A ROCK. Give the diggable stuff its');
+log(`        own bind of ${fx(need5,0)} and keep 3 g. Real rock stays at 3e6 and`);
+log('        stays undiggable, which is what makes it a wall. This is the one');
+log('        that costs nothing elsewhere, because it changes a number in the');
+log('        material table rather than the weapon everything else is sized to.');
+log('');
+log('     C. "DESTROY" IS NOT "REMOVE THE WHOLE BLOCK". 5 shots at 3 g bites');
+log(`        ${(faceBlast('rock', 5*shotEnergy()).depth*100).toFixed(0)} cm into a ${BLOCK_M*100} cm block — a real hole, not a hole`);
+log('        through. If the block should FALL once it is bitten deep enough,');
+log('        that is a structural rule and the depth is already the trigger.');
+log('');
+log('  B is the cheapest and C is the most interesting; A breaks everything');
+log('  else. This is a design call, not a measurement, so it is left open.');
+log('');
+
+log('--- 7. THE STIR, END TO END, WITH THE REAL ROUND ---');
 log('');
 {
-  /* A real hit, priced through the bridge from section 2 rather than through
-     a shotgun that cannot do it: SHOT_ENERGY for sand at the game's own rule. */
-  const mat='sand', E=energyForRadius(mat,2);
-  const tf = ms(()=>floodCrater(all,0,0,0,mat,E));
-  const f  = floodCrater(all,0,0,0,mat,E);
-  const th = throwOf(mat,E);
-  const d  = new Debris(4096);
+  const mat='sand', E=shotEnergy();
+  const f = faceBlast(mat, E);
+  const th = throwOf(mat, E);
+  const d = new Debris(8192);
   let s=3; const rnd=()=>((s=(s*1664525+1013904223)>>>0)/4294967296);
-  for (const [x,y,z] of f.cells){
-    const th2=rnd()*Math.PI*2, ph=rnd()*Math.PI/2;
-    d.add(x*G_CELL, 20+y*G_CELL, z*G_CELL,
-          Math.cos(th2)*Math.cos(ph)*th.speed, Math.sin(ph)*th.speed,
-          Math.sin(th2)*Math.cos(ph)*th.speed, 0);
+  /* Debris leaves along the face normal, because that is where the energy went */
+  const n = Math.min(f.cells, 8192);
+  for (let i=0;i<n;i++){
+    const a2=rnd()*Math.PI*2, sp=th.speed*(0.5+rnd());
+    d.add((rnd()-0.5)*BLOCK_M, 20+(rnd()-0.5)*BLOCK_M, (rnd()-0.5)*BLOCK_M,
+          Math.cos(a2)*sp*0.35, sp*0.6, Math.sin(a2)*sp*0.35, 0);
   }
   let ticks=0, tt=0;
-  while (d.n && ticks < 600){ tt += ms(()=>d.step(1/60, null, 0)); ticks++; }
-  log(`  A shot into a sand wall at the game's 2-cell rule — ${fx(E,0)} J, which`);
-  log(`  is what section 2 says that rule is worth, not what a pellet carries.`);
-  log(`     crater      ${f.freed} cells freed, ${f.spent.toFixed(1)} J spent breaking`);
+  while (d.n && ticks < 900){ tt += ms(()=>d.step(1/60, null, 0)); ticks++; }
+  log(`  One shot (${PELLETS_PER_SHOT}x${PELLET_TNT_G} g) into a sand face — ${fx(E,0)} J.`);
+  log(`     bite        ${fx(f.cells)} cells, ${(f.depth*100).toFixed(0)} cm deep, contained to one face`);
   log(`     throw       ${th.speed.toFixed(1)} m/s, ${th.flight.toFixed(2)} s of flight`);
-  log(`     debris      ${d.stats.spawned} grains spawned, ${d.stats.capped} over the cap`);
+  log(`     debris      ${fx(d.stats.spawned)} grains, ${d.stats.capped} over the cap`);
   log(`     settled     after ${ticks} ticks (${(ticks/60).toFixed(2)} s)`);
-  log(`     COST        ${tf.toFixed(3)} ms to compute the crater, `+
-      `${tt.toFixed(2)} ms for the whole flight, ${(tt/Math.max(ticks,1)).toFixed(4)} ms/tick`);
+  log(`     COST        ${tt.toFixed(2)} ms for the whole flight, `+
+      `${(tt/Math.max(ticks,1)).toFixed(4)} ms/tick`);
   log('');
-  log('  One hit is a fraction of one frame, spread over the second it takes to');
-  log('  land. The expensive thing was never the hit, it is how many are in the');
-  log('  air at once — which is the cap, and the cap is the frame.');
+  const you = facePush(E, 1.0, 80, 0.5);
+  const close = facePush(E, 0.3, 80, 0.5);
+  log(`  And it pushes: standing 1 m off the face it shoves you at ${you.toFixed(1)} m/s,`);
+  log(`  at 0.3 m it is ${close.toFixed(1)} m/s, past one block it is ${facePush(E, 3.0, 80, 0.5).toFixed(1)}.`);
+  log('  Firing at the floor under you is therefore a jump. Nobody asked for that;');
+  log('  it falls out of the round being a charge, and it should be found on');
+  log('  purpose rather than by accident.');
 }
 log('');
 log('=== done ===');

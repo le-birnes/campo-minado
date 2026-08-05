@@ -38,7 +38,8 @@
    ========================================================================== */
 
 /* Cell size. BLOCK/16 is the world's grain: 2.8 m / 16 = 0.175 m. */
-const G_CELL = 2.8/16;
+const BLOCK_M = 2.8;                       // the game's block edge, metres
+const G_CELL  = BLOCK_M/16;
 
 /* Materials, as specific energies. bind is J per cubic metre of material
    liberated; dens is kg/m^3. Taken from matter.js so there is one table, not
@@ -220,4 +221,107 @@ class Debris {
     }
     return this.n;
   }
+}
+
+/* ============================================================================
+   THE ROUND IS A CHARGE — our gun fires mini TNT that goes off on impact
+   ============================================================================
+   Marcelo: "I want OUR GUN to shoot mini tnt's that blow on impact ... Gun
+   pellet has 3g of tnt worth, shooting 8 at a time combines it to 24 grams."
+
+   This is the right way round, and it removes the fudge the last section asked
+   for. A pellet does not need a declared SHOT_ENERGY that quietly contradicts
+   its own mass and speed — it needs to BE an explosive, and then its energy is
+   just its charge. Nothing is invented: 4.6 MJ/kg is TNT, the pellet's own
+   kinetic energy is added because it is really there, and everything the blast
+   does comes out of the model that was already here.
+
+   The kinetic term is kept even though it is negligible — 12 J against 13,800 —
+   precisely so that it is visible how negligible it is. A round that was mostly
+   momentum and barely any charge would come out right too. */
+const TNT_J_PER_KG   = 4.6e6;
+const PELLET_TNT_G   = 3;                  // grams of TNT per pellet
+const PELLETS_PER_SHOT = 8;                // and they land together
+
+function chargeEnergy(grams, kineticJ){ return grams/1000*TNT_J_PER_KG + (kineticJ||0); }
+const shotEnergy = (pellets, grams) =>
+  chargeEnergy((pellets||PELLETS_PER_SHOT)*(grams||PELLET_TNT_G));
+
+/* How many shots to open a hole of a given radius, and to remove a whole block.
+   The second one is the question the GAME asks, because the game destroys
+   blocks, not cells. */
+function shotsForRadius(mat, rCells, pellets, grams){
+  return energyForRadius(mat, rCells) / shotEnergy(pellets, grams);
+}
+
+/* ---------------------------------------------------------------------------
+   NO SPREAD — the force is contained in the face that was shot
+   ---------------------------------------------------------------------------
+   Marcelo: "contain so that one shot doesn't go out blowing many stuff ...
+   the act is to contain the force into the cubic lattice's shot face."
+
+   So the blast is NOT a hemisphere. A free charge radiates in every direction
+   and a hemisphere is what it carves; this round does not get to do that. Its
+   energy is channelled into the FACE it struck and drives inward along that
+   face's normal, so the crater is a box the width of one block face and
+   however deep the budget reaches — and the blocks either side of it are not
+   touched at all, whatever the charge.
+
+   That is a gun quality rather than physics, and naming it as one keeps it
+   honest: "no spread", to be switchable later, always on for now.
+
+   What it changes about the arithmetic is only the SHAPE. The budget still
+   buys the same number of cells — energy in equals work done, unchanged — but
+   they stack as full layers off one face instead of spreading as a bowl. Which
+   means the number that matters to the game becomes DEPTH, and a block is
+   through when the layers reach the far side.
+
+   The lateral cap is what does the containing: a face is div*div cells, so no
+   matter how big the charge, one shot can only ever deepen one block. */
+function faceBlast(mat, E, div){
+  const d = div||16;
+  const face = d*d;                                  // cells in one block face
+  const n = cellsFreed(mat, E);
+  const layers = n/face;                             // in cells of depth
+  return {
+    cells:  Math.min(n, face*d),                     // it stops at the far side
+    face, depth: Math.min(layers, d)*G_CELL,         // metres bitten out
+    layers, through: layers >= d,
+    wasted: Math.max(0, n - face*d)                  // energy past the far side
+  };
+}
+/* How many of these shots to take a whole block apart. This is the question
+   the GAME asks, because the game destroys blocks and not cells. */
+function shotsForBlock(mat, div, pellets, grams){
+  const d = div||16;
+  return (d*d*d * cellBreakCost(mat) / BREAK_SHARE) / shotEnergy(pellets, grams);
+}
+/* And run it backwards: what would a material have to be BOUND at for a given
+   number of shots to take a block? The answer to "5 shots should destroy rock"
+   is a number, and it is either rock's or it is not. */
+function bindForShots(shots, div, pellets, grams){
+  const d = div||16;
+  return BREAK_SHARE * shots * shotEnergy(pellets, grams) /
+         (d*d*d * G_CELL*G_CELL*G_CELL);
+}
+
+/* ---------------------------------------------------------------------------
+   AND WHAT IT DOES TO THINGS THAT ARE NOT WALLS
+   ---------------------------------------------------------------------------
+   Contained means contained for bodies too, or the round is a grenade again by
+   the back door. The push reaches one block from the face and no further, and
+   it points along the face normal — so it shoves what is standing in front of
+   what you shot, and nothing behind you.
+
+   This is what makes firing at the floor at your feet lift you: a consequence
+   rather than a feature, and worth knowing before it is found by accident. */
+function facePush(E, r, mass, area, eff){
+  if (r > BLOCK_M) return 0;                         // one block, then nothing
+  /* The jet leaves the face as a face-sized front and widens as it goes, so
+     what a body intercepts is its own area against (BLOCK + r)^2 rather than
+     against the bare face. Without the r the push came out identical at 30 cm
+     and at a metre, which is not a blast, it is a switch. */
+  const w = BLOCK_M + r;
+  const share = E * (area||0.5) / (w*w);
+  return Math.sqrt(2*Math.min(share, E)*(eff===undefined?0.25:eff)/mass);
 }
