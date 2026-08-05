@@ -1,0 +1,198 @@
+<!doctype html><meta charset="utf-8"><title>the stir</title>
+<body style="background:#111;color:#ddd;font:13px ui-monospace,monospace;padding:12px">
+<pre id="out">running…</pre>
+<script src="impact.js"></script>
+<script>
+const L=[],log=s=>L.push(s);
+const ms=f=>{const t=performance.now();f();return performance.now()-t;};
+const fx=(n,d=0)=>n.toLocaleString('en-US',{maximumFractionDigits:d});
+
+log('=== THE STIR — what a hit does to the particles around it ===');
+log('');
+log(`  Cell ${G_CELL.toFixed(3)} m (BLOCK/16). Nothing below is tuned: the crater, the`);
+log('  speed and the flight time all fall out of ONE energy and the material.');
+log('');
+
+/* ---- 0. what a pellet carries ---- */
+log('--- 0. WHAT A PELLET IS CARRYING ---');
+log('');
+const PEL_SPD = 101;                       // the game's own pellet speed, m/s
+log('     pellet mass    speed      kinetic energy');
+const PELLETS=[];
+for (const gr of [1.2, 2.4, 4.8]){         // grams: buckshot-ish
+  const m = gr/1000, E = 0.5*m*PEL_SPD*PEL_SPD;
+  PELLETS.push({gr, m, E});
+  log(`     ${gr.toFixed(1)} g`.padEnd(18)+`${PEL_SPD} m/s`.padEnd(11)+`${E.toFixed(1)} J`);
+}
+log('');
+log('  A shotgun puts several of those into the same place at once, so the');
+log('  energy that matters is the pellet times how many land together.');
+log('');
+
+/* ---- 1. the crater ---- */
+log('--- 1. THE CRATER: WHAT A GIVEN ENERGY CAN ACTUALLY BREAK ---');
+log('');
+log('  Energy in equals work done. One cell costs bind * g^3 to free, so the');
+log('  crater holds however many cells the hit could pay for. The flood spends');
+log('  the same budget through the real material and must agree on uniform');
+log('  ground - if it did not, one of them would be lying.');
+log('');
+log('     material   cost of ONE cell     energy      cells   radius   flood');
+const all = () => true;
+for (const mat of ['sand','coal','rock','iron']){
+  for (const E of [1e2, 1e4, 1e6]){
+    const f = floodCrater(all, 0,0,0, mat, E);
+    log(`     ${mat.padEnd(8)} ${fx(cellBreakCost(mat),1).padStart(14)} J  ${fx(E).padStart(9)} J   `+
+        `${fx(cellsFreed(mat,E)).padStart(7)}   ${craterRadius(mat,E).toFixed(2).padStart(5)} m   ${fx(f.freed).padStart(6)}`);
+  }
+}
+log('');
+log('  One cell of sand is 0.175 m on a side - a shovelful - and freeing it');
+log('  costs 107 J. A 2.4 g pellet at 101 m/s carries 12. So a single pellet');
+log('  CANNOT MOVE ONE CELL OF SAND, and that is not a bug in the model, it is');
+log('  what buckshot does to a sand bank. The model only becomes wrong if it is');
+log('  asked to explain the game.');
+log('');
+
+/* ---- 2. Marcelo's own spec, checked ---- */
+log('--- 2. "EACH SHOT BURNS 2 PARTICLES RADIUS" — THE BILL FOR IT ---');
+log('');
+log('  That number was fixed by hand long before any of this, so run it');
+log('  backwards: what would a shot have to be worth to clear a 2-cell radius?');
+log('');
+log('     material    energy for r=2 cells      that is...');
+const PEL = PELLETS[1];
+const TNT = 4.6e6;                                   // J per kg
+for (const mat of ['sand','coal','rock','iron']){
+  const need = energyForRadius(mat, 2);
+  const nPel = need/PEL.E;
+  const kg   = need/TNT;
+  log(`     ${mat.padEnd(9)} ${fx(need,0).padStart(16)} J   ${fx(nPel,0).padStart(10)} pellets`+
+      `, or ${kg < 1 ? fx(kg*1000,0)+' g' : fx(kg,1)+' kg'} of TNT`);
+}
+log('');
+log('  So the honest answer is that THE GAME\'S SHOT IS NOT A SHOTGUN. Clearing');
+log('  two cells of rock is a stick of dynamite, not buckshot, and no amount of');
+log('  tuning bind fixes that without making rock behave like foam everywhere');
+log('  else. The two systems have to be bridged ON PURPOSE:');
+log('');
+log('     SHOT_ENERGY[material] — a declared game constant, per material, that');
+log('     says what a trigger pull is worth against that stuff. Physics decides');
+log('     what an energy DOES; the game decides how much of it a shot carries.');
+log('');
+log('  Writing it that way keeps every derived quantity below honest - crater,');
+log('  speed, flight time, debris count all still come out of the energy - while');
+log('  putting the one lie in a single named place instead of smearing it');
+log('  through the material table where it would corrupt everything else.');
+log('');
+log('     material   SHOT_ENERGY for the game\'s 2-cell rule');
+for (const mat of ['sand','coal','rock','iron']){
+  log(`     ${mat.padEnd(9)} ${fx(energyForRadius(mat,2),0).padStart(16)} J`);
+}
+log('');
+
+/* ---- 3. the throw ---- */
+log('--- 3. THE THROW: HOW FAST, AND HOW LONG IT LASTS ---');
+log('');
+log('  Energies chosen to actually break something, so the trend is visible.');
+log('');
+log('     material   energy    cells freed   speed       in the air');
+for (const mat of ['sand','rock']){
+  for (const E of [1e4, 1e5, 1e6, 1e7]){
+    const t = throwOf(mat, E);
+    log(`     ${mat.padEnd(8)} ${fx(E).padStart(9)} J ${fx(t.n).padStart(11)}   `+
+        `${t.speed.toFixed(1).padStart(6)} m/s   ${t.flight.toFixed(2)} s`);
+  }
+}
+log('');
+log('  The speed does NOT run away with energy: ten times the hit frees ten');
+log('  times the mass, so the same share of energy is spread over ten times as');
+log('  much of it and the speed is flat. A bigger hit throws MORE rubble, not');
+log('  FASTER rubble - which is what an explosion looks like, and it came out of');
+log('  the arithmetic rather than being asked for. Flight time is flat with it,');
+log('  so debris lifetime is a property of the material, not of the hit.');
+log('');
+
+/* ---- 4. what flying them costs ---- */
+log('--- 4. WHAT IT COSTS TO ACTUALLY FLY THEM ---');
+log('');
+log('  A freed grain is not a falling-sand cell any more: it has a velocity, so');
+log('  it integrates and lands. This is the real budget — Marcelo\'s rule that');
+log('  visible debris is a budget rather than a consequence.');
+log('');
+log('     debris in the air    ms/tick    ns per particle');
+const floorY = 0;
+const solid = null;
+for (const n of [1000, 10000, 50000, 200000]){
+  const d = new Debris(n+16);
+  let s=99; const rnd=()=>((s=(s*1664525+1013904223)>>>0)/4294967296);
+  for (let i=0;i<n;i++){
+    const th=rnd()*Math.PI*2, ph=rnd()*Math.PI/2, v=8+rnd()*8;
+    d.add(0, 40, 0, Math.cos(th)*Math.cos(ph)*v, Math.sin(ph)*v, Math.sin(th)*Math.cos(ph)*v, 0);
+  }
+  /* time the ticks while they are all still up, which is the worst case */
+  let t=0, k=0;
+  for (; k<20 && d.n>n*0.9; k++) t += ms(()=>d.step(1/60, solid, floorY));
+  const per = t/Math.max(k,1);
+  log(`     ${fx(n).padStart(16)}   ${per.toFixed(3).padStart(7)}   ${(per/n*1e6).toFixed(1).padStart(12)}`);
+}
+log('');
+{
+  const d = new Debris(200016);
+  let s=7; const rnd=()=>((s=(s*1664525+1013904223)>>>0)/4294967296);
+  for (let i=0;i<200000;i++){
+    const th=rnd()*Math.PI*2, ph=rnd()*Math.PI/2, v=8+rnd()*8;
+    d.add(0, 40, 0, Math.cos(th)*Math.cos(ph)*v, Math.sin(ph)*v, Math.sin(th)*Math.cos(ph)*v, 0);
+  }
+  let t=0, k=0;
+  for (; k<20; k++) t += ms(()=>d.step(1/60, solid, floorY));
+  const per=t/k;
+  const budget = 4.0;                                 // ms, a physics slice
+  log(`  At ${(per/200000*1e6).toFixed(1)} ns a particle, a ${budget} ms slice flies `+
+      `${fx(Math.round(budget/(per/200000)/1000)*1000)} grains at once.`);
+  log('');
+  log('  So the cap in Debris is not a fudge, it is the frame. Past it the source');
+  log('  diminishes by the rest and no particle is made: a big hit looks big');
+  log('  without costing more than a small one, and the cost of a fight stops');
+  log('  depending on how hard anyone swings.');
+}
+log('');
+
+/* ---- 5. the stir itself ---- */
+log('--- 5. THE STIR: ONE HIT, END TO END ---');
+log('');
+{
+  /* A real hit, priced through the bridge from section 2 rather than through
+     a shotgun that cannot do it: SHOT_ENERGY for sand at the game's own rule. */
+  const mat='sand', E=energyForRadius(mat,2);
+  const tf = ms(()=>floodCrater(all,0,0,0,mat,E));
+  const f  = floodCrater(all,0,0,0,mat,E);
+  const th = throwOf(mat,E);
+  const d  = new Debris(4096);
+  let s=3; const rnd=()=>((s=(s*1664525+1013904223)>>>0)/4294967296);
+  for (const [x,y,z] of f.cells){
+    const th2=rnd()*Math.PI*2, ph=rnd()*Math.PI/2;
+    d.add(x*G_CELL, 20+y*G_CELL, z*G_CELL,
+          Math.cos(th2)*Math.cos(ph)*th.speed, Math.sin(ph)*th.speed,
+          Math.sin(th2)*Math.cos(ph)*th.speed, 0);
+  }
+  let ticks=0, tt=0;
+  while (d.n && ticks < 600){ tt += ms(()=>d.step(1/60, null, 0)); ticks++; }
+  log(`  A shot into a sand wall at the game's 2-cell rule — ${fx(E,0)} J, which`);
+  log(`  is what section 2 says that rule is worth, not what a pellet carries.`);
+  log(`     crater      ${f.freed} cells freed, ${f.spent.toFixed(1)} J spent breaking`);
+  log(`     throw       ${th.speed.toFixed(1)} m/s, ${th.flight.toFixed(2)} s of flight`);
+  log(`     debris      ${d.stats.spawned} grains spawned, ${d.stats.capped} over the cap`);
+  log(`     settled     after ${ticks} ticks (${(ticks/60).toFixed(2)} s)`);
+  log(`     COST        ${tf.toFixed(3)} ms to compute the crater, `+
+      `${tt.toFixed(2)} ms for the whole flight, ${(tt/Math.max(ticks,1)).toFixed(4)} ms/tick`);
+  log('');
+  log('  One hit is a fraction of one frame, spread over the second it takes to');
+  log('  land. The expensive thing was never the hit, it is how many are in the');
+  log('  air at once — which is the cap, and the cap is the frame.');
+}
+log('');
+log('=== done ===');
+document.getElementById('out').textContent=L.join('\n');
+document.body.dataset.r=L.join('~');
+</script></body>

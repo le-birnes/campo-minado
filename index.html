@@ -5917,17 +5917,31 @@ function checkWin(){
      as we go, and having as many flags out as there are mines is a necessary
      condition for having flagged them all, so it gates the scan down to the
      handful of moments it could possibly succeed. */
-  /* THE LAST FLAG, and nothing else. Digging the place out used to count too,
-     on the reasoning that by then only mines are left standing — but that
-     fired the finale the moment the last safe block fell, with mines still
-     unflagged, which is the wrong beat entirely. The dungeon ends when the
-     place is made safe, so: every mine under a flag, and then the thing that
-     comes for you dead. A board dug out but not flagged is not finished; the
-     flags are still there to plant, and a number will plant the last of them
-     for you if the blocks are out of reach. */
+  /* TWO WAYS TO FINISH THE DUNGEON, and it needs both.
+
+     The intended one is the last flag: you are not here to empty the place,
+     you are here to make it safe, and the finale should fire when the last
+     mine goes under a flag rather than when the last safe block falls.
+
+     But the flag alone cannot be the ONLY way out, and insisting on it was a
+     mistake that cost real games. A mine can end up with no face you can put a
+     flag on — buried behind other mines, or in a pocket with nowhere to stand
+     and no line to it — and then a board with every safe block dug and every
+     deduction made is UNWINNABLE, with nothing left to do and no way to say
+     so. That is the endgame that spins forever.
+
+     So: digging it out counts again. By the time the last safe block is gone,
+     every block still standing is a mine by definition — the place IS safe,
+     whether or not there is a flag on each of them. Both paths run through the
+     same finale, so the beat is unchanged when you earn it the intended way;
+     the dig is the floor that stops an unflaggable mine from stranding you. */
+  /* safeTotal>0 guards the degenerate case: a board that has not been generated
+     yet has 0 revealed of 0 safe, and >= would call that a win the instant the
+     level loads. The flag branch has always carried the same guard as mines>0. */
+  const dug = G.safeTotal > 0 && G.revealed >= G.safeTotal;
   const done = G.dungeon
-    ? (G.mines>0 && G.marked===G.mines && correctFlags()===G.mines)
-    : G.revealed >= G.safeTotal;
+    ? (dug || (G.mines>0 && G.marked===G.mines && correctFlags()===G.mines))
+    : dug;
   if(done && G.dungeon && !G.finale){ startFinale(); return; }
   if(done && G.dungeon && enemies.some(e=>e.hell)) return;
   if(done){
