@@ -299,3 +299,47 @@ diagonals that cross rows and planes.
 So: **smaller and lighter, both**. Six times finer at 3.3x the cost, or the same
 grain for 0.6x the cost. The earlier "15.31x" line stays retracted — this is the
 number that replaces it.
+
+---
+
+# THE SCALE, decided against the real dungeon
+
+Measured, not assumed (`tools/h_dims.js`):
+
+```
+zones=1   18x6x18  =  1,944 blocks   50x17x50 m    42,675 m3
+zones=2   18x12x18 =  3,888 blocks   50x34x50 m    85,349 m3
+zones=4   18x24x18 =  7,776 blocks   50x67x50 m   170,699 m3
+```
+
+A four-level dungeon is **170,699 m3**, of which only 1,198 blocks (15%) are air
+or puzzle - the other 6,578 are solid rock.
+
+Tets = 6 x volume / spacing^3; element = an equal-volume cube of side spacing/cbrt(6).
+
+| spacing | element | per player (2 m) | tets, whole dungeon | resident |
+|---|---|---|---|---|
+| BLOCK/8 = 0.350 m | 0.193 m | 10.4 | 23.9 M | 24 MB |
+| BLOCK/9 = 0.311 m | 0.171 m | 11.7 | 34.0 M | 34 MB |
+| **BLOCK/12 = 0.233 m** | **0.128 m** | **15.6** | **80.6 M** | **81 MB** |
+| BLOCK/16 = 0.175 m | 0.096 m | 20.8 | 191 M | 191 MB |
+| BLOCK/24 = 0.117 m | 0.064 m | 31.2 (Noita) | 645 M | 645 MB |
+| BLOCK/32 = 0.088 m | 0.048 m | 41.5 | 1,529 M | 1.5 GB |
+
+## Cube spacing BLOCK/12, element ~0.128 m
+
+It is the finest scale at which **the entire four-level dungeon fits in memory
+with every rock cell resident** - 81 MB at a byte each. That matters more than it
+sounds: it removes the whole sparse / voxelise-on-damage machinery and an entire
+class of bug about when a block becomes voxels and what happens at the seam.
+
+* **10,368 tets per block**, so one wall collapsing is 10 k cells - 40x under the
+  ~10 M active budget.
+* 15.6 elements per player height. Chunkier than Noita's 30, but a shotgun crater
+  in a 2.8 m wall is ~22 elements across, which reads as material, not bricks.
+* Sparse storage later drops it to ~26 MB and makes BLOCK/16 (0.096 m, 21 per
+  player) affordable. That is the upgrade path if the art wants finer.
+
+**And the constraint that comes with it:** at 80.6 M cells a full scan is
+**0.39 s**. The dirty rect stops being an optimisation and becomes mandatory.
+Anything that wakes the whole world is not a slowdown, it is a hang.
