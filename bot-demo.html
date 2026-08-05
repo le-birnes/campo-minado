@@ -8776,7 +8776,7 @@ const stats = { walked:0, jumps:0, shots:0, flags:0, noEffect:0,
                 bored:0, reroutes:0, kills1:0,
                 goals:0, goalDone:0, goalLost:0, goalDrop:0, hunts:0,
                 busted:0, bustOpen:0, crawlUp:0, passWon:0, passBad:0,
-                settled:0, arrived:0, perched:0 };
+                settled:0, arrived:0, perched:0, clNew:0, clDone:0 };
 
 /* ---------------- audit ---------------- */
 let baseAir = 0, baseRock = 0;
@@ -9507,6 +9507,11 @@ function newRun(){
        get, how many steps it has failed to get closer, and the ones it has
        given up on. See pickGoal. */
     goal: null, goalD: 1e9, goalAge: 0, dropped: new Set(),
+    /* The cluster it is working right now: the actual cells, not an id, because
+       ids are rebuilt from scratch and would not survive a single dig. Cells
+       only ever LEAVE this set — opened or flagged — so it shrinks to nothing
+       exactly when the cluster is resolved. */
+    clust: null, clustN: 0,
     /* Steps spent walking at a creature it cannot see. Bounded, so one that
        cannot be reached at all does not stop the run for good. */
     hunt: 0,
@@ -9591,6 +9596,16 @@ const EX = {
   perchR: 3,     // how far around a target it will look for such a spot, in cells
   perchN: 20,    // candidates it will actually cast a ray from, cheapest first
   perchD: 5,     // and only once it has ARRIVED: this many walking steps away or less
+  /* OFF until it can let go. Holding the cluster is right and Marcelo's rule
+     for releasing it is the missing half: a cluster is only abandoned when it
+     goes 50/50 and needs digging around, and then it is RESUMED from another
+     side — which is how a player behaves when the logic runs out, and the only
+     honest reason a perfect logician ever stops, since it means the clues
+     themselves are insufficient. As written there is no release at all: at 300
+     steps it matches the old behaviour exactly (147/356 either way), and by
+     1200 it is still grinding the same group. Tomorrow's job. */
+  cluster: 0,    // 1 = resolve ONE cluster of sand before starting another
+  clMin:  0,     // clusters smaller than this are not worth holding on to
   kill:  30,     // most shots poured into one enemy before breaking off
   killHell: 90   // and into a finale creature, which has real hit points
 };
@@ -9961,6 +9976,51 @@ function workNow(M, skip){
 }
 
 /* ==========================================================================
+   ONE CLUSTER AT A TIME
+   ==========================================================================
+   Marcelo, watching it work: "it does some work but it skips some mines
+   sometimes. It should resolve a cluster at a time, trying to stand close to
+   sand blocks all times until marked and dug all (except in combat)."
+
+   That is exactly what the numbers said and I had not read them that way. The
+   work list is every shut block on the BOARD, sorted by walking distance, and
+   the objective is the nearest one — so the moment a block in the next chamber
+   is a metre closer than the one behind it, a half-solved cluster is abandoned
+   with its mines still unflagged. Nothing in this file ever said "finish this
+   group first". The floor filter was a crude gesture at it and only ever
+   worked in one axis.
+
+   A cluster is the FRONTIER, not the sand: shut blocks that touch open space,
+   grouped by touching each other. All the sand in a fresh dungeon is one solid
+   mass, so grouping sand would name the whole board a cluster and change
+   nothing — but the exposed faces of it form separate rings, one around each
+   chamber the bot has dug, and those rings are what a player means by "this
+   cluster". Resolve one and it disappears: every safe block in it opened,
+   every mine in it flagged, which is precisely the condition Marcelo asked
+   for.
+
+   Combat is untouched. Enemies are rung 1 and this is rung 10.
+   ========================================================================== */
+function clusterAt(list, seed){
+  const pool = new Set();
+  for (const w of list) pool.add(w.cell);
+  const out = new Set([seed]);
+  const q = [seed];
+  while (q.length){
+    WD();
+    const [x,y,z] = cellXYZ(q.pop());
+    for (let dy=-1; dy<=1; dy++) for (let dz=-1; dz<=1; dz++) for (let dx=-1; dx<=1; dx++){
+      if (!dx && !dy && !dz) continue;
+      const a=x+dx, b=y+dy, c=z+dz;
+      if (!inside(a,b,c)) continue;
+      const j = idx(a,b,c);
+      if (pool.has(j) && !out.has(j)){ out.add(j); q.push(j); }
+    }
+  }
+  return out;
+}
+
+/* ==========================================================================
    THE OBJECTIVE
    ==========================================================================
    Everything above this decides what is worth doing. This decides what it is
@@ -10002,12 +10062,29 @@ function pickGoal(R, M){
     }
   }
   let list = workNow(M, R.bored).filter(w => !R.dropped.has(w.cell));
+  /* HOLD THE CLUSTER. Everything above chose from the whole board; this keeps
+     the choice inside the group it is already standing in until that group has
+     nothing left to offer. */
+  if (EX.cluster && list.length){
+    if (R.clust){
+      const stay = list.filter(w => R.clust.has(w.cell));
+      if (stay.length) list = stay;
+      else { stats.clDone++; R.clust = null; }      // resolved, or nothing left reachable in it
+    }
+    if (!R.clust){
+      const c = clusterAt(list, list[0].cell);
+      if (c.size > EX.clMin){
+        R.clust = c; R.clustN = c.size; stats.clNew++;
+        list = list.filter(w => c.has(w.cell));
+      }
+    }
+  }
   if (!list.length){
     /* Out of anywhere to go: forget both grudges and look again with clear
        eyes. Refusing to reconsider is how a bot decides a solvable board is
        finished and stands still next to the rest of it. */
     if (R.bored.size || R.dropped.size){
-      R.bored.clear(); R.been.clear(); R.dropped.clear(); stats.reroutes++;
+      R.bored.clear(); R.been.clear(); R.dropped.clear(); R.clust = null; stats.reroutes++;
       list = workNow(M, null);
     }
   }
@@ -10719,6 +10796,7 @@ if (/[?&]floors/.test(location.search)){
     if (shut||stand||mines) log(`  y=${y}  shut ${shut}  standable ${stand}  mines left ${mines}`);
   }
 }
+log(`clusters: ${stats.clNew} taken up, ${stats.clDone} worked out to nothing`);
 log(`the perch: ${stats.perched} routes aimed at a spot that could SEE the target`);
 log(`landing: ${stats.settled} ticks spent putting its feet down before deciding anything, `+
     `${stats.arrived} objectives reached but impossible to open`);
