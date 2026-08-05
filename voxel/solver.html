@@ -2,56 +2,74 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Matter solver</title>
 <style>
-:root{--bg:#12131a;--fg:#dfe2ea;--dim:#8d93a3;--line:#2a2d38;--card:#1a1c25;--hi:#ffb347;--ok:#7ec87e;--warn:#ff7b6b}
-@media(prefers-color-scheme:light){:root{--bg:#f6f7fa;--fg:#1a1c24;--dim:#5d6472;--line:#dcdfe8;--card:#fff;--hi:#b06c00}}
+:root{--bg:#12131a;--fg:#dfe2ea;--dim:#8d93a3;--line:#2a2d38;--card:#1a1c25;--head:#20232e;--hi:#ffb347;--ok:#7ec87e}
+@media(prefers-color-scheme:light){:root{--bg:#f6f7fa;--fg:#1a1c24;--dim:#5d6472;--line:#dcdfe8;--card:#fff;--head:#eef0f5;--hi:#b06c00}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;padding:16px}
 h1{font-size:19px;margin:0 0 2px}
 h2{font-size:13px;text-transform:uppercase;letter-spacing:.09em;color:var(--dim);margin:22px 0 8px;font-weight:600}
-.sub{color:var(--dim);margin:0 0 18px;max-width:75ch}
-.wrap{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:18px}
-@media(max-width:900px){.wrap{grid-template-columns:1fr}}
+.sub{color:var(--dim);margin:0 0 18px;max-width:78ch}
+.wrap{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:18px}
+@media(max-width:980px){.wrap{grid-template-columns:1fr}}
 .card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px}
-table{border-collapse:collapse;width:100%;font-size:12.5px}
-th{text-align:left;color:var(--dim);font-weight:600;padding:4px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
-td{padding:3px 6px;border-bottom:1px solid var(--line)}
-tr:hover td{background:rgba(127,127,127,.07)}
-td.n{text-align:right;font-variant-numeric:tabular-nums}
-input,select{background:transparent;color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:3px 5px;font:inherit;font-size:12.5px;width:100%}
+.scroll{max-height:520px;overflow:auto;position:relative;border:1px solid var(--line);border-radius:6px}
+table{border-collapse:separate;border-spacing:0;width:100%;font-size:12.5px}
+/* THE HEADER STAYS PUT, and so does the material's name, so a wide table can be
+   read in both directions without losing which row you are on. */
+thead th{position:sticky;top:0;z-index:3;background:var(--head);text-align:left;color:var(--dim);
+  font-weight:600;padding:6px;border-bottom:1px solid var(--line);white-space:nowrap}
+th.nm,td.nm{position:sticky;left:0;z-index:2;background:var(--card);border-right:1px solid var(--line);min-width:118px}
+thead th.nm{z-index:4;background:var(--head)}
+td{padding:4px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:hover td{background:rgba(127,127,127,.06)}
+tr:hover td.nm{background:var(--card)}
+input,select,textarea{background:transparent;color:var(--fg);border:1px solid var(--line);border-radius:4px;
+  padding:3px 5px;font:inherit;font-size:12.5px;width:100%}
+textarea{resize:vertical;min-height:2.6em;line-height:1.4}
 input[type=range]{padding:0;border:none}
-.row{display:grid;grid-template-columns:120px 1fr 74px;gap:8px;align-items:center;margin:6px 0}
+td.n input{text-align:right;font-variant-numeric:tabular-nums}
+.row{display:grid;grid-template-columns:118px 1fr 78px;gap:8px;align-items:center;margin:6px 0}
 .row label{color:var(--dim);font-size:12.5px}
 .val{text-align:right;font-variant-numeric:tabular-nums;color:var(--hi)}
-.big{font-size:26px;color:var(--hi);font-variant-numeric:tabular-nums}
+.big{font-size:24px;color:var(--hi);font-variant-numeric:tabular-nums;line-height:1.15}
 .k{color:var(--dim);font-size:12px}
-.res{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-top:10px}
-.res div{background:rgba(127,127,127,.07);border-radius:6px;padding:8px 10px}
+.res{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:10px}
+.res>div{background:rgba(127,127,127,.07);border-radius:6px;padding:8px 10px}
+.say{background:rgba(127,127,127,.07);border-radius:6px;padding:10px 12px;margin-top:10px;font-size:13px}
+.say b{color:var(--hi)}
 .tier{border-left:3px solid var(--hi);padding-left:10px;margin:10px 0}
 .tier b{color:var(--hi)}
-.bar{height:6px;background:rgba(127,127,127,.2);border-radius:3px;overflow:hidden;margin-top:5px}
-.bar i{display:block;height:100%;background:var(--ok)}
-.note{color:var(--dim);font-size:12.5px;max-width:80ch}
+.note{color:var(--dim);font-size:12.5px;max-width:82ch}
 code{background:rgba(127,127,127,.14);padding:1px 4px;border-radius:3px}
-.add{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
 button{background:transparent;border:1px solid var(--line);color:var(--fg);border-radius:5px;padding:4px 9px;font:inherit;font-size:12.5px;cursor:pointer}
 button:hover{border-color:var(--hi);color:var(--hi)}
-.scroll{max-height:420px;overflow:auto}
+.add{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center}
+.forms{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.forms>span{background:rgba(127,127,127,.1);border-radius:5px;padding:5px 9px;font-size:12.5px}
+.forms b{color:var(--hi)}
 </style></head><body>
 
 <h1>Matter solver</h1>
-<p class="sub">Every material is three numbers and a state. Everything below — how many
-grains a punch frees, how many shots a wall takes, what a thrown ingot does —
-falls out of them. Edit anything; it recomputes as you type.</p>
+<p class="sub">Every material is a few numbers, a state, and the atoms it is built from. Everything
+below — how heavy it is, what scratches it, how many grains a punch frees, and what
+<i>shape</i> the pieces come off in — falls out of them. Edit anything; it recomputes as you type.</p>
 
 <div class="wrap">
  <div class="card">
   <h2 style="margin-top:0">Materials</h2>
   <div class="scroll"><table id="mt">
-   <thead><tr><th>material</th><th>what it is / used for</th><th>molecule</th><th>hard</th><th>bind</th><th>kg/m³</th><th>collides as</th></tr></thead>
-   <tbody></tbody></table></div>
+   <thead><tr>
+     <th class="nm">material</th><th style="min-width:230px">what it is / what it is for</th>
+     <th style="min-width:150px">built from</th>
+     <th>molecule<br><span class="k">mm</span></th><th>hard<br><span class="k">Mohs</span></th>
+     <th>bind<br><span class="k">J/m³</span></th><th>density<br><span class="k">kg/m³</span></th>
+     <th>collides as</th><th style="min-width:180px">breaks into<br><span class="k">name:mm, …</span></th>
+   </tr></thead><tbody></tbody></table></div>
   <div class="add">
    <button onclick="addMat()">+ material</button>
-   <span class="k">molecule in mm · hard = scratch (Mohs) · bind = work to free 1 m³</span>
+   <button onclick="grow(1)">taller descriptions</button>
+   <button onclick="grow(-1)">shorter</button>
+   <span class="k">the header and the name column stay put while you scroll</span>
   </div>
  </div>
 
@@ -68,9 +86,11 @@ falls out of them. Edit anything; it recomputes as you type.</p>
     <option value="1.41e27">the sun</option>
    </select><span></span></div>
   <div id="obj" class="res"></div>
+  <div class="say" id="heft"></div>
 
   <h2>The interaction</h2>
   <div class="row"><label>kind</label><select id="kind">
+    <option value="saw">saw — steady abrasion</option>
     <option value="mine">mine — pick, chipping</option>
     <option value="punch">punch — bare fist</option>
     <option value="attack" selected>attack — bladed</option>
@@ -80,168 +100,219 @@ falls out of them. Edit anything; it recomputes as you type.</p>
   <div class="row"><label>tool is</label><select id="tool"></select><span></span></div>
   <div class="row"><label id="pl">force</label><input type="range" id="pow" min="1" max="100" value="45"><span class="val" id="pv"></span></div>
   <div id="out" class="res"></div>
-  <div id="dur" style="margin-top:10px"></div>
+  <div class="say" id="frag"></div>
  </div>
 </div>
 
+<h2>What the three numbers mean</h2>
+<div class="tier"><b>HARD</b> — scratch hardness, the Mohs idea. It decides <i>who marks whom</i>:
+only a harder thing scratches a softer one, and the margin decides how much comes off. Two things of
+equal hardness barely mark each other however hard you swing.</div>
+<div class="tier"><b>BIND</b> — the work it takes to free one cubic metre of the stuff. This is
+<i>toughness, and it is not hardness</i>. Flesh is soft (hardness 0.5) and binds hard: you cannot
+crumble it. Glass is hard (5.5) and binds weakly: it shatters. Bind is why a diamond can cut a rope
+badly and a blunt rock can break a window.</div>
+<div class="tier"><b>MOLECULE</b> — the smallest piece that can come off, in millimetres. It is dust:
+iron at half a millimetre, rock sand at two. The threshold to free one molecule is
+<code>bind × its volume</code>, which is what lets one table span a scratched blade and a shot star.</div>
+
+<h2>The same material breaks at different sizes</h2>
+<p class="note">Wood is carbon, hydrogen and oxygen with a little nitrogen — but you almost never
+meet wood as its molecule. <b>Saw it and you get dust. Chop it and you get splinters and sticks.
+Throw it against a wall and you get logs.</b> Same material, same table; the <i>interaction</i>
+decides which size the pieces come off in. That is the <code>breaks into</code> column, and the
+readout under the interaction tells you what you would actually be holding.</p>
+
 <h2>Does everything really collide as grains?</h2>
-<p class="note">You asked me to think this rather than take it as read, and the honest answer is
-<b>no — and that is a large saving.</b> Three tiers, and only the middle one needs grain-by-grain collision:</p>
-
-<div class="tier"><b>WHOLE</b> — rock, metal, wood, ice, bone, a star. These never collide as grains
-because they are never grains: they are one record with a wear counter, and grains only exist once
-liberated. Most of the world, by volume, is this tier. <span class="k">cost: one object</span></div>
-
-<div class="tier"><b>GRANULAR</b> — sand, gravel, ash, soot, powder, snow, salt, gunpowder. These are
-the only materials that need real grain collision: they pile, they hold an angle of repose, they pour
-through a gap. <span class="k">cost: the falling-sand grid, and only where grains exist</span></div>
-
-<div class="tier"><b>FLUID &amp; GAS</b> — water, oil, lava, acid, blood, steam, smoke, plasma. These
-never collide as grains either. They move by density and pressure, which is cheaper than contact:
-who sinks through whom is one comparison. <span class="k">cost: a flow field, no contacts at all</span></div>
-
-<p class="note">So the expensive answer — every particle testing every neighbour — is needed for perhaps
-a tenth of what is on screen. The rest is either a whole object or a fluid, and neither has grains to
-collide. That is why <code>matter.js</code> keeps objects intact and only spawns particles where matter
-has actually come off.</p>
+<p class="note">No — and that is a large saving. Three tiers, and only the middle needs grain-by-grain contact:</p>
+<div class="tier"><b>WHOLE</b> — rock, metal, wood, ice, bone, a star. Never grains because they are
+never grains: one record with a wear counter, and grains exist only once liberated. Most of the world by volume.</div>
+<div class="tier"><b>GRANULAR</b> — sand, gravel, ash, soot, powder, snow, salt, gunpowder. The only tier
+that needs real grain collision: piling, holding an angle of repose, pouring through a gap.</div>
+<div class="tier"><b>FLUID &amp; GAS</b> — water, oil, lava, acid, steam, smoke, plasma. No contacts at
+all; they move by density, which is one comparison and cheaper than contact.</div>
 
 <script>
-/* Three numbers and a state. `bind` is a SPECIFIC ENERGY - the work to liberate
-   one cubic metre - so the threshold to free ONE molecule is bind x its volume.
-   That is what lets one table span a scratched blade and a shot star. */
-const G=0,L=1,F=2,W=3;           // granular, liquid, gas, whole
-const STATE=['granular','liquid','gas','whole'];
+const G=0,L=1,F=2,W=3, STATE=['granular','liquid','gas','whole'];
+/* name, use, atoms, molecule mm, hard, bind, density, state, fracture forms */
 let MAT=[
- // name, use, molecule mm, hardness, bind, density, collides-as
- ['bedrock','the edge of the world; never yields',10,9,1e15,3200,W],
- ['granite','deep cavern wall, structural',2,6,4e6,2700,W],
- ['rock','common cavern wall; crumbles to sand',2,5,3e6,2700,W],
- ['cinderstone','the breakable coat; one layer thick',4,4,5e6,2400,W],
- ['obsidian','glassy, hard, shatters rather than wears',1,5.5,2e6,2600,W],
- ['ice','cold structure; melts to water',3,1.5,4e5,917,W],
- ['wood','burns; light structure and hafts',3,2,8e5,700,W],
- ['glass','windows, vials; shatters',1,5.5,1.2e6,2500,W],
- ['concrete','built walls, rubble when broken',3,4,3.5e6,2400,W],
- ['iron','mines, tools, cheap blades',0.5,4.5,5e8,7870,W],
- ['steel','the good blade; scratches iron',0.4,6.5,8e8,7850,W],
- ['bronze','soft alloy, resists corrosion',0.6,3.5,4e8,8800,W],
- ['copper','wire, trim, soft',0.6,3,3e8,8960,W],
- ['gold','heavy, soft, worth carrying',0.5,2.5,2e8,19300,W],
- ['lead','very heavy, very soft; sling shot',0.6,1.5,1.2e8,11340,W],
- ['diamond','cuts everything; almost nothing cuts it',0.3,10,4e9,3510,W],
- ['bone','skeleton, constructs, ammunition',1.5,3,1e6,1900,W],
- ['flesh','the body; soft but hard to tear',1,0.5,2e5,1050,W],
- ['chitin','insect armour; light and stiff',0.8,2.5,7e5,1300,W],
- ['sand','pours, piles, buries; the mine block',2,4,1e4,1600,G],
- ['gravel','coarse fill; rolls',6,5,3e4,1700,G],
- ['ash','what fire leaves; drifts',0.5,1,4e3,700,G],
- ['soot','clings, blackens, burns again',0.2,1,2e3,400,G],
- ['gunpowder','granular and it detonates',0.6,1,5e3,1200,G],
- ['snow','packs, melts to water',1,0.5,3e3,300,G],
- ['salt','preserves; dissolves in water',1,2.5,2e4,2160,G],
- ['coal','burns hot and long; crumbles',3,2,1e6,1400,W],
- ['water','70% of you; puts out fire; makes steam',0.5,0,8e4,1000,L],
- ['blood','what wet things lose',0.5,0,7e4,1060,L],
- ['oil','floats on water; burns',0.5,0,6e4,900,L],
- ['acid','dissolves what it touches',0.5,0,5e4,1200,L],
- ['lava','melts and re-freezes to rock',0.8,0,3e5,3100,L],
- ['mud','slows you; dries to clay',1.5,0.5,2e4,1800,L],
- ['honey','sticky, slow, edible',0.5,0,9e4,1420,L],
- ['steam','lava met water; rises',0.05,0,1e3,0.6,F],
- ['smoke','fire leaves it; blinds',0.05,0,5e2,1.2,F],
- ['flammable gas','waits for a spark',0.05,0,8e2,0.7,F],
- ['hydrogen','what a star is made of',0.05,0,1e13,70,F],
- ['plasma','the inside of a star; burns anything',0.02,0,1e14,1e-4,F]
+ ['bedrock','the edge of the world; never yields','silicon, oxygen, iron, magnesium',10,9,1e15,3200,W,'grit:8, slab:900'],
+ ['granite','deep cavern wall; structural','silicon, oxygen, aluminium, potassium',2,6,4e6,2700,W,'dust:2, chip:25, cobble:180, boulder:1200'],
+ ['rock','common cavern wall; crumbles to sand','silicon, oxygen, aluminium, iron',2,5,3e6,2700,W,'sand:2, chip:20, cobble:150, boulder:900'],
+ ['cinderstone','the breakable coat, one layer thick','silicon, oxygen, calcium, carbon',4,4,5e6,2400,W,'ash:4, shard:40, slab:700'],
+ ['obsidian','glassy; shatters rather than wears','silicon, oxygen',1,5.5,2e6,2600,W,'dust:1, flake:15, blade:90'],
+ ['ice','cold structure; melts to water','hydrogen, oxygen',3,1.5,4e5,917,W,'crystal:3, shard:60, floe:800'],
+ ['wood','burns; hafts, beams, planks','carbon, hydrogen, oxygen, nitrogen',1,2,8e5,700,W,'sawdust:1, splinter:30, stick:300, log:2000'],
+ ['glass','windows and vials; shatters','silicon, oxygen, sodium, calcium',1,5.5,1.2e6,2500,W,'powder:1, shard:40, pane:600'],
+ ['concrete','built walls; rubble when broken','calcium, silicon, oxygen, aluminium',3,4,3.5e6,2400,W,'dust:3, gravel:30, rubble:250, slab:1500'],
+ ['iron','mines, tools, cheap blades','iron, carbon',0.5,4.5,5e8,7870,W,'filings:0.5, chip:8, bar:400'],
+ ['steel','the good blade; scratches iron','iron, carbon, manganese',0.4,6.5,8e8,7850,W,'filings:0.4, chip:6, bar:400'],
+ ['bronze','soft alloy; resists corrosion','copper, tin',0.6,3.5,4e8,8800,W,'filings:0.6, chip:9, ingot:200'],
+ ['copper','wire and trim; soft','copper',0.6,3,3e8,8960,W,'filings:0.6, wire:3, ingot:200'],
+ ['gold','heavy, soft, worth carrying','gold',0.5,2.5,2e8,19300,W,'dust:0.5, flake:4, ingot:150'],
+ ['lead','very heavy, very soft; sling shot','lead',0.6,1.5,1.2e8,11340,W,'dust:0.6, shot:9, ingot:150'],
+ ['diamond','cuts everything; almost nothing cuts it','carbon',0.3,10,4e9,3510,W,'dust:0.3, chip:3, stone:12'],
+ ['bone','skeleton, constructs, ammunition','calcium, phosphorus, oxygen, carbon',1.5,3,1e6,1900,W,'meal:1.5, splinter:25, shaft:200'],
+ ['flesh','the body; soft but hard to tear','carbon, hydrogen, oxygen, nitrogen',1,0.5,2e5,1050,W,'mince:1, gobbet:25, limb:400'],
+ ['chitin','insect armour; light and stiff','carbon, hydrogen, oxygen, nitrogen',0.8,2.5,7e5,1300,W,'dust:0.8, flake:12, plate:110'],
+ ['sand','pours, piles, buries; the mine block','silicon, oxygen',2,4,1e4,1600,G,'grain:2'],
+ ['gravel','coarse fill; rolls','silicon, oxygen, calcium',6,5,3e4,1700,G,'stone:6'],
+ ['ash','what fire leaves; drifts','carbon, potassium, calcium',0.5,1,4e3,700,G,'fleck:0.5'],
+ ['soot','clings, blackens, burns again','carbon',0.2,1,2e3,400,G,'fleck:0.2'],
+ ['gunpowder','granular, and it detonates','potassium, nitrogen, oxygen, sulfur, carbon',0.6,1,5e3,1200,G,'corn:0.6'],
+ ['snow','packs; melts to water','hydrogen, oxygen',1,0.5,3e3,300,G,'flake:1, ball:120'],
+ ['salt','preserves; dissolves in water','sodium, chlorine',1,2.5,2e4,2160,G,'crystal:1'],
+ ['coal','burns hot and long; crumbles','carbon, hydrogen, sulfur',3,2,1e6,1400,W,'dust:3, lump:70, seam:800'],
+ ['water','70% of you; kills fire; makes steam','hydrogen, oxygen',0.5,0,8e4,1000,L,'drop:0.5'],
+ ['blood','what wet things lose','hydrogen, oxygen, iron, carbon',0.5,0,7e4,1060,L,'drop:0.5'],
+ ['oil','floats on water; burns','carbon, hydrogen',0.5,0,6e4,900,L,'drop:0.5'],
+ ['acid','dissolves what it touches','hydrogen, sulfur, oxygen',0.5,0,5e4,1200,L,'drop:0.5'],
+ ['lava','melts, then freezes back to rock','silicon, oxygen, iron, magnesium',0.8,0,3e5,3100,L,'gob:0.8'],
+ ['mud','slows you; dries to clay','silicon, oxygen, aluminium, hydrogen',1.5,0.5,2e4,1800,L,'clod:1.5'],
+ ['honey','sticky, slow, edible','carbon, hydrogen, oxygen',0.5,0,9e4,1420,L,'drop:0.5'],
+ ['steam','lava met water; rises','hydrogen, oxygen',0.05,0,1e3,0.6,F,'wisp:0.05'],
+ ['smoke','fire leaves it; blinds','carbon, hydrogen, oxygen',0.05,0,5e2,1.2,F,'wisp:0.05'],
+ ['flammable gas','waits for a spark','carbon, hydrogen',0.05,0,8e2,0.7,F,'wisp:0.05'],
+ ['hydrogen','what a star is made of','hydrogen',0.05,0,1e13,70,F,'wisp:0.05'],
+ ['plasma','the inside of a star; burns anything','hydrogen, helium',0.02,0,1e14,1e-4,F,'wisp:0.02']
 ];
-/* how the tool delivers work: scratch is hardness-driven and frees fine dust;
-   shock ignores hardness and argues with bind */
+const N={NAME:0,USE:1,ATOM:2,MOL:3,HARD:4,BIND:5,DENS:6,STATE:7,FORM:8};
+
+/* scratch is hardness-driven and frees dust; shock ignores hardness and argues
+   with bind. `size` says WHICH fracture form the interaction tends to produce:
+   0 = the finest the material has, 1 = the coarsest. */
 const KIND={
- mine  :{scratch:0.45,shock:0.55,label:'swing force',e:12, tip:'repeated chipping; what actually yields ore'},
- punch :{scratch:0.05,shock:0.95,label:'punch force',e:5,  tip:'blunt, and it hurts you back'},
- attack:{scratch:0.85,shock:0.15,label:'blow force', e:20, tip:'a blade scratches; the harder edge wins'},
- throw :{scratch:0.15,shock:0.85,label:'throw speed',e:1,  tip:'energy is one half m v squared - mass matters most'},
- shot  :{scratch:0.35,shock:0.65,label:'pellet speed',e:1, tip:'one pellet; a shot is eighteen of them'}
+ saw   :{scratch:0.95,shock:0.05,e:8, size:0.00,label:'stroke force',tip:'steady abrasion — this is how you get dust and nothing else'},
+ mine  :{scratch:0.45,shock:0.55,e:12,size:0.35,label:'swing force', tip:'chipping; what actually yields ore'},
+ punch :{scratch:0.05,shock:0.95,e:5, size:0.55,label:'punch force', tip:'blunt, and it hurts you back'},
+ attack:{scratch:0.85,shock:0.15,e:20,size:0.25,label:'blow force',  tip:'a blade scratches; the harder edge wins'},
+ throw :{scratch:0.15,shock:0.85,e:1, size:0.90,label:'throw speed', tip:'energy is ½mv² — the mass does the work'},
+ shot  :{scratch:0.35,shock:0.65,e:1, size:0.15,label:'pellet speed',tip:'one pellet; a full shot is eighteen'}
 };
-const PER_GRAIN=1000;                       // molecules in one grain you can see
-const molVol=m=>Math.pow(m[2]/1000,3)/6;    // one Kuhn tet of that molecule
-const fx=(n,d=0)=>!isFinite(n)?'∞':n>=1e15?n.toExponential(2):n.toLocaleString('en-US',{maximumFractionDigits:d});
+const PER_GRAIN=1000;
+const molVol=m=>Math.pow(m[N.MOL]/1000,3)/6;
+const fx=(n,d=0)=>!isFinite(n)?'∞':Math.abs(n)>=1e15?n.toExponential(2):n.toLocaleString('en-US',{maximumFractionDigits:d});
+const forms=m=>String(m[N.FORM]).split(',').map(s=>{const p=s.split(':');return{n:(p[0]||'').trim(),mm:parseFloat(p[1])||1};})
+                .filter(f=>f.n).sort((a,b)=>a.mm-b.mm);
+let ROWS=3;
 
 function drawMats(){
  const tb=document.querySelector('#mt tbody'); tb.innerHTML='';
  MAT.forEach((m,i)=>{
+  const t=(k,ta)=>ta?`<td><textarea rows="${ROWS}" data-i="${i}" data-k="${k}">${m[k]}</textarea></td>`
+                    :`<td class="n"><input value="${m[k]}" data-i="${i}" data-k="${k}"></td>`;
   const tr=document.createElement('tr');
-  const cell=(v,k,w)=>`<td class="${k==2||k>2?'n':''}"><input value="${v}" data-i="${i}" data-k="${k}" style="width:${w||'100%'}"></td>`;
-  tr.innerHTML=`<td><input value="${m[0]}" data-i="${i}" data-k="0"></td>`+
-    `<td><input value="${m[1]}" data-i="${i}" data-k="1"></td>`+
-    cell(m[2],2)+cell(m[3],3)+cell(m[4],4)+cell(m[5],5)+
-    `<td><select data-i="${i}" data-k="6">${STATE.map((s,j)=>`<option value="${j}" ${j==m[6]?'selected':''}>${s}</option>`).join('')}</select></td>`;
+  tr.innerHTML=`<td class="nm"><input value="${m[N.NAME]}" data-i="${i}" data-k="0"></td>`+
+   t(N.USE,1)+t(N.ATOM,1)+t(N.MOL)+t(N.HARD)+t(N.BIND)+t(N.DENS)+
+   `<td><select data-i="${i}" data-k="${N.STATE}">${STATE.map((s,j)=>`<option value="${j}" ${j==m[N.STATE]?'selected':''}>${s}</option>`).join('')}</select></td>`+
+   t(N.FORM,1);
   tb.appendChild(tr);
  });
  tb.oninput=e=>{
   const i=+e.target.dataset.i,k=+e.target.dataset.k;
-  MAT[i][k]=(k===0||k===1)?e.target.value:+e.target.value;
-  fillSelects(); go();
+  MAT[i][k]=[N.NAME,N.USE,N.ATOM,N.FORM].includes(k)?e.target.value:+e.target.value;
+  if(k===N.NAME) fillSelects();
+  go();
  };
 }
-function addMat(){ MAT.push(['new material','describe it',1,3,1e6,2000,W]); drawMats(); fillSelects(); go(); }
+function addMat(){ MAT.push(['new material','describe it','carbon',1,3,1e6,2000,W,'dust:1, chunk:40']); drawMats(); fillSelects(); go(); }
+function grow(d){ ROWS=Math.max(2,Math.min(10,ROWS+d*2)); drawMats(); }
 function fillSelects(){
- const a=document.getElementById('mat'), b=document.getElementById('tool');
- const ka=a.value,kb=b.value;
- const opts=MAT.map((m,i)=>`<option value="${i}">${m[0]}</option>`).join('');
- a.innerHTML=opts; b.innerHTML=opts;
- a.value=ka||MAT.findIndex(m=>m[0]==='rock'); b.value=kb||MAT.findIndex(m=>m[0]==='steel');
+ const a=document.getElementById('mat'),b=document.getElementById('tool');
+ const ka=a.value,kb=b.value, o=MAT.map((m,i)=>`<option value="${i}">${m[N.NAME]}</option>`).join('');
+ a.innerHTML=o; b.innerHTML=o;
+ a.value=ka!==''&&ka!=null?ka:MAT.findIndex(m=>m[N.NAME]==='wood');
+ b.value=kb!==''&&kb!=null?kb:MAT.findIndex(m=>m[N.NAME]==='steel');
  if(a.selectedIndex<0)a.selectedIndex=0; if(b.selectedIndex<0)b.selectedIndex=0;
+}
+
+/* Plain language for the two numbers people actually feel. */
+function heftWords(mass,dens){
+ const d = dens>15000?'extraordinarily dense — it feels wrong in the hand':
+           dens>7000 ?'dense, the weight of metal':
+           dens>2200 ?'the heft of stone':
+           dens>900  ?'about the weight of water':
+           dens>200  ?'light for its size':'barely there';
+ const c = mass<0.05?'you would not notice carrying it':
+           mass<2   ?'one hand, easily':
+           mass<25  ?'one hand, and you would feel it':
+           mass<80  ?'both arms, briefly':
+           mass<1000?'you do not lift this':'it is not a thing that gets lifted';
+ return d+'. '+c+'.';
+}
+function hardWords(h,name){
+ const softer=MAT.filter(m=>m[N.HARD]<h-0.4).map(m=>m[N.NAME]);
+ const harder=MAT.filter(m=>m[N.HARD]>h+0.4).map(m=>m[N.NAME]);
+ const s=softer.length?softer.slice(-3).join(', '):'nothing here';
+ const r=harder.length?harder.slice(0,3).join(', '):'nothing here';
+ return `hardness ${h} — it marks ${s}; it is marked by ${r}.`;
+}
+function bindWords(b){
+ return b>=1e12?'bound beyond any tool in the game — nothing frees it':
+        b>=1e8 ?'binds like metal: hard to free anything, so it wears rather than breaks':
+        b>=1e6 ?'binds like stone: chips and crumbles under a real blow':
+        b>=1e5 ?'binds like flesh or wood: tears, does not crumble':
+        b>=1e4 ?'barely bound — it is already nearly loose':'not bound at all; it simply moves';
 }
 
 function go(){
  const tgt=MAT[+document.getElementById('mat').value];
  const tool=MAT[+document.getElementById('tool').value];
+ if(!tgt||!tool) return;
  const vol=+document.getElementById('shape').value;
- const kindKey=document.getElementById('kind').value, K=KIND[kindKey];
- const pow=+document.getElementById('pow').value;
+ const kk=document.getElementById('kind').value, K=KIND[kk], pow=+document.getElementById('pow').value;
  document.getElementById('pl').textContent=K.label;
  document.getElementById('pv').textContent=pow;
 
- const mass=vol*tgt[5], mols=vol/molVol(tgt);
+ const mass=vol*tgt[N.DENS], mols=vol/molVol(tgt);
  document.getElementById('obj').innerHTML=
   `<div><div class="k">mass</div><div class="big">${mass>=1000?fx(mass/1000,1)+' t':fx(mass,1)+' kg'}</div></div>`+
   `<div><div class="k">molecules</div><div class="big">${fx(mols)}</div></div>`+
-  `<div><div class="k">one molecule</div><div class="big">${tgt[2]} mm</div><div class="k">${STATE[tgt[6]]}</div></div>`;
+  `<div><div class="k">one molecule</div><div class="big">${tgt[N.MOL]} mm</div><div class="k">${STATE[tgt[N.STATE]]}</div></div>`;
+ document.getElementById('heft').innerHTML=
+  `<b>How it feels.</b> ${heftWords(mass,tgt[N.DENS])}<br>`+
+  `<b>How hard.</b> ${hardWords(tgt[N.HARD],tgt[N.NAME])}<br>`+
+  `<b>How bound.</b> ${bindWords(tgt[N.BIND])}<br>`+
+  `<span class="k">built from ${tgt[N.ATOM]}</span>`;
 
- /* Work delivered. THROW is the one where the material's own weight is the
-    point: energy is half m v squared, so a lead ingot hurled is a different
-    proposition from a wooden one at the same speed. */
- let work, hint='';
- if(kindKey==='throw'){
-  const tv=0.002, tm=tv*tool[5], v=pow*0.4;
+ let work,hint;
+ if(kk==='throw'){
+  const tv=0.002,tm=tv*tool[N.DENS],v=pow*0.4;
   work=0.5*tm*v*v*3;
-  hint=`a 2 L ${tool[0]} weighs ${fx(tm,1)} kg; at ${fx(v,1)} m/s that is ${fx(0.5*tm*v*v)} J`;
- } else if(kindKey==='shot'){
-  const v=pow*13, pm=0.0000015*tool[5];
+  hint=`a 2 L lump of ${tool[N.NAME]} weighs ${fx(tm,1)} kg; at ${fx(v,1)} m/s that is ${fx(0.5*tm*v*v)} J`;
+ } else if(kk==='shot'){
+  const v=pow*13,pm=0.0000015*tool[N.DENS];
   work=0.5*pm*v*v*0.35;
-  hint=`one pellet of ${tool[0]}, ${fx(pm*1000,2)} g at ${fx(v)} m/s`;
+  hint=`one pellet of ${tool[N.NAME]}, ${fx(pm*1000,2)} g at ${fx(v)} m/s`;
  } else { work=pow*K.e; hint=K.tip; }
 
- const edge=Math.max(0,tool[3]-tgt[3])/Math.max(1,tool[3]);
- const eff=K.scratch*edge+K.shock*0.35;
- const applied=work*eff;
- const need=tgt[4]*molVol(tgt);
+ const edge=Math.max(0,tool[N.HARD]-tgt[N.HARD])/Math.max(1,tool[N.HARD]);
+ const applied=work*(K.scratch*edge+K.shock*0.35);
+ const need=tgt[N.BIND]*molVol(tgt);
  const freed=Math.max(0,Math.floor(applied/need));
- const lostVol=Math.min(freed*molVol(tgt),vol);
- const grains=Math.floor(freed/PER_GRAIN);
- const pct=vol>0?lostVol/vol*100:0;
+ const lost=Math.min(freed*molVol(tgt),vol);
  const hits=freed>0?Math.ceil(vol/(freed*molVol(tgt))):Infinity;
 
  document.getElementById('out').innerHTML=
   `<div><div class="k">molecules freed</div><div class="big">${fx(freed)}</div><div class="k">per hit</div></div>`+
-  `<div><div class="k">grains you can see</div><div class="big">${fx(grains)}</div><div class="k">1 grain = ${PER_GRAIN} molecules</div></div>`+
-  `<div><div class="k">dust freed</div><div class="big">${fx(lostVol*tgt[5]*1000,1)} g</div><div class="k">${pct<0.001?'<0.001':fx(pct,4)}% of it</div></div>`+
+  `<div><div class="k">grains you can see</div><div class="big">${fx(Math.floor(freed/PER_GRAIN))}</div><div class="k">1 grain = ${PER_GRAIN} molecules</div></div>`+
+  `<div><div class="k">material freed</div><div class="big">${fx(lost*tgt[N.DENS]*1000,1)} g</div><div class="k">${vol?fx(lost/vol*100,4):'0'}% of it</div></div>`+
   `<div><div class="k">hits to destroy</div><div class="big">${hits===Infinity?'never':fx(hits)}</div><div class="k">${edge<=0?'tool is not harder — shock only':'tool is harder by '+fx(edge*100)+'%'}</div></div>`;
 
- const w=Math.max(0,Math.min(100,100-Math.log10(Math.max(hits,1))/8*100));
- document.getElementById('dur').innerHTML=
-  `<div class="k">${hint}</div><div class="bar"><i style="width:${w}%"></i></div>`+
-  (tgt[6]!==W?`<div class="k" style="margin-top:6px">${tgt[0]} is <b>${STATE[tgt[6]]}</b> — it is already loose, so a hit displaces it rather than wearing it down.</div>`:'');
+ /* WHAT YOU ARE ACTUALLY HOLDING. Same material, same table — the interaction
+    picks which of its fracture sizes the pieces come off in. */
+ const F=forms(tgt);
+ const pick=F[Math.min(F.length-1,Math.round(K.size*(F.length-1)))];
+ const pv=Math.pow(pick.mm/1000,3)/6;
+ const n=pv>0?Math.max(0,Math.floor(lost/pv)):0;
+ document.getElementById('frag').innerHTML=
+  `<b>What comes off.</b> ${K.tip}.<br>`+
+  `A ${kk} on ${tgt[N.NAME]} breaks it into <b>${pick.n}</b> — about ${pick.mm} mm across — `+
+  (n>0?`roughly <b>${fx(n)}</b> of them per hit.`
+     :`and this hit frees less than one, so it only marks the surface.`)+
+  `<div class="forms">${F.map(f=>`<span>${f.n} <b>${f.mm} mm</b></span>`).join('')}</div>`+
+  (tgt[N.STATE]!==W?`<div class="k" style="margin-top:8px">${tgt[N.NAME]} is <b>${STATE[tgt[N.STATE]]}</b> — already loose, so a hit displaces it rather than wearing it down.</div>`:'')+
+  `<div class="k" style="margin-top:6px">${hint}</div>`;
 }
 drawMats(); fillSelects();
 document.querySelectorAll('#mat,#shape,#kind,#tool,#pow').forEach(e=>e.oninput=go);
