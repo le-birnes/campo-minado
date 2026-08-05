@@ -1,0 +1,162 @@
+<!doctype html><meta charset="utf-8"><title>the round</title>
+<body style="background:#111;color:#ddd;font:13px ui-monospace,monospace;padding:12px">
+<pre id="out">running…</pre>
+<script src="impact.js"></script>
+<script src="round.js"></script>
+<script>
+const L=[],log=s=>L.push(s);
+const fx=(n,d=0)=>n.toLocaleString('en-US',{maximumFractionDigits:d});
+const cm=m=>(m*100).toFixed(1);
+
+log('=== THE ROUND — a directed charge, and what KIND of energy it carries ===');
+log('');
+log(`  Voxel ${G_CELL.toFixed(3)} m. Block ${BLOCK_M} m = ${16} voxels a side, `+
+    `${fx(16*16*16)} voxels.`);
+log('  Destruction is per voxel throughout. Nothing below knows what a block is;');
+log('  blocks only appear at the end, as a count of voxels that happens to be 4,096.');
+log('');
+
+log('--- 1. WHAT ONE VOXEL COSTS TO TAKE APART ---');
+log('');
+log('  The unit of destruction: one voxel coming apart into its coarsest RAW.');
+log('  Every other number on this page is this one divided into a budget.');
+log('');
+log('     material   voxel mass    RAW        cost/voxel   voxels per shot');
+const R = ROUNDS.buck, E = roundEnergy(R);
+for (const mat of ['sand','wood','coal','rock','cinder','iron']){
+  const m = IMAT[mat].dens*Math.pow(G_CELL,3);
+  const c = voxelCost(mat);
+  log(`     ${mat.padEnd(9)} ${m.toFixed(2).padStart(8)} kg  ${String(RAW[mat][1]).padStart(5)} g   `+
+      `${fx(c,1).padStart(10)} J   ${fx(E*R.mix.frac/c,0).padStart(14)}`);
+}
+log('');
+log(`  Sand is nearly free because sand is ALREADY RAW — there is nothing to`);
+log('  fracture, only something to move, and moving it is the kinetic share\'s');
+log('  problem rather than the fracture share\'s.');
+log('');
+
+log('--- 2. THE ROUND, AND WHY THE MIX IS HALF OF IT ---');
+log('');
+log('     round        energy      fracture  kinetic  thermal   jet');
+for (const k of ['buck','incend','slug']){
+  const r = ROUNDS[k];
+  log(`     ${k.padEnd(12)} ${fx(roundEnergy(r),0).padStart(9)} J   `+
+      `${(r.mix.frac*100).toFixed(0).padStart(6)}%  ${(r.mix.kin*100).toFixed(0).padStart(6)}%  `+
+      `${(r.mix.therm*100).toFixed(0).padStart(6)}%   ${r.jetDeg}deg`);
+}
+log('');
+log(`  Our round: ${ROUNDS.buck.name}. ${ROUNDS.buck.pellets} pellets x `+
+    `${ROUNDS.buck.tntG} g of TNT, in a ${ROUNDS.buck.caseG} g steel case,`);
+log(`  at ${101} m/s. The case is why it is a jet: it will not give, so the gas goes`);
+log('  one way — into the cube, by design of the puzzle, and that is a WEAPON');
+log('  property rather than a fact about the world.');
+log('');
+log('  THE MIX NUMBERS ARE CHOSEN, not derived, and that is the one place on');
+log('  this page a hand is on the scale. Real TNT is roughly a third blast with');
+log('  a long thermal tail; how much of the blast breaks versus throws depends');
+log('  on what it is against. They live in one table so they can be argued with.');
+log('');
+
+log('--- 3. THE JET: SAME ENERGY, DIFFERENT SHAPE ---');
+log('');
+log('  A narrow jet drills and a wide one scoops. This is the whole reason the');
+log('  divergence angle exists, and it is what puts a hole THROUGH a thing');
+log('  instead of taking the front off it.');
+log('');
+log('     material   round     depth        hole mouth -> far side   voxels out');
+for (const mat of ['sand','wood','rock']){
+  for (const k of ['buck','incend','slug']){
+    const j = jet(mat, ROUNDS[k]);
+    log(`     ${mat.padEnd(9)} ${k.padEnd(8)} ${(j.depth*G_CELL).toFixed(2).padStart(5)} m   `+
+        `${cm(j.mouthR*2).padStart(6)} -> ${cm(j.holeR*2).padStart(6)} cm      ${fx(j.removed).padStart(9)}`);
+  }
+}
+log('');
+
+log('--- 4. THE TREE ---');
+log('');
+log('  "Later I want when you shoot a tree with a shotgun you leave a hole in');
+log('  it, like in the movies." A trunk is a thin structure, so the question is');
+log('  whether the jet gets through and how big the exit is.');
+log('');
+log('     trunk    round     through?   exit hole   voxels out   what is left');
+for (const trunkCm of [20, 40, 80]){
+  const vox = Math.max(1, Math.round(trunkCm/100/G_CELL));
+  for (const k of ['buck','slug']){
+    const j = jet('wood', ROUNDS[k], vox);
+    log(`     ${String(trunkCm+' cm').padEnd(8)} ${k.padEnd(8)} ${(j.through?'YES':'no').padEnd(9)}  `+
+        `${cm(j.holeR*2).padStart(7)} cm   ${fx(j.removed).padStart(10)}   `+
+        `${j.through ? 'a hole you can see through' : 'a crater '+(j.depth*G_CELL*100).toFixed(0)+' cm deep'}`);
+  }
+}
+log('');
+log('  A 20 cm sapling goes through and a 80 cm trunk does not, which is the');
+log('  right answer and the one the movies get wrong. Nothing was tuned to make');
+log('  that happen — it falls out of wood\'s fracture energy against the budget.');
+log('');
+
+log('--- 5. HOW MANY SHOTS TAKE A BLOCK, PER VOXEL ---');
+log('');
+log('  A block is 4,096 voxels. No special case: it is gone when they are, and');
+log('  the jet is clamped to the face so a shot can never spend itself on the');
+log('  block behind.');
+log('');
+log('     material   voxels/shot   shots for a block   fracture J needed');
+for (const mat of ['sand','wood','coal','rock','cinder','iron']){
+  const j = jet(mat, R);
+  const need = 4096*voxelCost(mat);
+  log(`     ${mat.padEnd(9)} ${fx(j.removed).padStart(11)}   `+
+      `${(j.removed>0 ? fx(4096/j.removed,1) : 'never').padStart(17)}   ${fx(need,0).padStart(14)}`);
+}
+log('');
+{
+  const need = 4096*voxelCost('rock'), have = E*R.mix.frac;
+  log(`  ROCK IS ${fx(need/have,1)} SHOTS, NOT 2, and the gap is the MIX rather than the`);
+  log(`  material. A shot carries ${fx(E,0)} J but only ${(R.mix.frac*100).toFixed(0)}% of it is aimed at breaking`);
+  log(`  bonds — ${fx(have,0)} J. Two shots would take a rock block if the fracture`);
+  log(`  share were ${(need/(2*E)*100).toFixed(0)}% instead of ${(R.mix.frac*100).toFixed(0)}%.`);
+  log('');
+  log('  So there is a real tension to settle, and it is a design call:');
+  /* No '~' in log text: the page joins its lines with it for data-r, so a
+     tilde here comes back out of the harness as a line break. Twice now. */
+  log(`     - 2 shots on rock wants about ${(need/(2*E)*100).toFixed(0)}% fracture, leaving little for heat`);
+  log('       or throw, and then nothing glazes and nothing flies far.');
+  log(`     - keeping ${(R.mix.therm*100).toFixed(0)}% thermal for the glass effect costs shots on rock.`);
+  log('     - or the charge grows, and everything softer than rock gets erased.');
+  log('  The mix is one table, so this is a dial rather than a rewrite.');
+}
+log('');
+log('--- 6. HEATED OR PUSHED: THE SAME JOULES, THE OTHER WAY ROUND ---');
+log('');
+log('  "Sand would be heated if the blast is fire but pushed if the blast is');
+log('  just energy." Same material, same round energy, only the mix differing.');
+log('');
+log('     material  round     mass moved   thrown at   heated by   fused');
+for (const mat of ['sand','wood','rock']){
+  for (const k of ['buck','incend']){
+    const j = jet(mat, ROUNDS[k]);
+    const kk = kineticOf(mat, ROUNDS[k], j.removed);
+    const th = thermalOf(mat, ROUNDS[k], j.removed);
+    log(`     ${mat.padEnd(9)} ${k.padEnd(8)} ${kk.massKg.toFixed(1).padStart(9)} kg  `+
+        `${kk.speed.toFixed(1).padStart(7)} m/s  ${th.rise.toFixed(1).padStart(8)} K   `+
+        `${(th.fusedKg*1000).toFixed(0)} g`);
+  }
+}
+log('');
+{
+  const j = jet('sand', ROUNDS.incend);
+  const th = thermalOf('sand', ROUNDS.incend, j.removed);
+  log(`  The incendiary into sand: ${th.massKg.toFixed(1)} kg lifted, ${th.rise.toFixed(1)} K of rise if the`);
+  log(`  heat spread evenly through all of it — ${th.allMelts ? 'which IS enough to melt the lot'
+        : 'which is NOT enough to melt it all'}. Spread evenly`);
+  log(`  it glazes; concentrated at the mouth it fuses ${(th.fusedKg*1000).toFixed(0)} g into glass.`);
+  log('');
+  log('  THAT is why "almost turns sand to glass" is the honest phrasing. The');
+  log('  same joules make a crater or a lump depending only on how they arrive,');
+  log('  and no round is all one thing.');
+}
+log('');
+log('=== done ===');
+document.getElementById('out').textContent=L.join('\n');
+document.body.dataset.r=L.join('~');
+</script></body>
