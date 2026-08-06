@@ -659,6 +659,15 @@ const BLOCK   = P_H * 1.4;   // 2.8 m
 const P_R     = 0.52;   // collision radius
 const EYE     = 1.72;   // eye height
 const GRAV    = 20.0;   // m/s^2 (heavy, so jumps do not float)
+/* GRAVITY IS NO LONGER A CONSTANT, it is a constant times something you can
+   change. Not yet a vector — down is still -Y everywhere — but the MAGNITUDE
+   and the SIGN are now the world's business, which is what the ending needs:
+   the boss goes up, and so do you.
+
+   A full vector is the right end state and it is expensive, because sand.js's
+   speed comes from "down" being a compile-time index offset. This is the half
+   of it that costs nothing. */
+function gnow(){ return GRAV * (G.gravK === undefined ? 1 : G.gravK); }
 const JUMP_LO = 6.0;    // jump apex = 3x your height
 const V_LO    = Math.sqrt(2*GRAV*JUMP_LO);
 /* Every jump is the same jump, and you get twenty of them before your feet
@@ -1452,8 +1461,17 @@ const MATS = [
   {c:[0.94,0.75,0.42]}, // pale sand
   {c:[0.72,0.44,0.20]}, // ochre clay
   {c:[0.80,0.55,0.26]}, // dark sandstone
-  {c:[0.90,0.70,0.28], gold:true} // gold vein
+  {c:[0.90,0.70,0.28], gold:true}, // gold vein
+  /* THE ISLAND. Everything from index 5 up is scenery: it is never part of the
+     puzzle, never opens, and is drawn with its own colour rather than the
+     shell's black. */
+  {c:[0.86,0.74,0.48]}, // 5 dry sand
+  {c:[0.44,0.37,0.26]}, // 6 wet sand
+  {c:[0.13,0.34,0.62]}, // 7 salt water
+  {c:[0.36,0.24,0.13]}, // 8 wood
+  {c:[0.22,0.45,0.16]}  // 9 leaf
 ];
+const M_DRYSAND=5, M_WETSAND=6, M_SALT=7, M_WOOD=8, M_LEAF=9;
 /* Structure is grey stone and the puzzle is warm sand, at the source rather
    than only per-face. In a dungeon corridor every surface you can see is
    structure, so shading alone left floor, wall and ceiling the same brown
@@ -3885,7 +3903,7 @@ function rawStep(dt){
     /* ---- in the air ---- */
     if(RAW.rest[i]===0){
       moving++;
-      RAW.vy[i] -= GRAV*dt;
+      RAW.vy[i] -= gnow()*dt;
       const nx=RAW.x[i]+RAW.vx[i]*dt, ny=RAW.y[i]+RAW.vy[i]*dt, nz=RAW.z[i]+RAW.vz[i]*dt;
       const cx=rawCell(nx), cy=rawCell(ny), cz=rawCell(nz);
       if(rawFree(cx,cy,cz) && ny > RAW_S*0.5){
@@ -4164,6 +4182,17 @@ function rebuildWorld(){
          behind it is the same black as the shell, because it is the same
          promise: this does not open, ever. Breaking the skin is how you find
          that out — the black is only ever seen once you have earned it. */
+      /* SCENERY IS NOT THE SHELL. A ROCK block flagged as scenery is the
+         island — sand, water, wood, leaf — and it draws in its own colour
+         instead of the bedrock black that means "this never opens". It still
+         never opens; it just is not a wall. */
+      if(G.scenery && G.scenery[i]){
+        const c = MATS[G.mat[i]].c;
+        put((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, BLOCK, c,
+            ((x*7+y*13+z*29)%1000)/1000,
+            G.mat[i]===M_SALT ? 0.14 : 0.0, 0, 0);
+        continue;
+      }
       const isCoat = G.coat && G.coat[i];
       const k = isCoat ? 1 - (G.rockHit[i]||0)/CINDER_HP : 1;
       const base = hs ? hs[0] : (cryst?BEDCRYST:(isCoat?CINDER:BEDROCK));
@@ -4395,7 +4424,7 @@ function physics(dt){
   P.vx += (wx*target - P.vx) * Math.min(1, accel*dt);
   P.vz += (wz*target - P.vz) * Math.min(1, accel*dt);
   if(ln===0 && P.ground){ const f=Math.min(1,16*dt); P.vx-=P.vx*f; P.vz-=P.vz*f; }
-  P.vy -= GRAV*dt;
+  P.vy -= gnow()*dt;
   if(P.vy < -60) P.vy = -60;
 
   // substeps so we cannot tunnel through a block
@@ -6082,7 +6111,11 @@ function killEnemy(e, i){
      re-asked once it died — so the run stayed open until the player happened to
      do something else that called checkWin, like shooting a spare block. The
      last shot of the fight should be the last shot of the run. */
-  if(wasFinale) checkWin();
+  if(wasFinale){
+    /* THE LAST SHOT OF THE FIGHT IS NOT THE END OF THE RUN ANY MORE. It is
+       the blast, and the blast is what takes you out of the cave. */
+    bossBlows(e.x, e.y, e.z);
+  }
 }
 
 /* Enemy shots do half damage. Four of them kill, which is the same two hearts
@@ -6453,6 +6486,108 @@ function syncPowHud(){
   if(G.eye)      bits.push('THE EYE');
   el.textContent = bits.join(' · ');
   el.parentNode.style.display = bits.length ? '' : 'none';
+}
+
+/* ==========================================================================
+   THE ENDING — the boss blows, gravity lets go, and you come up on an island
+   ==========================================================================
+   Marcelo's order, and the order is the whole of it: "make the boss blow,
+   gravity change then emerge at island with water."
+
+   Three beats, each one a thing the engine can already do, finally pointed at
+   the same moment:
+
+     1. THE BLAST. The thing that came for you was full of what the mines are
+        full of, so it detonates rather than merely dying. compose.js prices a
+        0.2 kg charge at 600 kJ; this one is bigger because it is the last one.
+     2. GRAVITY LETS GO. G.gravK goes negative and everything loose — you, the
+        rubble, the grains — falls UP. It is not a cutscene, it is the same
+        physics with one sign changed, which is why the debris does it too.
+     3. YOU COME UP SOMEWHERE ELSE. The cave is gone and you are standing on a
+        sandbank in salt water, with a tree and a hole in the ground.
+
+   The island is BLOCKS, not voxels, and that is deliberate: a block is one
+   solid thing until something breaks it, so an intact island costs exactly
+   what an intact dungeon costs. Shoot it and it becomes grains like anything
+   else. */
+const EMERGE_T = 2.6;                   // seconds of falling upward
+
+function buildIsland(){
+  const N = G.nx*G.ny*G.nz;
+  if(!G.scenery || G.scenery.length !== N) G.scenery = new Uint8Array(N);
+  G.scenery.fill(0);
+  for(let i=0;i<N;i++){ G.st[i]=AIR; G.mine[i]=0; }
+  G.revealed=0; G.marked=0; G.mines=0; G.safeTotal=0; G.rockCount=0;
+  enemies.length=0; eshots.length=0; corpses.length=0;
+
+  const cx=G.nx/2, cz=G.nz/2, SEA=Math.max(2, (G.ny*0.30)|0);
+  const R = Math.min(G.nx,G.nz)*0.34;
+  const set=(x,y,z,mat)=>{
+    if(!inside(x,y,z)) return;
+    const i=idx(x,y,z);
+    G.st[i]=ROCK; G.mat[i]=mat; G.scenery[i]=1;
+  };
+  /* salt water to the sea line, everywhere */
+  for(let y=0;y<SEA;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++) set(x,y,z,M_SALT);
+  /* the bank: sand, wet where the sea reaches it and a little above, because a
+     beach is damp above the tide from capillary rise rather than from splash */
+  const top=(x,z)=>{
+    const dx=(x-cx)/R, dz=(z-cz)/R, d=Math.hypot(dx,dz);
+    if(d>1.15) return -1;
+    const rough = Math.sin(x*0.9)*Math.cos(z*0.7)*0.8 + Math.sin(z*1.7)*0.5;
+    return Math.round(SEA + Math.cos(Math.min(d,1)*Math.PI/2)*G.ny*0.28 + rough - (d>1?(d-1)*G.ny:0));
+  };
+  for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
+    const t=top(x,z); if(t<0) continue;
+    for(let y=0;y<=t;y++) set(x,y,z, y < SEA+1 ? M_WETSAND : M_DRYSAND);
+  }
+  /* THE HOLE IN THE GROUND — the way you came up */
+  const hx=Math.round(cx+R*0.30), hz=Math.round(cz-R*0.15), hr=Math.max(2,Math.round(R*0.22));
+  const htop=top(hx,hz);
+  for(let y=0;y<G.ny;y++) for(let z=hz-hr;z<=hz+hr;z++) for(let x=hx-hr;x<=hx+hr;x++){
+    if(!inside(x,y,z)) continue;
+    const d=Math.hypot(x-hx,(y-(htop-hr*0.4))*1.1,z-hz);
+    if(d<hr){ const i=idx(x,y,z); G.st[i]=AIR; G.scenery[i]=0; }
+  }
+  /* THE TREE, attached to the bank */
+  const tx=Math.round(cx-R*0.4), tz=Math.round(cz+R*0.25), tb=top(tx,tz);
+  const th=Math.max(4,(G.ny*0.22)|0);
+  for(let y=tb+1;y<=tb+th;y++) set(tx,y,tz,M_WOOD);
+  for(let dy=-1;dy<=2;dy++) for(let dz=-2;dz<=2;dz++) for(let dx=-2;dx<=2;dx++){
+    if(dx*dx+dy*dy+dz*dz > 5) continue;
+    if(!dx && !dz && dy<=0) continue;
+    set(tx+dx, tb+th+dy, tz+dz, M_LEAF);
+  }
+  /* stand on the bank beside the hole */
+  const sx=hx-hr-1, sz=hz, sy=top(sx,sz);
+  P.x=(sx+0.5)*BLOCK; P.y=(sy+1)*BLOCK+0.05; P.z=(sz+0.5)*BLOCK;
+  P.vx=P.vy=P.vz=0; P.pitch=0;
+  P.yaw=Math.atan2(-((hx-sx)), -((hz-sz)));
+  G.island=true; G.dungeon=false; G.dirty=true;
+  /* whatever the cave left lying about does not come with you */
+  RAW.n=0; RAW.oldest=0; RAW.occ.clear(); RAW.under.clear();
+  RAW.key.fill(0); RAW.rest.fill(0); VOX.clear();
+}
+
+function bossBlows(x,y,z){
+  G.emerge = EMERGE_T;
+  G.shake = 1.0;
+  snd.boom && snd.boom();
+  /* the charge, thrown outward and upward */
+  for(let k=0;k<90;k++){
+    const a=rnd()*6.283, b=Math.acos(2*rnd()-1), sp=9+rnd()*22;
+    addP(x,y,z, Math.sin(b)*Math.cos(a)*sp, Math.abs(Math.cos(b))*sp+6, Math.sin(b)*Math.sin(a)*sp,
+         0.3+rnd()*0.7, 1.4+rnd()*1.4, [1.0,0.62,0.22], 0.9, 0.25);
+  }
+  for(let k=0;k<26;k++)
+    addS(x,y,z, (rnd()-.5)*10,(rnd())*9+2,(rnd()-.5)*10, 2.2+rnd()*2, 1.2,
+         [1.0,0.80,0.35], T_GLOW, 0.8);
+  /* AND GRAVITY LETS GO. One sign, and everything loose goes up together —
+     you, the smoke, the grains on the floor. Not a cutscene: the same physics
+     it has been running all along, told to point the other way. */
+  G.gravK = -0.42;
+  P.vy = Math.max(P.vy, 6.5);
+  for(let i=0;i<RAW.n;i++){ RAW.rest[i]=0; RAW.vy[i]=2+rnd()*6; }
 }
 
 function checkWin(){
@@ -8262,6 +8397,14 @@ function frame(now){
     G.fuse -= dt; G.dirty = true;
     if(G.fuse <= 0) blast();
   }
+  if(G.emerge > 0){
+    G.emerge -= dt;
+    if(G.emerge <= 0){
+      G.emerge = 0; G.gravK = 1;
+      buildIsland();
+      toast('The sand let you go. You come up on a bank in open water.', 6000);
+    }
+  }
   recoil = Math.max(0, recoil - dt*6.2);
   swayX -= swayX*Math.min(1, dt*6); swayY -= swayY*Math.min(1, dt*6);
   G.shake = Math.max(0, G.shake - dt*0.55);
@@ -8271,7 +8414,7 @@ function frame(now){
   for(let i=particles.length-1;i>=0;i--){
     const p=particles[i]; p.l-=sim;
     if(p.l<=0){ particles.splice(i,1); continue; }
-    p.vy -= GRAV*p.g*sim;
+    p.vy -= gnow()*p.g*sim;
     p.x+=p.vx*sim; p.y+=p.vy*sim; p.z+=p.vz*sim;
     p.rx+=p.vrx*sim; p.ry+=p.vry*sim; p.rz+=p.vrz*sim;
     if(p.y < 0.1 && p.vy<0){ p.y=0.1; p.vy*=-0.32; p.vx*=0.7; p.vz*=0.7; }
