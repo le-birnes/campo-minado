@@ -3675,6 +3675,109 @@ const hellB   = makeCubeBatch(6000);
    1,352 can be seen), and only VOX_MAX blocks may be voxelised at once, oldest
    evicted first. Past that a block is damaged the old way, which looks worse
    and never breaks. */
+/* --------------------------------------------------------------------------
+   RAW — what a block leaves behind when it comes apart
+   --------------------------------------------------------------------------
+   Marcelo: "destroy a block of sand (dirt) and it leaves sand (raw) and rock
+   (raw) spread around like noita would with pixels ... here it is a solid
+   chunk before it becomes block/16 stuff."
+
+   That last clause is the whole design and it is what makes this NOT Noita. In
+   Noita a desert is pixels all the way down and always was, so a shovel just
+   moves what is already there. Here a block is ONE SOLID THING — one cube, one
+   instance, no interior — right up until the moment it is destroyed, and only
+   then does it become BLOCK/16 stuff. The fine grain is a CONSEQUENCE of
+   destruction, never a precondition for it, which is why a dungeon of 7,776
+   blocks costs 7,776 cubes and not 31 million voxels.
+
+   These grains PERSIST. They fall, they land, they stay: a pile of raw sand
+   under a hole you shot is still there when you walk back. That is the promise
+   the whole voxel layer exists to keep, and a fading particle would break it.
+
+   Flat arrays because there can be a thousand of them and every one is touched
+   every frame while it is still moving. Once landed, a grain is skipped
+   entirely — settled material costs nothing, same rule as sand.js's dirty
+   rects, for the same reason. */
+const RAW_MAX = 1400;
+const RAW_S   = BLOCK/16;                 // one grain is one voxel
+const R_SAND=0, R_ROCK=1, R_WATER=2;
+/* Pale tan and dark grey, and the contrast is deliberate: raw sand and raw
+   rock have to be told apart on the ground at a glance, or "it left sand and
+   rock" is a claim nobody can check. */
+const RAW_COL = [[0.80,0.68,0.44],[0.30,0.28,0.26],[0.22,0.44,0.76]];
+const RAW = {
+  n:0, x:new Float32Array(RAW_MAX), y:new Float32Array(RAW_MAX), z:new Float32Array(RAW_MAX),
+  vx:new Float32Array(RAW_MAX), vy:new Float32Array(RAW_MAX), vz:new Float32Array(RAW_MAX),
+  m:new Uint8Array(RAW_MAX), rest:new Uint8Array(RAW_MAX), moving:0
+};
+function rawAdd(x,y,z, vx,vy,vz, mat){
+  /* Past the cap the oldest grain is recycled rather than the new one dropped:
+     what you just shot is always what you see, and the floor stops growing.
+     NEXT.md rule 3 — visible debris is a budget, not a consequence. */
+  const i = RAW.n < RAW_MAX ? RAW.n++ : ((RAW.oldest = ((RAW.oldest||0)+1) % RAW_MAX));
+  RAW.x[i]=x; RAW.y[i]=y; RAW.z[i]=z;
+  RAW.vx[i]=vx; RAW.vy[i]=vy; RAW.vz[i]=vz;
+  RAW.m[i]=mat; RAW.rest[i]=0;
+}
+/* Break a block into its constituents and throw them. The recipe is the same
+   one the voxel layer uses, so what falls out of a block is what was in it. */
+function rawBurst(bx,by,bz, dirx,diry,dirz, count){
+  const i = idx(bx,by,bz);
+  const rec = voxRecipe(i);
+  const cx=(bx+0.5)*BLOCK, cy=(by+0.5)*BLOCK, cz=(bz+0.5)*BLOCK;
+  for(let k=0;k<count;k++){
+    const t = rnd();
+    const mat = t < rec.rock ? R_ROCK : (t < rec.rock+rec.water ? R_WATER : R_SAND);
+    const sp = 2.0 + rnd()*5.5;
+    rawAdd(cx+(rnd()-.5)*BLOCK*0.9, cy+(rnd()-.5)*BLOCK*0.9, cz+(rnd()-.5)*BLOCK*0.9,
+           -dirx*sp*0.5 + (rnd()-.5)*sp,
+           rnd()*sp*0.75 + 1.2,
+           -dirz*sp*0.5 + (rnd()-.5)*sp, mat);
+  }
+}
+/* One tick. Only grains still in the air are integrated; a landed one is a
+   number in an array and nothing more. */
+function rawStep(dt){
+  let moving = 0;
+  for(let i=0;i<RAW.n;i++){
+    if(RAW.rest[i]) continue;
+    moving++;
+    RAW.vy[i] -= GRAV*dt;
+    /* PER AXIS, and the first version was not, which is why grains ended up
+       stuck to walls. It moved all three at once, and on any collision
+       reversed vy and rested as soon as vy was small — so a grain flying
+       SIDEWAYS into a vertical face had a small vy the whole time and froze
+       in the air against it. The vision review called it exactly: "floating
+       unsupported in mid-air against vertical faces".
+
+       Resolving one axis at a time means a wall stops horizontal motion and
+       leaves the fall alone, which is what a wall does. */
+    const x0=RAW.x[i], y0=RAW.y[i], z0=RAW.z[i];
+    let nx = x0 + RAW.vx[i]*dt;
+    if(solidAtWorld(nx, y0, z0)){ nx = x0; RAW.vx[i] = -RAW.vx[i]*0.25; }
+    let nz = z0 + RAW.vz[i]*dt;
+    if(solidAtWorld(nx, y0, nz)){ nz = z0; RAW.vz[i] = -RAW.vz[i]*0.25; }
+    let ny = y0 + RAW.vy[i]*dt;
+    let landed = false;
+    if(solidAtWorld(nx, ny, nz) || ny < RAW_S*0.5){
+      ny = y0;
+      landed = RAW.vy[i] < 0;              // only a DOWNWARD hit is a landing
+      RAW.vy[i] = -RAW.vy[i]*0.18;
+      RAW.vx[i] *= 0.45; RAW.vz[i] *= 0.45;
+    }
+    RAW.x[i]=nx; RAW.y[i]=ny; RAW.z[i]=nz;
+    /* AND IT ONLY RESTS IF SOMETHING IS HOLDING IT UP. Supported, slow, and
+       falling — all three, or it keeps going. That is what turns a scatter
+       into a pile instead of a coat of paint on the nearest surface. */
+    if(landed &&
+       Math.abs(RAW.vy[i]) < 0.9 &&
+       (solidAtWorld(RAW.x[i], RAW.y[i]-RAW_S*0.75, RAW.z[i]) || RAW.y[i] <= RAW_S*0.75)){
+      RAW.rest[i]=1; RAW.vx[i]=RAW.vy[i]=RAW.vz[i]=0;
+    }
+  }
+  RAW.moving = moving;
+}
+
 const VOX_DIV = 16;                       // voxels per block edge, = BLOCK/16
 const VOX_N   = VOX_DIV*VOX_DIV*VOX_DIV;
 /* THREE, not six, and the measurement is why: six carved blocks emitted 9,534
@@ -4328,7 +4431,19 @@ function shoot(){
     }
     detonate(hit.x,hit.y,hit.z); return;
   }
+  /* IT COMES APART AS IT GOES. The block was one solid cube a moment ago; now
+     it is the sand and rock that were in it, thrown along the shot and left on
+     the floor. This is the only place a SAND block becomes BLOCK/16 stuff, and
+     it is the moment of destruction, exactly as intended.
+
+     AFTER revealAt, not before, and the ordering is not a detail. Bursting
+     first spawns every grain inside a block that is still SOLID, so each one
+     instantly reports a collision and freezes where it was born: measured at 3
+     ticks to "settle" and a 2.5 m spread that was nothing but the spawn
+     jitter. The block has to be gone before its contents can fall through
+     where it was. */
   revealAt(i,false);
+  rawBurst(hit.x, hit.y, hit.z, r.dx, r.dy, r.dz, 150);
   noteDigNear(i);          // only a shot counts, never a cascade or a blast
   digSpawn(i, hit.x, hit.y, hit.z);
   checkWin();
@@ -7951,6 +8066,7 @@ function frame(now){
   swayX -= swayX*Math.min(1, dt*6); swayY -= swayY*Math.min(1, dt*6);
   G.shake = Math.max(0, G.shake - dt*0.55);
 
+  rawStep(sim);
   // ------- particles -------
   for(let i=particles.length-1;i>=0;i--){
     const p=particles[i]; p.l-=sim;
@@ -8076,6 +8192,22 @@ function frame(now){
   // escombros
   {
     const d=debris.data; let n=0;
+    /* RAW GOES IN FIRST, on purpose. It persists and the particles do not, so
+       when the batch is tight it is the fading smoke that should lose its
+       place, not the pile of sand that is meant to still be there tomorrow. */
+    for(let i=0;i<RAW.n && n<debris.max;i++){
+      const o=n*CUBE_STRIDE, c=RAW_COL[RAW.m[i]];
+      composeAA(d,o, RAW.x[i],RAW.y[i],RAW.z[i], RAW_S,RAW_S,RAW_S);
+      d[o+16]=c[0]; d[o+17]=c[1]; d[o+18]=c[2];
+      /* A LITTLE EMISSIVE, and it is a readability choice rather than physics.
+         The cave is dark on purpose and a 17 cm grain of sand at 0.12 is
+         invisible from three metres — the pellets already carry the same
+         concession for the same reason. Enough to be seen lying on the floor,
+         not enough to light anything. */
+      d[o+19]=(i*0.317)%1; d[o+20]=0.42; d[o+21]=0; d[o+22]=0;
+      d[o+23]=d[o+24]=d[o+25]=0;
+      n++;
+    }
     for(let i=0;i<particles.length && n<debris.max;i++){
       const p=particles[i], o=n*CUBE_STRIDE;
       const k = Math.min(1, p.l/Math.min(0.6,p.ml));
