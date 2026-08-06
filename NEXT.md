@@ -1,99 +1,72 @@
-# NEXT - after the compact
-
-Paste the fenced block at the bottom. Everything above it is why.
+# NEXT - after the sand.js port
 
 ## Where the game actually is, 2026-08-06
 
-**In the game, working, verified:**
+**sand.js IS the game now.** RAW and VOX are gone; there is one flat grid over
+the whole world at BLOCK/16 - the bead, 17.5 cm - with a ROCK border, dirty
+rects, materials from a table and reactions as rows. A dungeon is 288x384x288
+cells, 31 MB, 972 chunks, and 60 ticks of a quiet one scan ZERO cells.
+
+**And it runs on 26 neighbours, for powders and fluids alike**, which is what
+Noita's 8 translates to in three dimensions. Nine downward directions instead of
+five, eight lateral instead of four. Measured on a poured heap, diagonal radius
+over axis radius, where round is 1.00:
+
+    four lateral   0.74 sand   0.81 wet sand   0.83 rubble
+    eight lateral  1.03        1.00            1.00
+
+Photographed from directly above (tools/h_sandshot.js, ?sview=top): the old set
+makes a DIAMOND with four sharp points, the new one makes a CIRCLE. agy was
+shown both without being told which was which and said "a circle" / "a diamond
+with four points", and picked the circle as the real one.
 
 | | |
 |---|---|
-| the ending | boss detonates -> gravity flips to -8.4 -> 2.6 s -> island. agy PASS |
-| the island | sand / wet sand / salt water / wood / leaf, as blocks. 2,115 instances |
-| the tree | trunk, 7 branches, 8 leaf clusters (223 blocks) |
-| voxel layer | a block voxelises 16^3 when damaged, persists, 3 drawn at once |
-| RAW grains | burst from destroyed blocks, collide, slump, pile, persist |
-| grain materials | water flat to 17.45 m; sand cones at 1.00 m; wet sand steepest |
-| Shift+H | insta_dungeon_solve, stops one move short of the finale |
-| ?lightx=N | tester ambient multiplier |
+| the grid | one array, whole world, persistent, settled costs nothing |
+| materials | 19, from air to gunpowder, each a row |
+| reactions | water+fire, lava+sand -> glass, water+sand -> wet sand, acid+rock |
+| grit | ballistic while flying, written into the grid when it lands |
+| drawing | its own batch, 22,000 instances, 26 chunks, nearest first |
+| the ending | boss -> gravity flips -> island. Gravity reversing wakes every chunk holding anything loose |
+| scenery | the island tree comes apart into wood and leaves, not generic rubble |
 
-**In voxel/, measured, NOT in the game:** sand.js (flat, 8.3 ns/cell),
-impact.js (fracture is a surface), round.js (energy has a kind, the jet),
-compose.js (blocks as recipes, mines as energy sources, overpressure),
-island.js, many.html (27 materials cost what 2 do), ball.js (round vs
-flat-faced, measured), BEAD.md.
+**Three things found by measuring, all worth keeping:**
+
+1. The corner gate must be INDEPENDENT of slip, then scaled by 1/slip. What has
+   to match between a free-running powder and a cohesive one is corner steps PER
+   GRAIN, not per attempt.
+2. A liquid needs something ON TOP of it to slide sideways. Without that test a
+   sheet one cell thick shuffles at its edges for ever - 25 chunks still awake
+   after 3,000 ticks - and the dirty rect never pays.
+3. Arcane plus rendering blocks Chrome's main thread long enough that virtual
+   time never advances and a screenshot harness reads as an endless loop. Shoot
+   on Apprentice.
 
 **Known broken or missing:**
 
-- **Salt water is solid blocks.** You stand on the sea. No transparency, no
-  swimming, no beads. Biggest gap between built and asked-for. It is next.
-- The sinking rule (denser grain through lighter) is written and **untested** -
-  three test scenes leaked.
-- No **field** of any kind: no wind, no heat, no pressure. Leaves cannot move
-  because there is nothing to move them.
+- **The island sea is still solid blocks.** You stand on it. This is the
+  biggest remaining gap and it is item 1 below.
+- Liquid isotropy is 0.84 against the powders' 0.97. It is quantisation at a
+  spread of five cells - floor(5/sqrt2)*sqrt2/5 is 0.85 - and it closes as the
+  spread grows. A bigger number, not a cleverer rule.
+- No **field**: no wind, no heat, no pressure. Leaves cannot move.
 - No **MORTAL** flag: nothing is allowed to stop existing.
-- The **dungeon bot ceiling** at 41% is unexplained. findHint solves 395/396 of
-  the same board instantly, so the bot is not deduction-limited.
+- The **dungeon bot ceiling** at 41% is still unexplained.
 
 ## The order, and why this order
 
-### 1. WATER AS BEADS - everything else waits on it
+### 1. WATER AS BEADS, at ocean scale
 
-Asked for most, delivered least. It also forces three mechanisms the rest of
-the design needs anyway:
-
-- **a depth query** - how much water is under this block. Waves, rigidity and
-  transparency all read it.
-- **two binds** - bead-to-bead surface tension, broken by wading, against the
-  block overall threshold. That distinction IS how you enter water.
-- **accumulated thickness for transparency** - one number along a ray, which is
-  Beer-Lambert and also the cheap way.
-
-      water below | loose beads | stand on | inert
-      1 block     | 8 layers    | 2 rigid  | rest
-      2 blocks    | 16 layers   | 3        | 13 pass through
-
-Shores keep >= 8 interactive layers. Sea level holds at level + 2.
+The engine is in and its LIQUID kind works. What is missing is the ocean, and
+the reason it is missing is cost: the island sea as beads is millions of cells
+that would all be awake at once. It needs the on-demand shell - depth read from
+the block below, computed only where something touches it - plus the two binds
+and accumulated thickness for transparency.
 
 ### 2. THE 500 m SPHERE - the cost ceiling
-
-Second, not first, and not because it matters less. It is a refactor with no
-visible output, and doing it before water means testing it against a world with
-nothing interesting in it. Water gives it something to be a ceiling OVER.
-
-Needs: an active-sphere test, a record for anything outside it (position,
-state, forces, probable next position), re-entry that recomputes from elapsed
-time, and the boundary violet wash falling to black at 3x shotgun radius.
-
-### 3. WIND - the first field
-
-Then leaves move, water splatters, air becomes visible at 0.05-0.5 opacity by
-temperature and speed. A moving mass 2-500 m across, up to 100 km/h, random.
-**MORTAL rides along with it**: wind takes the leaves, and they must be allowed
-to die two minutes later.
-
+### 3. WIND - the first field, and MORTAL rides with it
 ### 4. CELESTIAL - sun, moon, planet
-
-Cheap, and it is rule 1 at the largest scale: the sun at 13.6 Gm is 10^20 bead
-widths away and can only ever be a record. Time keeps running outside the
-sphere, so tides and seasons come from the same bookkeeping.
-
 ### 5. THE SPIT - liquids as a weapon
-
-Beads on a gravity arc from screen centre, strength on hold. The only way to
-throw a liquid, so throwing one always doses you mildly. Needs (1).
-
-## What I would push back on, once
-
-**The 16-layer water spec is expensive at the wrong moment.** Sixteen layers of
-BLOCK/16 beads per water block, over an ocean, is a lot of beads for something
-whose top two layers are all anyone ever sees. I would build it as: the shell is
-computed ON DEMAND, its depth read from the block below, and only where
-something is touching it. Same rule, same numbers, but the ocean at rest costs
-nothing - which is rule 1 again, and it is the rule this engine keeps rewarding.
-
-Flagged rather than quietly done, because the layer counts are a design
-statement and I may be reading them too literally.
 
 ## THE PROMPT
 

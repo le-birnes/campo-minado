@@ -68,9 +68,19 @@ setTimeout(()=>{ try{
   SAND_LAT = 8;
   const wl = box(80,44,80); pour(wl, S_WATER, GR, 900);
   const sl = shape(wl, S_WATER);
-  R.push(`WATER 8 lateral: axis ${f2(sl.ax)} diag ${f2(sl.dg)}, diag/axis ${f2(sl.ratio)}; ` +
-         `spread ${f2(sl.ax*CELL_M)} m against sand ${f2(s8.ax*CELL_M)} m ` +
-         (sl.ax > s8.ax*2 ? 'ok' : 'FAULT: liquid heaps'));
+  /* HEIGHT is the honest test, not width. A powder HEAPS and a liquid does
+     not, and that is the one bit of difference between them; comparing radii
+     compares two different shapes of the same volume and says less. */
+  function peak(w, mat){
+    const cx=w.W>>1, cz=w.D>>1; let top=0;
+    for(let x=cx-2;x<=cx+2;x++) for(let z=cz-2;z<=cz+2;z++)
+      for(let y=1;y<w.H-1;y++) if(w.at(x,y,z)===mat && y>top) top=y;
+    return top;
+  }
+  const hw=peak(wl,S_WATER), hs=peak(w8,S_SAND);
+  R.push(`WATER: ${f2(sl.ax)} cells across, ${hw} tall; SAND: ${f2(s8.ax)} across, ${hs} tall ` +
+         (hw*2 < hs ? 'ok, the liquid does not heap' : 'FAULT: liquid heaps'));
+  R.push(`WATER isotropy: diag/axis ${f2(sl.ratio)} (powder is ${f2(s8.ratio)})`);
 
   /* ================= 3. SETTLED COSTS NOTHING ================= */
   const before = w8.stats.scanned;

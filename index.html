@@ -4217,7 +4217,22 @@ function sStepCell(w, i, x,y,z, mat, gdir){
       const side = i + off*n;
       if(!sPassable(mat, M[side])) break;
       if(sPassable(mat, M[side+dy])){ sMove(w,i,x,y,z, side+dy, dx*n,dir,dz*n); return true; }
-      if(n === lim){ sMove(w,i,x,y,z, side, dx*n,0,dz*n); return true; }
+      /* AND THE SIDEWAYS SLIDE NEEDS SOMETHING ON TOP OF IT. Without this test
+         a liquid never settles, and it is not a small effect: 900 beads of
+         water spread to a sheet one cell thick, and the ragged cells at its
+         edge shuffle into open air for ever, because a horizontal move into
+         air is always legal. Measured, 25 chunks were still awake after 3,000
+         ticks, which means the dirty rect never pays and a puddle costs as much
+         as a waterfall — the exact failure this engine's header warns about.
+
+         A liquid spreads because the liquid above it is pressing down. One cell
+         thick, there is nothing above and it has already found its level, so it
+         stops. Gases keep the unconditional slide: they disperse on purpose and
+         they have a life, so they cannot churn for ever. */
+      if(n === lim){
+        if(K === K_GAS || M[i-dy] !== S_AIR){ sMove(w,i,x,y,z, side, dx*n,0,dz*n); return true; }
+        break;
+      }
     }
   }
   return false;
