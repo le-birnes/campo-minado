@@ -446,9 +446,15 @@ body.touch.portrait #rotate{display:grid;}
         <div class="opt"><label for="cde">Mines</label>
           <input type="range" id="cde" min="6" max="32" value="13"><span id="cdeV">13%</span></div>
         <p class="diffnote" id="cWarn"></p>
-        <div class="startRow" style="margin-top:12px">
-          <button class="go" id="btnStart">Enter the cave</button>
-        </div>
+      </div>
+
+      <!-- AND THE WAY IN SITS OUTSIDE #customBox, which is the whole point of
+           where it is. It was inside it, and #customBox is display:none unless
+           Custom is the chosen difficulty - so on Apprentice, Sorcerer, Arcane
+           and the dungeon there was no start button at all and the game could
+           not be entered. -->
+      <div class="startRow" id="startRow" style="margin-top:12px">
+        <button class="go" id="btnStart">Enter the cave</button>
       </div>
 
       <div class="rule"></div>
