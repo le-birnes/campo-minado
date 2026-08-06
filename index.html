@@ -4133,15 +4133,52 @@ function sStepCell(w, i, x,y,z, mat, gdir){
      calls, 12.4 ms written out, the same moves either way. Doing the same to
      the diagonals changed nothing (12.9 ms), so they keep the readable form.
      Change the rule here, change sPassable too. */
+  /* AND IT ACCELERATES, which it did not, and that was the complaint. One cell
+     a tick is a CONSTANT speed — 10.5 m/s at 60 Hz — so a bead crossed the
+     first metre far too fast and then never went any quicker however far it
+     fell. Real gravity passes it at 1.1 s and leaves it behind, and a long drop
+     read as a crawl because it was one.
+
+     So each cell carries its own fall speed in the byte it already has. That
+     byte is the AGE for anything with a life and the SPEED for everything else,
+     and the two never collide because nothing has both. It is in 64ths of a
+     cell per tick, and at 60 Hz adding one per tick IS 9.8 m/s^2:
+
+         one cell a tick at 60 Hz   = 0.175 * 60      = 10.5 m/s
+         one 64th of that, per tick = 10.5/64 * 60    = 9.84 m/s^2
+
+     which is the real number to within a fifth of a percent, and it falls out
+     of the cell size and the tick rate rather than being tuned. The floor is
+     one cell a tick, because half a cell is not a thing the lattice can do; the
+     ceiling is six, about 63 m/s, which is past terminal for a 17 cm stone. */
   {
-    const j = i+dy, tgt = M[j];
-    if(tgt === S_AIR || (SM_K[tgt] >= K_LIQUID && SM_D[mat] > SM_D[tgt])){
-      M[i] = tgt; M[j] = mat;
-      if(SM_LIFE[tgt] || SM_LIFE[mat]){ const T=w.ages(); if(SM_LIFE[tgt]) T[i]=0; if(SM_LIFE[mat]) T[j]=0; }
-      w.touch(x,y,z); w.touch(x,y+dir,z);
-      SMOV++;
-      return true;
-    }
+    const j0 = i+dy, t0 = M[j0];
+    if(t0 === S_AIR || (SM_K[t0] >= K_LIQUID && SM_D[mat] > SM_D[t0])){
+      const alive = SM_LIFE[mat] !== 0;
+      const T = w.ages();
+      let steps = 1;
+      if(!alive){ steps = (T[i] || V_UNIT) >> 6; if(steps < 1) steps = 1; }
+      /* Walk to the furthest cell it can reach, then make ONE swap. Swapping at
+         every step would drag whatever it is passing through along with it. */
+      let j = i, yy = y, moved = 0;
+      while(moved < steps){
+        const n = j + dy, t2 = M[n];
+        if(!(t2 === S_AIR || (SM_K[t2] >= K_LIQUID && SM_D[mat] > SM_D[t2]))) break;
+        j = n; yy += dir; moved++;
+      }
+      if(moved){
+        const tgt = M[j];
+        M[i] = tgt; M[j] = mat;
+        if(alive){ T[j] = 0; }
+        else { const v = T[i] || V_UNIT; T[j] = v < V_MAX ? v+1 : V_MAX; T[i] = 0; }
+        if(SM_LIFE[tgt]) T[i] = 0;
+        for(let s=0;s<=moved;s++) w.touch(x, y + dir*s, z);
+        SMOV++;
+        return true;
+      }
+      /* it could not go anywhere: it has landed, and it starts again from rest */
+      if(!alive) T[i] = V_UNIT;
+    } else if(SM_LIFE[mat] === 0){ w.ages()[i] = V_UNIT; }
   }
 
   /* 2. THE EIGHT DIAGONALS, which is the 26-neighbourhood arriving. Four along
@@ -4357,7 +4394,13 @@ const VOXD = new Set();
 const SAND_DRAW_R = BLOCK*11;              // chunks past this are not drawn
 const SAND_DRAW_MAX = 22000;               // instances the sand layer may spend
 const SAND_CHUNKS = 26;                    // chunks it may scan for them
-const SAND_HZ = 30;                        // grid ticks a second
+/* SIXTY, not thirty, and it is half of why falling was slow: a bead can only
+   ever move on a tick, so the tick rate is the floor on how fast anything can
+   be. The other half is the acceleration in sStepCell, and the two are tied -
+   the 64ths below are 9.8 m/s^2 only at this rate. */
+const SAND_HZ = 60;                        // grid ticks a second
+const V_UNIT = 64;                         // one cell a tick, in 64ths
+const V_MAX  = 6*64;                       // six, about 63 m/s
 let sandAcc = 0, sandCells = 0;
 /* THE SAND LAYER GETS ITS OWN BATCH, and that is the point of it. The old
    voxel layer emitted into worldB, which holds 10,464 and drops geometry
@@ -4491,6 +4534,111 @@ function sandBurst(bx,by,bz, dirx,diry,dirz, count){
 }
 
 /* --------------------------------------------------------------------------
+   A BEAD IS SOMETHING YOU CAN HIT
+   --------------------------------------------------------------------------
+   Marcelo: "it is NOT a particle interacting with the world around, current
+   status is only particles falling." Exactly right, and the reason was that
+   nothing outside the grid could reach into it. The shot raycast walked the
+   BLOCK world; a heap of sand was not in it, so a shot went straight through a
+   pile as if it were smoke and the pile never knew.
+
+   These two close that. sandRayHit walks the grid at half a cell so nothing can
+   be tunnelled through, and sandBlast is the gun's 24 g of TNT arriving in a
+   place made of beads.
+
+   THE BLAST IS BOTH RADIAL AND DIRECTIONAL, and that is the whole of what was
+   asked for. Fire into a wall of sand and it goes away from you, along the
+   shot. Fire while buried in it and the nearest beads are on every side of you,
+   so it goes outward in every direction. Neither is a special case: the impulse
+   is the shot direction blended with the line from the blast to the bead, and
+   which one dominates falls out of where the bead is.
+
+   The falloff is the one already specified: full power inside a body width,
+   half at three body widths, nothing past it. */
+const BLAST_FULL = 0.70/CELL_M;            // a body width, in cells
+const BLAST_HALF = 2.10/CELL_M;            // three of them
+const BLAST_V    = 17.0;                   // m/s at the centre
+const BLAST_MAX  = 420;                    // beads a shot may throw
+/* Room for every bead inside the biggest blast radius, packed one to an int:
+   a 3-block sphere is under 30,000 cells and a cell fits in ten bits. */
+const BLAST_CAND = new Int32Array(40000);
+
+/* The first loose cell along a ray, or null. Half a cell a step, so a bead
+   cannot be passed through. */
+function sandRayHit(ox,oy,oz, dx,dy,dz, maxT){
+  const w=SAND; if(!w) return null;
+  const step = CELL_M*0.5;
+  for(let t=0; t<=maxT; t+=step){
+    const cx=sandCell(ox+dx*t), cy=sandCell(oy+dy*t), cz=sandCell(oz+dz*t);
+    if(!w.inBox(cx,cy,cz)) continue;
+    const m = w.m[w.idx(cx,cy,cz)];
+    /* S_ROCK is the block world and the block raycast already owns it. */
+    if(m===S_AIR || m===S_ROCK || SM_K[m]===K_STATIC) continue;
+    return {t, cx, cy, cz, m};
+  }
+  return null;
+}
+
+/* Beads within reach are lifted out of the grid and thrown. Past the budget
+   they are only WOKEN, because how much can be in the air is the picture's
+   business and how much exists is not — NEXT.md rule 3. */
+function sandBlast(wx,wy,wz, dx,dy,dz, scale){
+  const w=SAND; if(!w) return 0;
+  const rF=BLAST_FULL*(scale||1), rH=BLAST_HALF*(scale||1);
+  const cx=sandCell(wx), cy=sandCell(wy), cz=sandCell(wz);
+  const R=Math.ceil(rH);
+  /* GATHER FIRST, THEN CHOOSE, and the reason is a bug worth remembering.
+     Throwing beads as they were found and stopping at the budget truncated the
+     blast IN SCAN ORDER: fired from inside a heap it took every bead on the low
+     side of z and none at all on the high side — 420 to 0, measured — because
+     the scan reached the budget before it reached the far half of the sphere.
+     A budget has to be spent evenly over what it is choosing between, so the
+     candidates are collected and then sampled. */
+  let nc=0;
+  for(let z=cz-R;z<=cz+R;z++) for(let y=cy-R;y<=cy+R;y++) for(let x=cx-R;x<=cx+R;x++){
+    if(!w.inBox(x,y,z)) continue;
+    const i=w.idx(x,y,z), m=w.m[i];
+    if(m===S_AIR || m===S_ROCK || SM_K[m]===K_STATIC) continue;
+    const ex=x-cx, ey=y-cy, ez=z-cz;
+    const d=Math.sqrt(ex*ex+ey*ey+ez*ez);
+    if(d>rH) continue;
+    /* full inside a body width, tapering to half at three, and past the taper
+       it is a coin toss whether this particular bead was caught */
+    if(d>rF && rnd() > 1-(d-rF)/(rH-rF)*0.5) continue;
+    if(nc >= BLAST_CAND.length) break;
+    BLAST_CAND[nc++] = (z<<20) | (y<<10) | x;
+  }
+  /* partial Fisher-Yates: the first BLAST_MAX of them, uniformly */
+  const take = nc < BLAST_MAX ? nc : BLAST_MAX;
+  for(let a=0;a<take;a++){
+    const b = a + ((rnd()*(nc-a))|0);
+    const tmp=BLAST_CAND[a]; BLAST_CAND[a]=BLAST_CAND[b]; BLAST_CAND[b]=tmp;
+  }
+  let thrown=0, woken=0;
+  for(let c=0;c<nc;c++){
+    const v=BLAST_CAND[c], x=v&1023, y=(v>>10)&1023, z=(v>>20)&1023;
+    const i=w.idx(x,y,z), m=w.m[i];
+    const ex=x-cx, ey=y-cy, ez=z-cz;
+    const d=Math.sqrt(ex*ex+ey*ey+ez*ez);
+    const k = d<=rF ? 1 : 1 - (d-rF)/(rH-rF)*0.5;
+    if(c>=take){ w.touch(x,y,z); woken++; continue; }
+    /* radial where there is a radius, along the shot where there is not */
+    let ux,uy,uz;
+    if(d>0.001){ ux=ex/d; uy=ey/d; uz=ez/d; } else { ux=dx; uy=dy; uz=dz; }
+    const b=0.55;
+    let px=ux+dx*b, py=uy+dy*b, pz=uz+dz*b;
+    const pl=Math.hypot(px,py,pz)||1;
+    const sp=BLAST_V*k*(0.6+rnd()*0.7);
+    w.m[i]=S_AIR; w.touch(x,y,z);
+    gritAdd((x+0.5)*CELL_M,(y+0.5)*CELL_M,(z+0.5)*CELL_M,
+            px/pl*sp, py/pl*sp + sp*0.25, pz/pl*sp, m);
+    thrown++;
+  }
+  if(thrown||woken) G.dirty=true;
+  return thrown;
+}
+
+/* --------------------------------------------------------------------------
    GRIT — the only thing left of RAW, and the part that was worth keeping
    --------------------------------------------------------------------------
    A bead in FLIGHT is ballistic and continuous, and that is what makes the arc
@@ -4562,7 +4710,7 @@ function sandStep(dt){
   gritStep(dt);
   sandAcc += Math.min(dt, 0.1);
   const period = 1/SAND_HZ;
-  let budget = 2;                        // never more than two ticks in a frame
+  let budget = 3;                        // never more than three ticks in a frame
   const gd = sandDir();
   while(sandAcc >= period && budget-- > 0){ sandAcc -= period; sandTick(SAND, gd); }
   if(sandAcc > period) sandAcc = period;
@@ -5091,6 +5239,26 @@ function shoot(){
     let px = tx-mx, py = ty-my, pz = tz-mz;
     const pl = Math.hypot(px,py,pz) || 1;
     addPellets(mx,my,mz, px/pl, py/pl, pz/pl, pl);
+  }
+  /* LOOSE MATERIAL COMES FIRST, because it is in front of everything else it
+     could be in front of. A heap of sand between you and a block absorbs the
+     shot, which is what a heap of sand does. Fired while standing in one, the
+     ray starts inside a bead and the blast lands on your own position — so
+     shooting your way out of being buried throws it off you in every
+     direction, which is exactly the case Marcelo asked for. */
+  {
+    const sh = sandRayHit(r.ox, r.oy, r.oz, r.dx, r.dy, r.dz, Math.min(dist, REACH));
+    if(sh){
+      const bx=(sh.cx+0.5)*CELL_M, by=(sh.cy+0.5)*CELL_M, bz=(sh.cz+0.5)*CELL_M;
+      const n = sandBlast(bx,by,bz, r.dx,r.dy,r.dz, 1);
+      snd.crumble();
+      G.shake = Math.max(G.shake, 0.06);
+      for(let k=0;k<10;k++)
+        addP(bx+(wrnd()-.5)*0.7, by+(wrnd()-.5)*0.7, bz+(wrnd()-.5)*0.7,
+             -r.dx*3+(wrnd()-.5)*5, 1.5+wrnd()*3, -r.dz*3+(wrnd()-.5)*5,
+             0.10+wrnd()*0.16, 0.5, [SM_COL[sh.m*3],SM_COL[sh.m*3+1],SM_COL[sh.m*3+2]], 0);
+      return;
+    }
   }
   /* Enemies come first, but only if one is genuinely nearer than whatever
      block the ray would otherwise have hit — otherwise you would shoot
