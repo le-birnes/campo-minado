@@ -1,0 +1,176 @@
+<!doctype html><meta charset="utf-8"><title>the island</title>
+<style>
+ html,body{margin:0;background:#0b0c10;color:#dfe2ea;font:13px ui-monospace,Menlo,monospace}
+ #wrap{padding:10px}
+ canvas{image-rendering:pixelated;border:1px solid #2a2d38;background:#05060a;display:block}
+ .cap{padding:6px 2px 8px;color:#8d93a3}
+ .cap b{color:#ffb347}
+ .legend{display:flex;gap:12px;flex-wrap:wrap;margin:8px 0}
+ .legend span{display:flex;align-items:center;gap:5px}
+ .sw{width:11px;height:11px;border:1px solid #333;display:inline-block}
+ pre{color:#b9c0d0;font:12px ui-monospace,monospace;margin:10px 0 0}
+</style>
+<body><div id="wrap">
+<div class="cap" id="cap">building…</div>
+<canvas id="c"></canvas>
+<div class="legend" id="leg"></div>
+<pre id="out"></pre>
+</div>
+<script src="sand.js"></script>
+<script src="impact.js"></script>
+<script src="round.js"></script>
+<script src="island.js"></script>
+<script>
+/* A vertical slice of the island, drawn the same way view.html draws its
+   scenes: one block per voxel, up is up, no camera to argue about. What is
+   being checked is SHAPE — is there water round it, does the rock sit in it,
+   is there sand where they meet, is the hole open to the sky, does the tree
+   stand on the rock with its crown clear of it. */
+const Q = new URLSearchParams(location.search);
+const W = +(Q.get('w')||192), H = +(Q.get('h')||128), D = +(Q.get('d')||192);
+const PX = +(Q.get('px')||4);
+const SEED = +(Q.get('seed')||7);
+const L=[], log=s=>L.push(s);
+const fx=(n,d=0)=>n.toLocaleString('en-US',{maximumFractionDigits:d});
+
+const t0 = performance.now();
+const IS = islandWorld(W,H,D,SEED);
+const build = performance.now()-t0;
+const w = IS.w;
+
+/* A SLAB, NOT A SLICE, and the difference was found the hard way.
+
+   The first version drew one voxel-thick cross-section through the tree, and
+   the vision review failed it twice for "a leaf cluster floating in mid-air
+   detached from the trunk". It was right about the PICTURE and wrong about the
+   world: a plane one voxel thick cuts through a three-dimensional tree, so the
+   branch holding a cluster curves out of the plane and the cluster is left
+   hanging on nothing. No tree survives that view.
+
+   So this projects a slab: for each column, the nearest non-air voxel within
+   +/- SLAB of the centre plane, shaded darker the further back it sits. The
+   island profile still reads, and a tree looks like a tree because the whole
+   of it is in frame. A true cross-section is still the right instrument for
+   the material scenes in view.html, where the question IS what is inside. */
+const zc = +(Q.get('z') || Math.round(IS.tree.z));
+const SLAB = +(Q.get('slab') || 26);
+const c = document.getElementById('c');
+c.width = W*PX; c.height = H*PX;
+const g = c.getContext('2d');
+g.fillStyle='#05060a'; g.fillRect(0,0,c.width,c.height);
+const seen = new Set();
+let filled=0;
+const z0 = Math.max(0, zc-SLAB), z1 = Math.min(D-1, zc+SLAB);
+for (let y=0;y<H;y++) for (let x=0;x<W;x++){
+  let m = AIR, depth = 0;
+  for (let z=z0; z<=z1; z++){
+    const v = w.at(x,y,z);
+    if (v !== AIR){ m = v; depth = (z-z0)/Math.max(1,z1-z0); break; }
+  }
+  if (m === AIR) continue;
+  seen.add(m); filled++;
+  const shade = 1 - depth*0.45;               // further back, darker
+  const col = MAT[m].c;
+  g.fillStyle = `rgb(${col.map(v=>Math.round(v*255*shade)).join(',')})`;
+  g.fillRect(x*PX, (H-1-y)*PX, PX, PX);
+}
+/* the water line, so "is it level" is checkable rather than a matter of taste */
+g.strokeStyle='rgba(120,190,255,0.35)'; g.beginPath();
+g.moveTo(0,(H-1-IS.SEA)*PX+.5); g.lineTo(c.width,(H-1-IS.SEA)*PX+.5); g.stroke();
+
+document.getElementById('cap').innerHTML =
+  `<b>the island</b> — rock in water, sand where they meet, the hole the boss left, `+
+  `and a tree whose every leaf cluster is its own structure.<br>`+
+  `${W}x${H}x${D} voxels at ${G_CELL.toFixed(3)} m = ${(W*G_CELL).toFixed(1)} x `+
+  `${(H*G_CELL).toFixed(1)} x ${(D*G_CELL).toFixed(1)} m · slab z=${zc}+-${SLAB} · `+
+  `${fx(filled)} voxels facing you · built in ${build.toFixed(0)} ms`;
+document.getElementById('leg').innerHTML =
+  [...seen].map(m=>`<span><i class="sw" style="background:rgb(${MAT[m].c.map(v=>Math.round(v*255)).join(',')})"></i>${MAT[m].n}</span>`).join('');
+
+/* ---- and what the round does to it ---- */
+log('=== THE ISLAND, AND WHAT A SHOT DOES TO IT ===');
+log('');
+log(`  ${(W*G_CELL).toFixed(1)} x ${(H*G_CELL).toFixed(1)} x ${(D*G_CELL).toFixed(1)} m, `+
+    `${fx(W*H*D)} voxels, built in ${build.toFixed(0)} ms.`);
+log(`  Sea line at ${(IS.SEA*G_CELL).toFixed(1)} m. Rock mass radius ${(IS.R*G_CELL).toFixed(1)} m.`);
+log(`  The hole the boss left: ${(IS.hole.r*G_CELL).toFixed(1)} m across, `+
+    `${fx(IS.hole.vox)} voxels taken out of the rock.`);
+log(`  The tree: ${(IS.tree.h*G_CELL).toFixed(1)} m tall, ${IS.tree.clusters} leaf clusters, `+
+    `each one its own structure.`);
+log('');
+{
+  let n=0; for (let i=0;i<w.N;i++) if (w.m[i]===WATER) n++;
+  let sd=0, rk=0, wd=0, lf=0;
+  for (let i=0;i<w.N;i++){ const m=w.m[i];
+    if (m===SAND) sd++; else if (m===ROCK) rk++; else if (m===WOOD) wd++; else if (m===LEAF) lf++; }
+  log('     material     voxels        as metres cubed');
+  for (const [nm,v] of [['water',n],['rock',rk],['sand',sd],['wood',wd],['leaf',lf]])
+    log(`     ${nm.padEnd(10)} ${fx(v).padStart(10)}   ${fx(v*Math.pow(G_CELL,3),1).padStart(12)} m3`);
+}
+log('');
+log('--- THE STRUCTURES: EACH ONE HAS ITS OWN THRESHOLD ---');
+log('');
+log('  This is what "destroy means disassemble when threshold is met" needs. A');
+log('  block could be priced because a block is a known 4,096 voxels. A leaf');
+log('  cluster is not a block, so the world has to say what its THINGS are.');
+log('');
+const R = ROUNDS.buck, E = roundEnergy(R), FR = E*R.mix.frac;
+log(`     a shot delivers ${fx(FR,0)} J of fracture (${(R.mix.frac*100).toFixed(0)}% of ${fx(E,0)} J)`);
+log('');
+log('     structure           voxels   threshold      shots to disassemble');
+{
+  const tr = IS.St.list[0];
+  log(`     ${tr.name.padEnd(18)} ${fx(tr.n).padStart(7)}   ${fx(tr.threshold,0).padStart(9)} J   `+
+      `${(tr.threshold/FR).toFixed(1)}`);
+  const cl = IS.St.list.slice(1);
+  const ns = cl.map(s=>s.n), ths = cl.map(s=>s.threshold);
+  const mn=Math.min(...ths), mx=Math.max(...ths), av=ths.reduce((a,b)=>a+b,0)/ths.length;
+  log(`     ${('leaf x'+cl.length).padEnd(18)} ${fx(Math.min(...ns))}-${fx(Math.max(...ns))}`.padEnd(32)+
+      `${fx(mn,0)}-${fx(mx,0)} J`.padStart(14)+`   ${(mn/FR).toFixed(3)}-${(mx/FR).toFixed(3)}`);
+  log('');
+  log(`  The trunk takes ${(tr.threshold/FR).toFixed(1)} shots. A leaf cluster takes `+
+      `${(av/FR*1000).toFixed(0)} THOUSANDTHS of one,`);
+  log('  so the crown comes apart in handfuls while the trunk stands — which is');
+  log('  what shooting a tree looks like, and it needed the clusters to be');
+  log('  separate structures to be able to happen at all.');
+}
+log('');
+log('--- ONE SHOT INTO THE CROWN ---');
+log('');
+{
+  /* Walk the jet through the crown and disassemble whatever structures it
+     reaches, in order, until the fracture budget is gone. */
+  let budget = FR, killed = 0, voxels = 0;
+  const order = IS.St.list.slice(1).sort((a,b)=>a.threshold-b.threshold);
+  for (const s of order){
+    if (budget < s.threshold) break;
+    budget -= s.threshold; killed++; voxels += s.n;
+  }
+  log(`  ${killed} of ${IS.St.list.length-1} leaf clusters disassemble, ${fx(voxels)} voxels of leaf,`);
+  log(`  and ${fx(budget,0)} J is still unspent — a shot into a crown is not`);
+  log('  limited by energy, it is limited by how much crown the jet touches.');
+  log('  That is the honest reason the jet needs a geometry and not just a budget:');
+  log('  the energy would take the whole tree, and the shape is what stops it.');
+}
+log('');
+log('--- WHAT THE REALISTIC MIX COSTS, NOW IT IS LOCKED ---');
+log('');
+log(`  Mix is ${(R.mix.frac*100).toFixed(0)}/${(R.mix.kin*100).toFixed(0)}/${(R.mix.therm*100).toFixed(0)} `+
+    `(fracture/kinetic/thermal), kept realistic as asked.`);
+log('');
+log('     target                       shots');
+for (const [nm, mat, n] of [['a rock block (4,096 vox)','rock',4096],
+                            ['a sand block','sand',4096],
+                            ['the trunk','wood',IS.St.list[0].n],
+                            ['one leaf cluster','leaf',IS.St.list[1]?IS.St.list[1].n:1]]){
+  log(`     ${nm.padEnd(28)} ${(n*voxelCost(mat)/FR).toFixed(2)}`);
+}
+log('');
+log(`  Rock is ${(4096*voxelCost('rock')/FR).toFixed(1)} shots, not 2. That is the price of keeping the mix`);
+log('  realistic instead of bending it to hit a number, and it was the choice');
+log('  asked for. If 2 is wanted later it is one field in the ROUNDS table.');
+log('');
+document.getElementById('out').textContent = L.join('\n');
+document.body.dataset.r = L.join('~');
+for (const s of L) console.log(s);
+</script></body>

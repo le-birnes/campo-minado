@@ -53,6 +53,13 @@ import run_harness as R
 
 ROOT = os.path.dirname(HERE)
 VIEW = os.path.join(ROOT, "voxel", "view.html")
+ISLAND = os.path.join(ROOT, "voxel", "island.html")
+
+# Which page a scene lives on. view.html carries the five material scenes; the
+# island is its own page because it is a WORLD rather than a behaviour, and it
+# is judged against different things - shoreline, sand where rock meets water,
+# a hole open to the sky, a tree standing clear of both.
+PAGES = {"island": ISLAND}
 SHOTS = os.path.join(ROOT, "shots", "voxel")
 
 try:
@@ -69,6 +76,8 @@ SCENES = {
     "float": "oil must stay ABOVE water; sand must sink THROUGH both to the floor",
     "seam":  "a pile falling across a chunk boundary must be symmetric, no shelf",
     "burn":  "fire must spread along an oil slick, smoke, and consume it",
+    "island":"a rock mass in water with sand where they meet, a hole blown "
+             "through the rock, and a tree standing on it",
 }
 
 RUBRIC = """You are reviewing one frame from a falling-material simulation - a
@@ -108,6 +117,45 @@ An arrangement that obeys the physics described is pass. A clear violation is
 fail. Slightly odd but physically plausible is warn. Do not invent defects: if it
 looks sensible, say so and pass it."""
 
+ISLAND_RUBRIC = """You are reviewing a FRONT VIEW of a generated island in a
+voxel game, drawn one coloured block per voxel. It is a SLAB PROJECTION: for
+each column you are seeing the nearest solid voxel within a slab of the world,
+shaded darker the further back it sits. So it reads like a side-on photograph
+of the island, not a cut through it. Up in the image is up in the world, and a
+faint blue horizontal line marks the water line.
+
+It is supposed to be a ROCK mass sitting in WATER, with SAND where the rock
+meets the water, a HOLE blown through the rock, and a TREE standing on the rock
+with a crown of green leaves above it.
+
+Colours: water blue, rock dark grey-brown, sand pale tan, wood brown, leaf green.
+
+What can be wrong, and these are the only things to judge:
+
+  THE WATER IS NOT LEVEL. It must be one flat horizontal surface at the marked
+  line, the same height on both sides of the island. Sloped or stepped is a fail.
+
+  THE ROCK FLOATS. The rock mass must sit on the bottom and rise out of the
+  water, not hang in it.
+
+  NO SAND AT THE SHORE. Pale sand should be visible where the rock surface is
+  near the water line.
+
+  THE TREE IS WRONG. It should stand on ROCK, above the water line, with a brown
+  trunk and green leaf clusters above and around the top of it. A tree growing
+  out of water, a floating trunk, or leaves far from the trunk are failures.
+  Leaves in SEVERAL SEPARATE CLUMPS is correct and intended - never report that
+  as a defect.
+
+  THE HOLE. Somewhere in the rock there should be a gap bitten out of it. Its
+  absence is worth a note but not a fail on its own: this is one slice and the
+  hole may be off this plane.
+
+  NOTHING GENERATED. A blank or nearly blank frame means the build failed.
+
+Be literal about what you can see. If it looks like a sensible island, pass it.
+Do not invent defects."""
+
 SCHEMA = {
     "type": "object",
     "properties": {
@@ -133,8 +181,10 @@ def shoot(scene, ticks, size):
     """One frame of a standalone page. No build() — there is no game to inject."""
     os.makedirs(SHOTS, exist_ok=True)
     png = os.path.join(SHOTS, "vox_%s_t%d.png" % (scene, ticks))
-    res, secs, bad, tries = R.escalate(VIEW, budget=6000,
-                                       query="scene=%s&ticks=%d" % (scene, ticks),
+    page = PAGES.get(scene, VIEW)
+    query = "seed=7" if scene in PAGES else ("scene=%s&ticks=%d" % (scene, ticks))
+    res, secs, bad, tries = R.escalate(page, budget=12000,
+                                       query=query,
                                        shot=png, size=size,
                                        profile=os.path.join(HERE, "cdata_eyes"))
     ok = os.path.exists(png) and os.path.getsize(png) > 2000
@@ -149,7 +199,7 @@ def review(png, scene):
         return {"verdict": "skip",
                 "error": "no vision backend (key=%s, calls=%s/%s)"
                          % (st.get("gemini_key"), st.get("calls_today"), st.get("cap"))}
-    ask = RUBRIC + "\n\nWHAT THIS SCENE IS SUPPOSED TO SHOW:\n" + SCENES.get(scene, "")
+    ask = (ISLAND_RUBRIC if scene in PAGES else RUBRIC) + "\n\nWHAT THIS SCENE IS SUPPOSED TO SHOW:\n" + SCENES.get(scene, "")
     r = agybridge.vision(ask, files=[png], schema=SCHEMA)
     if not r.ok:
         return {"verdict": "skip", "error": r.reason}
