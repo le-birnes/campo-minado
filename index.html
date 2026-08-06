@@ -2379,6 +2379,7 @@ function genWorld(d){
   G.crack=new Uint8Array(N);
   G.rockHit=new Uint8Array(N);      // shots taken by each cinderstone wall
   G.lamp=0;                         // lanterns found: each adds to the ambient
+  G.noWin=false; G.island=false; G.emerge=0; G.gravK=1;
   /* A NEW BOARD STARTS WITH NO RUBBLE ON IT. Without this the grains and, far
      worse, their occupancy claims survive into the next game — so the second
      run of a session has invisible solid cells scattered through its air. */
@@ -6601,6 +6602,8 @@ function buildIsland(){
 }
 
 function bossBlows(x,y,z){
+  /* no ending screen after this, ever. The island IS the ending. */
+  G.noWin = true;
   G.emerge = EMERGE_T;
   G.shake = 1.0;
   snd.boom && snd.boom();
@@ -6652,6 +6655,15 @@ function checkWin(){
   /* safeTotal>0 guards the degenerate case: a board that has not been generated
      yet has 0 revealed of 0 safe, and >= would call that a win the instant the
      level loads. The flag branch has always carried the same guard as mines>0. */
+  /* ONCE THE BOSS HAS BLOWN, THE RUN DOES NOT END. Marcelo: it kept showing
+     the end screen instead of the ending, and the reason is that killing the
+     finale creature is the LAST thing on a board that is already fully
+     flagged - so `done` was already true, and the very next checkWin() from
+     any other call site won the game out from under the blast.
+
+     bossBlows() sets G.noWin and nothing clears it. From that moment the world
+     is the island and it runs until the window is closed or R is pressed. */
+  if(G.noWin || G.emerge > 0 || G.island) return;
   const dug = G.safeTotal > 0 && G.revealed >= G.safeTotal;
   const done = G.dungeon
     ? (dug || (G.mines>0 && G.marked===G.mines && correctFlags()===G.mines))
