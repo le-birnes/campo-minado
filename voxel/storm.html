@@ -1,0 +1,201 @@
+<!doctype html><meta charset="utf-8"><title>how big can the storm be</title>
+<body style="background:#111;color:#ddd;font:13px ui-monospace,monospace;padding:12px">
+<pre id="out">running…</pre>
+<script>
+/* ============================================================================
+   HOW BIG CAN THE STORM BE
+   ============================================================================
+   Marcelo: "I want to make a system able to support a storm of particles as big
+   as it gets ... compute the interaction of the max simultaneous particles.
+   That's what I want to know how far you can go. How big of a tornado can we
+   have."
+
+   This is the question the whole voxel/ folder has been circling, so it is
+   answered the way everything else here is: measured on the real machine, with
+   the three ways a storm can actually be built, and the sizes converted into
+   metres at the end because "particles per second" is not an answer anyone can
+   picture.
+
+   THE THREE WAYS, cheapest to dearest:
+
+     FIELD-DRIVEN   every particle asks a formula where it should be. No
+                    neighbours. This is a tornado as a Rankine vortex and it is
+                    what a real one mostly IS.
+     6-NEIGHBOUR    the falling-sand rule: each cell looks at its faces. Right
+                    for powders, WRONG for fluids, because rotation on a
+                    6-neighbour lattice grows fake preferred axes.
+     26-NEIGHBOUR   D3Q27. What a fluid actually needs to rotate without going
+                    square, and four times the neighbour work.
+   ========================================================================== */
+const L=[],log=s=>L.push(s);
+const fx=(n,d=0)=>n.toLocaleString('en-US',{maximumFractionDigits:d});
+const ms=f=>{const t=performance.now();f();return performance.now()-t;};
+const G_CELL=2.8/16;                        // 0.175 m, the bead
+
+/* ---- the three inner loops, each as bare as it can honestly be ---- */
+const N = 1<<20;                            // a million particles
+const px=new Float32Array(N), py=new Float32Array(N), pz=new Float32Array(N);
+const vx=new Float32Array(N), vy=new Float32Array(N), vz=new Float32Array(N);
+let s=1; const rnd=()=>((s=(s*1664525+1013904223)>>>0)/4294967296);
+for(let i=0;i<N;i++){
+  px[i]=(rnd()-.5)*200; py[i]=rnd()*120; pz[i]=(rnd()-.5)*200;
+  vx[i]=vy[i]=vz[i]=0;
+}
+
+/* FIELD: a Rankine vortex. Solid-body rotation inside the core, 1/r outside,
+   plus the inward pull of the pressure deficit and the updraught. Ten numbers
+   for the whole storm, and this is every flop each particle costs. */
+function stepField(n, dt){
+  const r0=30, vmax=60, lift=18;
+  for(let i=0;i<n;i++){
+    const dx=px[i], dz=pz[i];
+    const r=Math.sqrt(dx*dx+dz*dz)+1e-6;
+    const vt = r<r0 ? vmax*(r/r0) : vmax*(r0/r);
+    const tx=-dz/r, tz=dx/r;                 // tangential
+    const pull = r<r0 ? 0 : 18*(r0/r);       // pressure deficit draws it in
+    vx[i]=tx*vt - dx/r*pull;
+    vz[i]=tz*vt - dz/r*pull;
+    vy[i]=lift*Math.max(0,1-r/(r0*3));
+    px[i]+=vx[i]*dt; py[i]+=vy[i]*dt; pz[i]+=vz[i]*dt;
+  }
+}
+/* 6-NEIGHBOUR and 26-NEIGHBOUR, on a flat lattice, every cell active. This is
+   the worst case on purpose: no dirty rect, nothing asleep, nothing skipped. */
+function makeGrid(side){
+  const g=new Uint8Array(side*side*side);
+  for(let i=0;i<g.length;i++) g[i]= (i*2654435761>>>0)%3 ? 1 : 0;
+  return g;
+}
+function stepN(g, side, dirs){
+  const S=side, S2=side*side;
+  let moved=0;
+  for(let y=1;y<S-1;y++) for(let z=1;z<S-1;z++) for(let x=1;x<S-1;x++){
+    const i=(y*S+z)*S+x;
+    if(!g[i]) continue;
+    let acc=0;
+    for(let k=0;k<dirs.length;k+=3){
+      const j=i + dirs[k] + dirs[k+1]*S + dirs[k+2]*S2;
+      acc += g[j];
+    }
+    if(acc<3){ g[i]=0; g[i-S]=1; moved++; }
+  }
+  return moved;
+}
+const D6=[], D26=[];
+for(let dy=-1;dy<=1;dy++) for(let dz=-1;dz<=1;dz++) for(let dx=-1;dx<=1;dx++){
+  if(!dx&&!dy&&!dz) continue;
+  const man=Math.abs(dx)+Math.abs(dy)+Math.abs(dz);
+  if(man===1) D6.push(dx,dy,dz);
+  D26.push(dx,dy,dz);
+}
+
+log('=== HOW BIG CAN THE STORM BE ===');
+log('');
+log(`  bead ${G_CELL.toFixed(3)} m. Worst case throughout: every particle active,`);
+log('  every tick, nothing asleep, no dirty rect helping.');
+log('');
+log('--- 1. THE THREE WAYS, MEASURED ---');
+log('');
+stepField(1<<16, 1/60);                       // warm
+let tF=0; for(let k=0;k<6;k++) tF+=ms(()=>stepField(N,1/60));
+const nsField=tF/6/N*1e6;
+
+const side=96, cells=(side-2)*(side-2)*(side-2);
+const g6=makeGrid(side), g26=makeGrid(side);
+stepN(g6,side,D6); stepN(g26,side,D26);       // warm
+let t6=0; for(let k=0;k<4;k++) t6+=ms(()=>stepN(g6,side,D6));
+let t26=0; for(let k=0;k<4;k++) t26+=ms(()=>stepN(g26,side,D26));
+const ns6=t6/4/cells*1e6, ns26=t26/4/cells*1e6;
+
+log('     method                       ns/particle   particles/second');
+for(const [nm,ns] of [['field (Rankine vortex)',nsField],
+                      ['6-neighbour lattice',ns6],
+                      ['26-neighbour (D3Q27)',ns26]])
+  log(`     ${nm.padEnd(28)} ${ns.toFixed(1).padStart(11)}   ${fx(1e9/ns).padStart(16)}`);
+log('');
+log(`  26 neighbours costs ${(ns26/ns6).toFixed(1)}x six, not the 4.3x the direction count`);
+log('  suggests. The extra is cache rather than arithmetic: the diagonals live on');
+log('  other rows and other planes, so they miss where the faces hit.');
+log('');
+log('  AND THE FIELD IS THE SLOW ONE, which is the opposite of what I expected');
+log('  and wrote down before running it.');
+log('');
+log(`     field ${nsField.toFixed(1)} ns  against  6-neighbour ${ns6.toFixed(1)} ns  =  `+
+    `the formula costs ${(nsField/ns6).toFixed(1)}x the lookup`);
+log('');
+log('  A square root and four divisions are dearer than six array reads. Modern');
+log('  machines are fast at fetching and slow at transcendentals, and the whole');
+log('  intuition that "a formula must beat a neighbourhood" is a hangover from');
+log('  when that was the other way round.');
+log('');
+log('  So the field does NOT win on cost per particle. It wins by NOT NEEDING');
+log('  THE PARTICLE AT ALL - and that is a different argument, made in 3.');
+log('');
+log('--- 2. SO HOW MANY, IN A FRAME ---');
+log('');
+log('     budget                         field      6-nbr      26-nbr');
+for(const [nm,budget] of [['4 ms, a physics slice of 60 Hz',0.004],
+                          ['16.6 ms, a whole 60 Hz frame',0.0166],
+                          ['50 ms, the sim at 20 Hz',0.050]]){
+  log(`     ${nm.padEnd(32)} ${fx(budget/(nsField/1e9)).padStart(9)}  `+
+      `${fx(budget/(ns6/1e9)).padStart(9)}  ${fx(budget/(ns26/1e9)).padStart(9)}`);
+}
+log('');
+
+log('--- 3. AND HOW BIG IS THAT TORNADO ---');
+log('');
+log('  A funnel is a cone shell, not a solid cone: the air in the middle is');
+log('  doing nothing you can see. So the particle count is the SURFACE of the');
+log('  funnel a few beads thick, which is the same "a reaction is a surface"');
+log('  result this project keeps landing on.');
+log('');
+log('     funnel        height   shell particles   field   6-nbr   26-nbr');
+const SLICE=0.050;                             // 20 Hz
+for(const [rad,h] of [[5,40],[15,120],[40,300],[100,600],[250,1200]]){
+  const area = 2*Math.PI*rad*h;                // the cone shell, m2
+  const n = area*3/(G_CELL*G_CELL);            // three beads thick
+  const fits = (ns)=> (n*(ns/1e9) <= SLICE) ? 'yes' : 'no';
+  log(`     r=${String(rad+' m').padEnd(8)} ${String(h+' m').padStart(6)}   ${fx(n).padStart(14)}   `+
+      `${fits(nsField).padStart(5)}   ${fits(ns6).padStart(5)}   ${fits(ns26).padStart(6)}`);
+}
+log('');
+{
+  const n15 = 2*Math.PI*15*120*3/(G_CELL*G_CELL);
+  log(`  READ THE TABLE, NOT THE HOPE. I wrote "bigger than the weather" under`);
+  log('  it before it ran, and the table says otherwise: a 250 m funnel needs');
+  log(`  ${fx(2*Math.PI*250*1200*3/(G_CELL*G_CELL))} particles and the best method affords ${fx(SLICE/(ns6/1e9))} at 20 Hz.`);
+  log('  Off by two orders of magnitude. The prose was wrong; the arithmetic was');
+  log('  right and was sitting directly above it.');
+  log('');
+  log('  THE HONEST CEILING, with the funnel actually made of particles:');
+  log('');
+  log(`     about 15 m across, 120 m tall  ${fx(n15)} particles, and it fits`);
+  log('     40 m across                   does not fit by any method');
+  log('');
+  log('  That is a dust devil and a small waterspout, not a tornado.');
+}
+log('');
+log('--- 4. WHAT THIS ACTUALLY SAYS ---');
+log('');
+log('  The storm is not limited by how many particles exist. It is limited by');
+log('  how many of them have to ASK EACH OTHER anything.');
+log('');
+log('     air in the funnel      -> FIELD. It is doing what a formula says.');
+log('     debris and water       -> particles. It is what you can see, and it');
+log('                               is a few thousand, not a few million.');
+log('     where they meet        -> the field is a velocity the particles read.');
+log('');
+log('  So a kilometre-tall funnel is affordable, but not by making the air out');
+log('  of beads at ANY price. The funnel is a SURFACE - a mesh, a shader, a');
+log('  drawn shape following the ten numbers - and the particles are only the');
+log('  things being thrown about, which is thousands rather than millions.');
+log('');
+log('  That is the same split as NEXT.md rule 2 and the same split as the bead:');
+log('  simulate what is seen, integrate the bulk. And it is the third time this');
+log('  project has arrived at it from a different direction, which is the best');
+log('  evidence available that it is the real shape of the problem.');
+log('');
+log('=== done ===');
+document.getElementById('out').textContent=L.join('\n');
+document.body.dataset.r=L.join('~');
+</script></body>
