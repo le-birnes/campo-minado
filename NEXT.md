@@ -141,6 +141,15 @@ Verify with agy at ?lightx=3. Push after every change. Small case first -
 Apprentice is 300 cells, the dungeon is 7,776. Marcelo plays the build, so say
 plainly what is untested rather than implying it works.
 
-Then, in order: the 500 m sphere and its three tiers, wind + MORTAL, celestial
-records, the spit.
+EXPECT THE WATER TO LOOK SUBTLY WRONG, and do not treat it as a bad port.
+sand.js uses SIX neighbours - faces only - which is right and cheap for powders
+and solids, because they do not rotate. It is also the configuration that makes
+FLUIDS anisotropic: flow prefers the axis directions and a vortex comes out
+square. That is the known lattice-gas failure and the reason lattice-Boltzmann
+exists. The fix is 26 neighbours (D3Q27) for the LIQUID kind only, 6 for
+everything else - but it is a SECOND job. Doing both at once makes it
+impossible to tell which change caused what.
+
+Then, in order: 26-neighbour liquids, the 500 m sphere and its three tiers,
+wind + MORTAL, celestial records, the spit.
 ```
