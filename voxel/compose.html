@@ -1,0 +1,83 @@
+<!doctype html><meta charset="utf-8"><title>what things are made of</title>
+<body style="background:#111;color:#ddd;font:13px ui-monospace,monospace;padding:12px">
+<pre id="out">running…</pre>
+<script src="sand.js"></script><script src="impact.js"></script>
+<script src="round.js"></script><script src="compose.js"></script>
+<script>
+const L=[],log=s=>L.push(s);
+const fx=(n,d=0)=>n.toLocaleString('en-US',{maximumFractionDigits:d});
+const R=ROUNDS.buck, E=roundEnergy(R), V=BLOCK_M*BLOCK_M*BLOCK_M;
+log('=== WHAT THINGS ARE MADE OF ===');
+log('');
+log('--- 1. NO TWO BLOCKS ARE THE SAME ---');
+log('');
+log('  A block is a RECIPE mixed from the world seed, so composition is a');
+log('  property of the place and survives being asked twice.');
+log('');
+log('     block    sand    rock   water     mass');
+for (let i=0;i<6;i++){
+  const r = blockRecipe(i*17+3);
+  const m = V*(r.sand*IMAT.sand.dens + r.rock*IMAT.rock.dens + r.water*1000);
+  log(`     #${String(i).padEnd(7)} ${(r.sand*100).toFixed(0).padStart(4)}%  `+
+      `${(r.rock*100).toFixed(0).padStart(4)}%  ${(r.water*100).toFixed(1).padStart(5)}%  ${fx(m).padStart(8)} kg`);
+}
+log('');
+log('--- 2. BLOWN TO SMITHEREENS: WHAT COMES OUT ---');
+log('');
+log('  Nothing here is authored. Water plus heat is vapour, sand plus enough');
+log('  heat is glass, rock is rock and it lands. The ORDER matters and is');
+log('  physical: boiling water is far cheaper per kg than fusing sand, so a');
+log('  damp block makes steam and NO glass. That falls out; it is not a rule.');
+log('');
+log('     block   shots   vapour     glass    raw sand    rock    glass share');
+for (const shots of [1, 5, 25, 100]){
+  for (const b of [1, 4]){
+    const r = blockRecipe(b*17+3);
+    const y = blockYield(r, V, R.mix, E*shots);
+    log(`     #${b}     ${String(shots).padStart(5)}   ${fx(y.vapor,1).padStart(7)} kg `+
+        `${fx(y.glass,1).padStart(8)} kg ${fx(y.sand,0).padStart(8)} kg ${fx(y.rock,0).padStart(7)} kg`+
+        `   ${(y.glassFrac*100).toFixed(2)}%`);
+  }
+}
+log('');
+log('  Glass is HARD to make with a gun, and that is the honest result: fusing');
+log('  a kilogram of sand is 1.3 MJ and a shot carries 110 kJ of which 20% is');
+log('  heat. The "irregular glass" a shot leaves is a crust, and clean glass');
+log('  really does need mined raw sand organised and heated on purpose.');
+log('');
+log('--- 3. A MINE IS AN ENERGY SOURCE, NOT A WALL ---');
+log('');
+log(`  Iron shell round a black-powder core, ${(POWDER_MIX.saltpeter*100)}/`+
+    `${(POWDER_MIX.charcoal*100)}/${(POWDER_MIX.sulfur*100)} saltpeter/charcoal/sulfur.`);
+log('');
+{
+  const mv = Math.pow(0.5,3);            // a mine is a half-metre thing
+  const one = mineHit(mv, E*R.mix.frac);
+  log(`  a half-metre mine, one shot (${fx(E*R.mix.frac,0)} J of fracture):`);
+  log(`     shell needs ${fx(one.need,0)} J to open  ->  ${one.opened?'OPENS':'HOLDS, short by '+fx(one.short,0)+' J'}`);
+  const shots = one.opened ? 1 : Math.ceil(one.need/(E*R.mix.frac));
+  const op = mineHit(mv, shots*E*R.mix.frac);
+  log(`     it takes ${shots} shot(s) to breach the iron`);
+  if (op.opened){
+    const b = op.blast;
+    log('');
+    log(`     THEN IT GOES:  ${fx(b.E,0)} J total`);
+    log(`        fracture ${fx(b.frac,0)} J   kinetic ${fx(b.kin,0)} J   heat ${fx(b.therm,0)} J`);
+    log(`        noise    ${b.dB.toFixed(0)} dB at 1 m, ${b.heardAt(10).toFixed(0)} dB at 10 m, `+
+        `${b.heardAt(100).toFixed(0)} dB at 100 m`);
+    log(`        it breaks ${fx(b.frac/voxelCost('rock'),0)} voxels of rock, or `+
+        `${fx(b.frac/voxelCost('sand'),0)} of sand`);
+    log(`        against our own shot's ${fx(E*R.mix.frac,0)} J: `+
+        `${(b.frac/(E*R.mix.frac)).toFixed(1)}x a trigger pull`);
+  }
+  log('');
+  log('  THE SHELL IS THE HOOK. A mine only lights if the hit got THROUGH the');
+  log('  iron, so a glancing shot leaves it armed — which is exactly "one day');
+  log('  will be able to be blown and contained so not all will blow when they');
+  log('  are shot". The containment already has somewhere to live.');
+}
+log('');
+log('=== done ===');
+document.getElementById('out').textContent=L.join('\n');
+document.body.dataset.r=L.join('~');
+</script></body>
