@@ -9641,6 +9641,22 @@ const EX = {
   sweep: 0.85,   // how far the head swings off the direction of travel, radians
   route:  1,     // 0 = straight lines only, the old behaviour
   farFirst: 0,   // 1 = always head for the FARTHEST work (pure exploration)
+  /* NEAR PLAY. Marcelo: "limiting movement to 4 radius of blocks for action
+     (movement and shooting, thus getting near to enemies and mines to solve
+     them). Register sight for possible paths but only walk using 3 step."
+
+     near  is the ACTION radius in blocks: it will only take work that is
+           already within this many steps of where it stands. It does not stop
+           it TRAVELLING — if nothing is in range it falls back to the full
+           list and walks toward the nearest thing, or it would simply freeze
+           the moment it cleared its own neighbourhood.
+     legs  is how far one walk goes before it stops and looks again, and 3 is
+           the short-leash number. Sight is registered either way: the flood
+           and the passage book are built every step regardless of how far it
+           chose to walk, so looking is free and only WALKING is rationed.
+
+     Both default to off/wide, so nothing changes unless asked: ?ex=near:4,legs:3 */
+  near:   0,     // blocks: only act on work this close. 0 = anywhere
   patience: 14,  // steps it will keep walking at one objective without closing
   hunt:  16,     // steps it will spend going to find a creature it cannot see
   shut:   3,     // times one step must fail before the map stops offering it
@@ -10039,7 +10055,16 @@ function workNow(M, skip){
      level count as work at all. */
   const py = pcell()[1];
   const here = out.filter(w => cellXYZ(w.cell)[1] >= py - 1);
-  return here.length ? here : out;
+  const pool = here.length ? here : out;
+  if (EX.near > 0){
+    const within = pool.filter(w => w.d <= EX.near);
+    /* Falling back when nothing is in range is the whole reason this is a
+       preference and not a filter: a hard cut would strand it the moment it
+       finished the blocks around its feet. */
+    if (within.length) return within;
+    stats.nearMiss = (stats.nearMiss||0) + 1;
+  }
+  return pool;
 }
 
 /* ==========================================================================
