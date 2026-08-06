@@ -236,6 +236,55 @@ log('     method          4 ms      16.6 ms     50 ms (20 Hz)');
   log('  cannot buy a storm by filling it in. You can only ever afford its skin.');
 }
 log('');
+log('--- 6. THE REAL QUESTION: HOW BIG A HOLE CAN WE CARVE ---');
+log('');
+log('  Marcelo: the calculation is ON DEMAND. The question is how big a hole');
+log('  individual bead processing can carve when things go boom.');
+log('');
+log('  That changes the answer completely, and for the better, because a carve');
+log('  is ONE-OFF. It does not need 60 Hz. It happens once, and then it is done.');
+log('');
+{
+  const BV=G_CELL*G_CELL*G_CELL;
+  const CARVE=ns6/1e9, FALL=50e-9, BALL=9.1e-9;
+  const rad=(n)=>Math.cbrt(3*n*BV/(4*Math.PI));
+  log('     budget                    beads carved    hole radius   across');
+  for(const [nm,b] of [['4 ms slice',0.004],['16.6 ms, one frame',0.0166],
+                       ['100 ms, a visible hitch',0.100],['1 s over 60 frames',1.0]]){
+    const n=b/CARVE;
+    log(`     ${nm.padEnd(24)} ${fx(n).padStart(13)}   ${rad(n).toFixed(1).padStart(8)} m  ${(2*rad(n)).toFixed(0).padStart(6)} m`);
+  }
+  log('');
+  log('  So a 43 m crater is ONE HUNDRED MILLISECONDS, paid once. A hitch you');
+  log('  would forgive for a bomb, and nobody has to pay it again.');
+  log('');
+  log('  BUT THE DEBRIS IS PER TICK, EVERY TICK, AND THAT IS THE REAL WALL:');
+  log('');
+  log('     hole radius   beads freed    falling ms/tick   ballistic ms/tick');
+  for(const r of [2,5,11,21,46]){
+    const n=(4/3)*Math.PI*r*r*r/BV;
+    log(`     ${(r+' m').padStart(11)}   ${fx(n).padStart(11)}   ${(n*FALL*1000).toFixed(0).padStart(15)}   ${(n*BALL*1000).toFixed(0).padStart(17)}`);
+  }
+  log('');
+  log(`  A 50 ms tick affords ${fx(0.050/FALL)} falling beads - a hole of about`);
+  log(`  ${rad(0.050/FALL).toFixed(0)} m radius worth of material actually in motion.`);
+  log('');
+  log('  SO THE RULE FOR A FALLING-EVERYTHING ENGINE IN 3D IS:');
+  log('');
+  log('     YOU CAN DESTROY FAR MORE THAN YOU CAN WATCH FALL.');
+  log('');
+  log('  Carving 43 m costs 100 ms once. Watching 43 m of rubble fall costs');
+  log('  3.8 SECONDS PER TICK, for as long as it is falling. Four times the');
+  log('  hole, four hundred times the aftermath.');
+  log('');
+  log('  Which gives the design, and it is the same shape as everything else');
+  log('  here: carve at FULL resolution, because that is cheap and final. Then');
+  log('  TRIAGE what was freed - a budget of it becomes beads and falls where');
+  log('  you are looking, and the rest lands as a settled heap computed rather');
+  log('  than simulated. Mass conserved, nothing invented, and the cost of a');
+  log('  bomb stops depending on how big the bomb was.');
+}
+log('');
 log('=== done ===');
 document.getElementById('out').textContent=L.join('\n');
 document.body.dataset.r=L.join('~');
