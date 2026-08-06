@@ -33,6 +33,29 @@
    it holds its shape, weighs almost nothing, and burns. */
 const LEAF = addMaterial({n:'leaf', k:STATIC, d:255, s:0, life:0, burn:1,
                           c:[0.22,0.45,0.16]});
+/* AND THE ISLAND IS MADE OF SAND, NOT ROCK. The first version of this built a
+   rock dome with a sand skin painted on it, and that was me not reading the
+   brief: "an island of sand (dirt) and wet_sand(dirt) surrounded by water
+   (salty), with a tree attached to it, and a hole in the ground".
+
+   Three materials the brief needs and the table did not have:
+
+   WET SAND is not a decoration on dry sand, it is its own material. Water
+   between the grains adds mass, and capillary bridges between them add
+   COHESION — which is why you can build a sandcastle out of it and not out of
+   dry sand, and why a wet bank stands at a steeper angle before it slumps.
+   Denser, darker, and it holds a face.
+
+   SALT WATER is denser than fresh, 1025 against 1000, which is small and is
+   exactly the sort of small that matters: fresh water poured into it FLOATS,
+   and that is a real thing you can see rather than a number in a table. */
+const WETSAND = addMaterial({n:'wet sand', k:POWDER, d:72, s:0, life:0, burn:0,
+                             c:[0.44,0.37,0.26]});
+const SALTWATER = addMaterial({n:'salt water', k:LIQUID, d:51, s:5, life:0, burn:0,
+                               c:[0.13,0.34,0.62]});
+IMAT.wetsand  = {bind:6.0e4, dens:2000};
+GAMMA.wetsand = 12;  RAW.wetsand = [0.001, 0.02];
+THERM.wetsand = {c:1200, melt:1700, L:1.4e5};
 IMAT.leaf  = {bind:4.0e4, dens:120};
 GAMMA.leaf = 30;                       // a leaf tears with almost nothing
 RAW.leaf   = [0.05, 4];                // shreds to whole leaves, grams
@@ -109,26 +132,27 @@ function islandWorld(W, H, D, seed){
     return SEA + (dome*H*0.30 + rough*H*0.05) - (d>1 ? (d-1)*H*0.5 : 0);
   }
 
-  /* 1. WATER EVERYWHERE FIRST, to the sea line. The island is then carved up
-        out of it, which is the order that leaves a real shoreline instead of
-        a rim of gaps. */
-  for (let y=0;y<SEA;y++) for (let z=0;z<D;z++) for (let x=0;x<W;x++) w.set(x,y,z,WATER);
+  /* 1. SALT WATER EVERYWHERE FIRST, to the sea line. The island is then
+        carved up out of it, which is the order that leaves a real shoreline
+        instead of a rim of gaps. */
+  for(let y=0;y<SEA;y++) for(let z=0;z<D;z++) for(let x=0;x<W;x++) w.set(x,y,z,SALTWATER);
 
-  /* 2. THE ROCK, and SAND wherever the rock surface is near the water — which
-        is what a beach is, rather than a decal painted round the edge. */
-  for (let z=0;z<D;z++) for (let x=0;x<W;x++){
+  /* 2. THE ISLAND, AND IT IS SAND ALL THE WAY DOWN. Wet where the sea can
+        reach it — below the water line, and a little above it, because a beach
+        is damp above the tide from capillary rise rather than from splashing.
+        Dry sand above that. No rock anywhere: this is a sandbank, and if it
+        stands at all it stands because the wet part underneath it holds. */
+  const WETBAND = H*0.10;
+  for(let z=0;z<D;z++) for(let x=0;x<W;x++){
     const top = rockTop(x,z);
     if (top < 0) continue;
-    for (let y=0;y<=top && y<H;y++){
-      const nearSurface = (top - y) < 2.5;
-      const nearWater   = Math.abs(top - SEA) < H*0.06;
-      w.set(x,y,z, (nearSurface && (nearWater || top < SEA+2)) ? SAND : ROCK);
+    for (let y=0;y<=top && y<H; y++){
+      /* wet if it is under the sea, or within the capillary band above it */
+      w.set(x,y,z, (y < SEA + WETBAND*0.35) ? WETSAND : SAND);
     }
-    /* a sand skin on the dry top too, thinning as it climbs */
-    if (top > SEA+2 && rnd() < 0.55) w.set(x, Math.floor(top), z, SAND);
   }
 
-  /* 3. THE HOLE the boss left. A rough sphere bitten out of the rock, off
+  /* 3. THE HOLE IN THE GROUND. A rough sphere bitten out of the rock, off
         centre, open to the sky — the way out. */
   const hx = cx + R*0.35, hz = cz - R*0.2;
   const htop = rockTop(hx,hz), hr = R*0.34;
@@ -137,7 +161,7 @@ function islandWorld(W, H, D, seed){
     const dx=x-hx, dy=(y-(htop-hr*0.35))*1.15, dz=z-hz;
     const d = Math.sqrt(dx*dx+dy*dy+dz*dz);
     if (d < hr*(0.8+0.35*Math.sin(x*0.7)*Math.cos(z*0.6))){
-      if (w.at(x,y,z) !== AIR){ w.set(x,y,z, y < SEA ? WATER : AIR); holeVox++; }
+      if (w.at(x,y,z) !== AIR){ w.set(x,y,z, y < SEA ? SALTWATER : AIR); holeVox++; }
     }
   }
 

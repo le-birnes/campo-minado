@@ -79,7 +79,7 @@ g.strokeStyle='rgba(120,190,255,0.35)'; g.beginPath();
 g.moveTo(0,(H-1-IS.SEA)*PX+.5); g.lineTo(c.width,(H-1-IS.SEA)*PX+.5); g.stroke();
 
 document.getElementById('cap').innerHTML =
-  `<b>the island</b> — rock in water, sand where they meet, the hole the boss left, `+
+  `<b>the island</b> — sand and wet sand in salt water, a hole in the ground, `+
   `and a tree whose every leaf cluster is its own structure.<br>`+
   `${W}x${H}x${D} voxels at ${G_CELL.toFixed(3)} m = ${(W*G_CELL).toFixed(1)} x `+
   `${(H*G_CELL).toFixed(1)} x ${(D*G_CELL).toFixed(1)} m · slab z=${zc}+-${SLAB} · `+
@@ -92,19 +92,19 @@ log('=== THE ISLAND, AND WHAT A SHOT DOES TO IT ===');
 log('');
 log(`  ${(W*G_CELL).toFixed(1)} x ${(H*G_CELL).toFixed(1)} x ${(D*G_CELL).toFixed(1)} m, `+
     `${fx(W*H*D)} voxels, built in ${build.toFixed(0)} ms.`);
-log(`  Sea line at ${(IS.SEA*G_CELL).toFixed(1)} m. Rock mass radius ${(IS.R*G_CELL).toFixed(1)} m.`);
-log(`  The hole the boss left: ${(IS.hole.r*G_CELL).toFixed(1)} m across, `+
-    `${fx(IS.hole.vox)} voxels taken out of the rock.`);
+log(`  Sea line at ${(IS.SEA*G_CELL).toFixed(1)} m. Sandbank radius ${(IS.R*G_CELL).toFixed(1)} m.`);
+log(`  The hole in the ground: ${(IS.hole.r*G_CELL).toFixed(1)} m across, `+
+    `${fx(IS.hole.vox)} voxels taken out of the bank.`);
 log(`  The tree: ${(IS.tree.h*G_CELL).toFixed(1)} m tall, ${IS.tree.clusters} leaf clusters, `+
     `each one its own structure.`);
 log('');
 {
-  let n=0; for (let i=0;i<w.N;i++) if (w.m[i]===WATER) n++;
-  let sd=0, rk=0, wd=0, lf=0;
+  let n=0,sd=0,ws=0,wd=0,lf=0;
   for (let i=0;i<w.N;i++){ const m=w.m[i];
-    if (m===SAND) sd++; else if (m===ROCK) rk++; else if (m===WOOD) wd++; else if (m===LEAF) lf++; }
+    if (m===SALTWATER) n++; else if (m===SAND) sd++; else if (m===WETSAND) ws++;
+    else if (m===WOOD) wd++; else if (m===LEAF) lf++; }
   log('     material     voxels        as metres cubed');
-  for (const [nm,v] of [['water',n],['rock',rk],['sand',sd],['wood',wd],['leaf',lf]])
+  for (const [nm,v] of [['salt water',n],['sand',sd],['wet sand',ws],['wood',wd],['leaf',lf]])
     log(`     ${nm.padEnd(10)} ${fx(v).padStart(10)}   ${fx(v*Math.pow(G_CELL,3),1).padStart(12)} m3`);
 }
 log('');
