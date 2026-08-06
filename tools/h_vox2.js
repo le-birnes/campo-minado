@@ -25,6 +25,9 @@ setTimeout(()=>{ try{
   R.push(`whole-but-voxelised draws as one cube: ${worldB.count===plain?'yes':'no, '+worldB.count}`);
 
   const took = voxCarve(tgt, 0,8,8, 1,0,0, 40000);
+  /* stand next to it: the draw budget is by DISTANCE, so a carved block the
+     player is nowhere near correctly stays a plain cube. */
+  P.x=(tx+0.5)*BLOCK; P.y=(ty+0.5)*BLOCK; P.z=(tz+0.5)*BLOCK;
   rebuildWorld();
   const carved = worldB.count;
   R.push(`one shot carved ${took} voxels, ${v.alive} left, instances ${plain} -> ${carved}`);
@@ -36,15 +39,19 @@ setTimeout(()=>{ try{
   R.push(`cull: ${emitted} emitted of ${v.alive} alive = `+
          `${(100-emitted/v.alive*100).toFixed(0)}% hidden ${emitted<v.alive?'ok':'FAULT'}`);
 
-  /* the cap: voxelise more than VOX_MAX and the oldest must be evicted */
+  /* PERSISTENCE: nothing is ever evicted, so voxelising twenty keeps twenty.
+     What is bounded is the DRAW, not the data. */
   let made=0;
-  for(let y=0;y<G.ny&&made<VOX_MAX+4;y++) for(let z=0;z<G.nz&&made<VOX_MAX+4;z++)
-  for(let x=0;x<G.nx&&made<VOX_MAX+4;x++){
+  for(let y=0;y<G.ny&&made<20;y++) for(let z=0;z<G.nz&&made<20;z++)
+  for(let x=0;x<G.nx&&made<20;x++){
     const i=idx(x,y,z);
     if(G.st[i]!==SOLID||G.mine[i]) continue;
-    voxelise(i); made++;
+    const v=voxelise(i); voxCarve(i, 8,8,0, 0,0,1, 20000); made++;
   }
-  R.push(`cap: made ${made}, VOX holds ${VOX.size} (want <= ${VOX_MAX})`);
+  R.push(`persistence: carved ${made}, VOX holds ${VOX.size} (want ${made})`);
+  rebuildWorld();
+  let drawn=0; for(const [,v] of VOX) if(v.draw) drawn++;
+  R.push(`draw budget: ${drawn} drawn as voxels of ${VOX.size} carved (want <= ${VOX_DRAW})`);
 
   /* and it must never overflow the batch */
   rebuildWorld();

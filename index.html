@@ -3677,7 +3677,13 @@ const hellB   = makeCubeBatch(6000);
    and never breaks. */
 const VOX_DIV = 16;                       // voxels per block edge, = BLOCK/16
 const VOX_N   = VOX_DIV*VOX_DIV*VOX_DIV;
-const VOX_MAX = 8;                        // blocks voxelised at once
+/* THREE, not six, and the measurement is why: six carved blocks emitted 9,534
+   instances on a 240-instance Apprentice board — 91% of the batch. A DUNGEON
+   already spends about 10,000 on its own geometry, so six would have blown the
+   cap and worldB drops geometry SILENTLY past it. Three is the safe standing
+   budget and the guard below is what makes it actually safe. */
+const VOX_DRAW = 3;                       // carved blocks drawn as voxels at once
+const VOX_DRAW_R = BLOCK*9;               // and only this close
 const V_AIR=0, V_SAND=1, V_ROCK=2, V_WATER=3, V_GLASS=4, V_IRON=5, V_POWDER=6;
 const VOX_COL = [null,
   [0.76,0.65,0.42],   // sand
@@ -3705,11 +3711,18 @@ function voxRecipe(i){
 function voxelise(i){
   let v = VOX.get(i);
   if(v) return v;
-  if(VOX.size >= VOX_MAX){
-    /* oldest out. Map preserves insertion order, so the first key IS the
-       oldest, and evicting means the block goes back to drawing as one cube. */
-    VOX.delete(VOX.keys().next().value);
-  }
+  /* PERSISTENT, like Noita. Nothing is ever evicted: a hole you shot an hour
+     ago is still there when you come back, which is the entire promise of a
+     destructible world and is worth more than the memory it costs. A block is
+     4 KB voxelised, so even a whole four-level dungeon gone to voxels is 32 MB
+     — affordable, and it only ever reaches that if you actually shoot all of
+     it.
+
+     What IS bounded is the DRAWING, and that is the honest constraint: the
+     instance batch holds 10,464 and one carved block emits about 1,500, so
+     only the nearest few can be drawn as voxels at once. Far ones fall back to
+     a single cube. The DATA never degrades; only the picture does, and only
+     with distance. */
   const rec = voxRecipe(i);
   const m = new Uint8Array(VOX_N);
   let s = (i*40503 + 7) >>> 0;
@@ -3776,6 +3789,22 @@ function rebuildWorld(){
 
      The board changes and G.dirty is set, so this is recomputed the moment a
      block comes out and its neighbours are exposed. */
+  /* WHICH CARVED BLOCKS GET TO BE VOXELS THIS FRAME. Persistence is in the
+     data; this is the picture's budget. Nearest first, capped, and everything
+     else draws as the plain cube it used to be — so a world you have shot to
+     pieces stays shot to pieces without ever overflowing the batch. */
+  {
+    const cand = [];
+    for(const [bi,v] of VOX){
+      v.draw = false;
+      if(v.alive >= VOX_N) continue;
+      const [bx,by,bz] = cellXYZ(bi);
+      const d = Math.hypot((bx+0.5)*BLOCK-P.x, (by+0.5)*BLOCK-P.y, (bz+0.5)*BLOCK-P.z);
+      if(d < VOX_DRAW_R) cand.push([d, v]);
+    }
+    cand.sort((a,b)=>a[0]-b[0]);
+    for(let k=0;k<Math.min(VOX_DRAW,cand.length);k++) cand[k][1].draw = true;
+  }
   const FACE6 = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
   /* ...unless the puzzle cells are drawn SMALLER than their block, in which
      case there are gaps between them and a "buried" cube is visible through
@@ -3810,10 +3839,16 @@ function rebuildWorld(){
        can be seen from outside, and the batch cap is 10,464 for the whole
        world. */
     const vx = VOX.get(i);
-    if(vx && vx.alive < VOX_N){
+    if(vx && vx.alive < VOX_N && vx.draw){
       const D=VOX_DIV, S=BLOCK/D, bx=x*BLOCK, by=y*BLOCK, bz=z*BLOCK;
       const at=(a,b,c)=> (a<0||b<0||c<0||a>=D||b>=D||c>=D) ? V_AIR : vx.m[(b*D+c)*D+a];
-      for(let vy=0;vy<D;vy++) for(let vz=0;vz<D;vz++) for(let vxx=0;vxx<D;vxx++){
+      /* AND A HARD FLOOR UNDER IT. VOX_DRAW is a guess about how much room is
+         left; this is the fact. worldB drops geometry silently when full, so a
+         voxelised block must never be the thing that fills it — better a block
+         that stays a plain cube than a wall that quietly stops existing. */
+      const ROOM = worldB.max - 64;
+      for(let vy=0;vy<D && n<ROOM;vy++) for(let vz=0;vz<D && n<ROOM;vz++)
+      for(let vxx=0;vxx<D && n<ROOM;vxx++){
         const mt = vx.m[(vy*D+vz)*D+vxx];
         if(mt===V_AIR) continue;
         if(at(vxx+1,vy,vz)&&at(vxx-1,vy,vz)&&at(vxx,vy+1,vz)&&
@@ -4229,6 +4264,34 @@ function shoot(){
       const n = G.rockHit[w] = Math.min(CINDER_HP, G.rockHit[w]+1);
       G.dirty = true;                       // it just got darker
       const wx=(hit.x+0.5)*BLOCK, wy=(hit.y+0.5)*BLOCK, wz=(hit.z+0.5)*BLOCK;
+      /* AND IT LOSES REAL MATERIAL. Cinderstone is where voxel erosion belongs
+         and sand is not: a sand block opens in ONE shot, so there is no state
+         between whole and gone for voxels to show. This takes five, and now
+         you can see each one. The jet goes into the face that was hit — the
+         no-spread rule from voxel/round.js — so the block behind is untouched
+         however many times you fire. */
+      {
+        const D=VOX_DIV;
+        const nx=Math.sign(hit.nx||0), ny=Math.sign(hit.ny||0), nz=Math.sign(hit.nz||0);
+        const ex = nx? (nx>0?D-1:0) : Math.floor(((hit.px||0.5))*D);
+        const ey = ny? (ny>0?D-1:0) : Math.floor(((hit.py||0.5))*D);
+        const ez = nz? (nz>0?D-1:0) : Math.floor(((hit.pz||0.5))*D);
+        const took = voxCarve(w, ex,ey,ez, -nx,-ny,-nz, 26000);
+        /* SPREAD IT. Every voxel taken out is material that went somewhere, and
+           watching it go is most of what makes destruction read as destruction
+           rather than as a texture swap. Sampled rather than one particle per
+           voxel: four hundred grains a shot is a firework, and the frame is the
+           budget — NEXT.md rule 3, visible debris is a budget not a consequence. */
+        const grains = Math.min(26, took>>4);
+        for(let g=0; g<grains; g++){
+          const sp = 3.5 + wrnd()*7.0;
+          addP(wx+(wrnd()-.5)*BLOCK*0.8, wy+(wrnd()-.5)*BLOCK*0.8, wz+(wrnd()-.5)*BLOCK*0.8,
+               -r.dx*sp*0.55 + (wrnd()-.5)*sp, (wrnd()*0.7)*sp + 1.4,
+               -r.dz*sp*0.55 + (wrnd()-.5)*sp,
+               BLOCK*(0.012+wrnd()*0.016), 0.9+wrnd()*0.8,
+               [0.42+wrnd()*0.18, 0.36+wrnd()*0.14, 0.30+wrnd()*0.10], 0, 1);
+        }
+      }
       if(n >= CINDER_HP){
         G.st[w] = AIR;
         if(G.rockCount>0) G.rockCount--;
