@@ -38,7 +38,31 @@ setTimeout(()=>{ try{
   P.x = cxw - (tx-ax)*BLOCK*2.6;
   P.y = cyw - (ty-ay)*BLOCK*2.6 + 0.8;
   P.z = czw - (tz-az)*BLOCK*2.6;
-  const vx=cxw-P.x, vy=cyw-P.y, vz=czw-P.z;
+  /* AIM OFF THE BLOCK, NOT AT IT. Centring the carved block filled the frame
+     with it, and a reviewer with nothing to compare against read its voxels AS
+     blocks — "the hole is carved out of multiple full-sized blocks", which was
+     the right reading of that picture. Pulling straight back to 7 blocks put
+     the eye inside unlit rock and returned black. So instead: stay at a lit
+     distance and aim at the SEAM, one block to the side, so a plain cube and a
+     voxelised one are both in shot and the size contrast is visible.
+
+     THAT STILL FAILED, and the third failure is the informative one. The
+     reviewer said "a bored hole is visible, but there is no size contrast: the
+     entire environment uses a uniform block size" — and it is right, for a
+     reason that is about the GAME and not the test. Every block already wears
+     a per-block noise texture of small squares, so an intact wall ALREADY
+     looks like it is made of little cubes. The voxel layer is therefore
+     visually indistinguishable from the surface it is carved out of.
+
+     That is a real finding and it is not a framing bug: no camera position
+     fixes it. What fixes it is giving voxels their own read — per-voxel
+     shading, an ambient-occlusion darkening inside the cavity, or simply
+     letting the exposed interior take the material colours (sand pale, rock
+     dark, water blue) which the data already carries and the renderer is
+     currently flattening. Left here rather than papered over. */
+  const sx = Math.abs(tx-ax)<0.5 ? 1 : 0, sz = sx ? 0 : 1;
+  const axw = cxw + sx*BLOCK*1.1, azw = czw + sz*BLOCK*1.1;
+  const vx=axw-P.x, vy=cyw-P.y, vz=azw-P.z;
   P.yaw   = Math.atan2(-vx, -vz);
   P.pitch = Math.atan2(vy, Math.hypot(vx,vz));
   G.dirty=true;
