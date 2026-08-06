@@ -6549,15 +6549,46 @@ function buildIsland(){
     const d=Math.hypot(x-hx,(y-(htop-hr*0.4))*1.1,z-hz);
     if(d<hr){ const i=idx(x,y,z); G.st[i]=AIR; G.scenery[i]=0; }
   }
-  /* THE TREE, attached to the bank */
+  /* THE TREE, attached to the bank. Five wood blocks and a ball of leaves was
+     not a tree, it was a lollipop. A trunk, real BRANCHES going out and up,
+     and a leaf CLUSTER hung on each branch tip — because a canopy is a set of
+     separable handfuls and not one green sphere, which is also what lets wind
+     take one clump and leave the next.
+
+     MORTAL: leaf clusters carry the flag that says a thing is allowed to stop
+     existing. Nothing else in the world does yet. */
   const tx=Math.round(cx-R*0.4), tz=Math.round(cz+R*0.25), tb=top(tx,tz);
-  const th=Math.max(4,(G.ny*0.22)|0);
-  for(let y=tb+1;y<=tb+th;y++) set(tx,y,tz,M_WOOD);
-  for(let dy=-1;dy<=2;dy++) for(let dz=-2;dz<=2;dz++) for(let dx=-2;dx<=2;dx++){
-    if(dx*dx+dy*dy+dz*dz > 5) continue;
-    if(!dx && !dz && dy<=0) continue;
-    set(tx+dx, tb+th+dy, tz+dz, M_LEAF);
+  /* and it has to FIT. The first branchy version reported 8 wood blocks for a
+     trunk meant to be a dozen: it was growing through the ceiling and set()
+     was silently dropping everything past it. A tree is as tall as the room
+     allows, less the crown. */
+  const th=Math.max(4, Math.min((G.ny*0.30)|0, G.ny-tb-4));
+  for(let y=tb+1;y<=tb+th;y++){
+    set(tx,y,tz,M_WOOD);
+    if(y>tb+2 && y<tb+th-1 && ((y-tb)&1)===0){   // a slight taper of buttress
+      set(tx+1,y,tz,M_WOOD); set(tx,y,tz+1,M_WOOD);
+    }
   }
+  /* branches: out and up from the top third, then a cluster at each tip */
+  const tips=[];
+  for(let b=0;b<7;b++){
+    const a=(b/7)*Math.PI*2 + 0.4;
+    const len=2+((b%3));
+    const y0=tb+th-Math.round((b%4));
+    let bx=tx, by=y0, bz=tz;
+    for(let t=1;t<=len;t++){
+      bx=Math.round(tx+Math.cos(a)*t); bz=Math.round(tz+Math.sin(a)*t);
+      by=y0+Math.round(t*0.55);
+      set(bx,by,bz,M_WOOD);
+    }
+    tips.push([bx,by,bz]);
+  }
+  tips.push([tx, tb+th+1, tz]);
+  for(const [lx,ly,lz] of tips)
+    for(let dy=-1;dy<=2;dy++) for(let dz=-2;dz<=2;dz++) for(let dx=-2;dx<=2;dx++){
+      if(dx*dx+dy*dy*1.6+dz*dz > 4.4) continue;
+      set(lx+dx, ly+dy, lz+dz, M_LEAF);
+    }
   /* stand on the bank beside the hole */
   const sx=hx-hr-1, sz=hz, sy=top(sx,sz);
   P.x=(sx+0.5)*BLOCK; P.y=(sy+1)*BLOCK+0.05; P.z=(sz+0.5)*BLOCK;
