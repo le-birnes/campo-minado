@@ -61,14 +61,30 @@ log('');
   if (op.opened){
     const b = op.blast;
     log('');
-    log(`     THEN IT GOES:  ${fx(b.E,0)} J total`);
+    log(`     THEN IT GOES: a ${b.coreKg} kg core = ${fx(b.E,0)} J, ${b.tnt.toFixed(2)} kg TNT equivalent`);
     log(`        fracture ${fx(b.frac,0)} J   kinetic ${fx(b.kin,0)} J   heat ${fx(b.therm,0)} J`);
-    log(`        noise    ${b.dB.toFixed(0)} dB at 1 m, ${b.heardAt(10).toFixed(0)} dB at 10 m, `+
-        `${b.heardAt(100).toFixed(0)} dB at 100 m`);
     log(`        it breaks ${fx(b.frac/voxelCost('rock'),0)} voxels of rock, or `+
         `${fx(b.frac/voxelCost('sand'),0)} of sand`);
-    log(`        against our own shot's ${fx(E*R.mix.frac,0)} J: `+
-        `${(b.frac/(E*R.mix.frac)).toFixed(1)}x a trigger pull`);
+    log('');
+    /* no '~' in log text: the page joins its lines with it for data-r */
+    log('        NO dB. A shock is not a sound wave: past 194 dB the');
+    log('        rarefaction would need less air than none, so it goes');
+    log('        asymmetric, steepens into a discontinuity, and outruns sound.');
+    log('        Overpressure and impulse are the units; dB only returns once');
+    log('        it has decayed back under the ceiling and become audible.');
+    log('');
+    log('        range   overpressure   impulse    what it does to you      as sound');
+    for (const Rm of [1,2,5,10,25,50,100]){
+      const h = b.at(Rm);
+      log(`        ${String(Rm+' m').padStart(6)}  ${h.kPa.toFixed(1).padStart(9)} kPa  `+
+          `${h.impulse.toFixed(0).padStart(6)} Pa.s   ${h.label.padEnd(22)} `+
+          `${h.shock ? 'SHOCK (>'+DB_CEILING+')' : h.dB.toFixed(0)+' dB'}`);
+    }
+    log('');
+    log('        Z = R / W^(1/3) — the SAME cube root that sets crater radius,');
+    log('        because both are energy spreading through a volume. Doubling');
+    log('        the lethal radius costs EIGHT times the powder, and blast and');
+    log('        destruction stay consistent without being made to agree.');
   }
   log('');
   log('  THE SHELL IS THE HOOK. A mine only lights if the hit got THROUGH the');

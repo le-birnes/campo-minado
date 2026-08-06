@@ -121,24 +121,91 @@ function blockYield(recipe, volumeM3, mix, E){
 }
 
 /* --- and a mine, which gives energy back ---------------------------------
-   The three products Marcelo named, from one number. Noise is reported in
-   decibels at a metre because that is the unit a game can actually use for
-   "how far away did that get heard", and it comes from the acoustic share
-   rather than being a separate dial. */
-function detonate(coreMassKg){
-  const E = coreMassKg * POWDER_J_PER_KG;
-  const kin   = E * POWDER_MIX_OUT.kin;
-  const therm = E * POWDER_MIX_OUT.therm;
-  const frac  = E * POWDER_MIX_OUT.frac;
-  /* A few percent of the energy leaves as sound. Referenced to 1 pW, at 1 m,
-     over the millisecond or so it takes to get out. */
-  const acoustic = E * 0.02;
-  const watts = acoustic / 0.001;
-  const dB = 10*Math.log10(watts / (4*Math.PI*1e-12));
-  return {E, frac, kin, therm, acoustic, dB,
-          /* how far off it is still above a threshold, inverse square */
-          heardAt: d => dB - 20*Math.log10(Math.max(d,1))};
+   THE dB IS GONE, and deleting it rather than clamping it is the point.
+
+   The first version reported 208 dB at a metre. The ceiling for a sound wave
+   in air at one atmosphere is about 194: sound is pressure oscillating around
+   ambient, so a wave whose amplitude reaches ambient has its rarefaction half
+   touching absolute vacuum, and there is no less air than none. 208 dB is not
+   a loud sound, it is a number produced by applying an acoustic formula to
+   something that is not acoustics.
+
+   PAST THAT CEILING IT IS A SHOCK, and a shock is a different animal:
+     - the negative half clips at vacuum while the positive half does not, so
+       the wave goes asymmetric - a sharp spike with a long suction tail
+     - compression heats the air, hot air carries sound faster, the peak
+       overtakes its own front and the leading edge steepens into a true
+       discontinuity travelling faster than sound
+     - it decays far faster than 1/r, because it burns energy irreversibly
+       heating everything it passes through
+     - the air itself MOVES: bulk flow, not oscillation. That is what throws
+       things, and dB has nothing to say about it.
+
+   So blast is overpressure and impulse, and dB only comes back once the shock
+   has decayed BELOW the ceiling and become an ordinary sound the AI can hear
+   across a level. Two regimes with one crossover, and the crossover is
+   physical rather than chosen.
+
+   THE SCALING LAW IS THE PRIZE. Sadovsky: everything depends on
+        Z = R / W^(1/3)
+   distance over the CUBE ROOT of charge mass - the same cube root that governs
+   crater radius in impact.js, and for the same reason: energy spreading
+   through a volume. So doubling a mine's lethal radius costs eight times the
+   powder, and blast and destruction stay consistent for free. */
+const P_ATM = 101.325;                  // kPa
+const DB_CEILING = 194;                 // where a sound wave runs out of medium
+const TNT_EQUIV_POWDER = 3.0/4.6;       // black powder against TNT, by energy
+
+/* Sadovsky's correlation for a free-air spherical charge. Overpressure in kPa
+   above ambient, for Z in m/kg^(1/3). */
+function overpressure(R, tntKg){
+  const Z = Math.max(R, 0.05) / Math.pow(Math.max(tntKg, 1e-9), 1/3);
+  return (0.085/Z + 0.3/(Z*Z) + 0.8/(Z*Z*Z)) * 1000;
 }
+/* Positive-phase impulse, Pa*s — what actually throws a body, as opposed to
+   what bursts it. Sadovsky again. */
+function blastImpulse(R, tntKg){
+  const W3 = Math.pow(Math.max(tntKg,1e-9), 1/3);
+  const Z = Math.max(R, 0.05)/W3;
+  return 200 * W3 / Z;                  // Pa*s, near enough for a game
+}
+/* Once the shock has decayed below the ceiling it IS a sound again, and this
+   is where it becomes one. Peak SPL from overpressure, capped at the ceiling
+   because above it the number is meaningless rather than merely large. */
+function blastDb(R, tntKg){
+  const p = overpressure(R, tntKg)*1000;             // Pa
+  const dB = 20*Math.log10(Math.max(p, 1e-9)/20e-6);
+  return {dB: Math.min(dB, DB_CEILING), shock: dB > DB_CEILING};
+}
+/* What it does to whoever is standing there. Thresholds are the standard
+   blast-injury ones, in kPa of peak overpressure. */
+const HARM = [[2,'windows break'], [7,'eardrum, threshold'], [35,'eardrum, 50%'],
+              [100,'lung damage'], [200,'50% lethal'], [700,'near-certain kill']];
+function harmAt(R, tntKg){
+  const p = overpressure(R, tntKg);
+  let lab = 'nothing much';
+  for (const [k,l] of HARM) if (p >= k) lab = l;
+  return {kPa:p, impulse:blastImpulse(R,tntKg), label:lab, ...blastDb(R,tntKg)};
+}
+
+/* A MINE IS 0.2 kg OF POWDER, and that is chosen from the table above rather
+   than from taste: it kills at a metre, bursts eardrums at two, and is walked
+   away from at five. The 138 kg a half-metre cube of solid powder implied was
+   not a mine, it was a demolition charge - at 25 m it still ruptured eardrums,
+   which would make a dungeon unplayable the moment you shot one. */
+const MINE_CORE_KG = 0.2;
+
+function detonate(coreMassKg){
+  const m = coreMassKg === undefined ? MINE_CORE_KG : coreMassKg;
+  const E = m * POWDER_J_PER_KG;
+  const tnt = m * TNT_EQUIV_POWDER;
+  return {E, tnt, coreKg:m,
+          frac:  E * POWDER_MIX_OUT.frac,
+          kin:   E * POWDER_MIX_OUT.kin,
+          therm: E * POWDER_MIX_OUT.therm,
+          at: R => harmAt(R, tnt)};
+}
+
 /* Does the shell open? A mine only lights if the hit got THROUGH the iron, so
    a glancing shot leaves it armed — which is the hook for "one day will be
    able to be blown and contained so not all will blow when they are shot". */
@@ -147,7 +214,11 @@ function mineHit(volumeM3, fractureJ){
   const shellVol = volumeM3 * m.shellFrac;
   const shellMass = shellVol * IMAT.iron.dens;
   const need = GAMMA.iron * fractureArea('iron', shellMass, RAW.iron[1]);
-  const coreMass = volumeM3 * (1-m.shellFrac) * IMAT.gunpowder.dens;
+  /* The core is MINE_CORE_KG, not "however much powder fits in the volume".
+     Packing a half-metre cube solid gave 138 kg and a 90 kg TNT equivalent,
+     which is a demolition charge wearing a mine's name. A mine is a shell with
+     a charge in it and a lot of air. */
+  const coreMass = MINE_CORE_KG;
   return fractureJ >= need
     ? {opened: true,  need, blast: detonate(coreMass)}
     : {opened: false, need, short: need - fractureJ};
