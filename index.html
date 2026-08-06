@@ -2385,11 +2385,7 @@ function genWorld(d){
   /* A NEW BOARD STARTS WITH NO RUBBLE ON IT. Without this the grains and, far
      worse, their occupancy claims survive into the next game — so the second
      run of a session has invisible solid cells scattered through its air. */
-  if(typeof RAW !== 'undefined'){
-    RAW.n=0; RAW.oldest=0; RAW.owed=0; RAW.fused=0; RAW.moving=0;
-    RAW.occ.clear(); RAW.under.clear(); RAW.key.fill(0); RAW.rest.fill(0);
-  }
-  if(typeof VOX !== 'undefined') VOX.clear();
+  GRIT.n=0; GRIT.next=0; GRIT.live.fill(0);
   G.rockCount=0;
   rollDensExp();
   for(let i=0;i<N;i++) G.mat[i] = (rnd()<0.055) ? 4 : (rnd()*4)|0;
@@ -2570,6 +2566,9 @@ function genWorld(d){
   syncPowHud();
   particles.length=0; sprites.length=0; pellets.length=0; debris.count=0;
   seedDust();
+  /* AND THE GRID, last, because it is read off the finished board: everything
+     is rock and only the air has to be written. */
+  sandBuild();
   G.dirty=true;
 }
 
@@ -2591,6 +2590,7 @@ function revealAt(start, silent, flat){
     if(G.chest && G.chest[i]){ G.chest[i]=0; spawnChest(i); }
     if(MATS[G.mat[i]].gold){ G.gold += 5 + ((rnd()*12)|0); }
     const x = i % G.nx, z = ((i/G.nx)|0) % G.nz, y = (i/(G.nx*G.nz))|0;
+    sandDig(x,y,z);
     if(!silent) spawnCrumble(x,y,z, G.mat[i]);
     if(G.cnt[i]===0 && !flat){
       for(let dy=-1;dy<=1;dy++) for(let dz=-1;dz<=1;dz++) for(let dx=-1;dx<=1;dx++){
@@ -3660,6 +3660,8 @@ const ghostB  = makeCubeBatch(64);
 /* four cubes a chest, and a minefield drops at most two */
 const chestB  = makeCubeBatch(4*12);
 const debris  = makeCubeBatch(MAXP);
+/* The sand layer's own batch is made further down, next to the numbers that
+   size it. */
 const viewB   = makeCubeBatch(48);
 /* live bodies plus a few still bursting */
 const enemyB  = makeCubeBatch((EN_MAX+8)*EN_PARTS);
@@ -3704,315 +3706,598 @@ const hellB   = makeCubeBatch(6000);
    1,352 can be seen), and only VOX_MAX blocks may be voxelised at once, oldest
    evicted first. Past that a block is damaged the old way, which looks worse
    and never breaks. */
-/* --------------------------------------------------------------------------
-   RAW — what a block leaves behind when it comes apart
-   --------------------------------------------------------------------------
-   Marcelo: "destroy a block of sand (dirt) and it leaves sand (raw) and rock
-   (raw) spread around like noita would with pixels ... here it is a solid
-   chunk before it becomes block/16 stuff."
+/* ==========================================================================
+   9b. SAND — voxel/sand.js, in the game
+   ==========================================================================
+   This is voxel/sand.js, ported in whole rather than reimplemented: one flat
+   Uint8Array over the world, a ROCK border so the inner loop needs no bounds
+   check, dirty rects so settled material costs nothing, materials whose
+   behaviour is a table row rather than a code path, and reactions that are a
+   row in a 65,536-entry array.
 
-   That last clause is the whole design and it is what makes this NOT Noita. In
-   Noita a desert is pixels all the way down and always was, so a shovel just
-   moves what is already there. Here a block is ONE SOLID THING — one cube, one
-   instance, no interior — right up until the moment it is destroyed, and only
-   then does it become BLOCK/16 stuff. The fine grain is a CONSEQUENCE of
-   destruction, never a precondition for it, which is why a dungeon of 7,776
-   blocks costs 7,776 cubes and not 31 million voxels.
+   It replaces TWO systems that were each half of it:
 
-   These grains PERSIST. They fall, they land, they stay: a pile of raw sand
-   under a hole you shot is still there when you walk back. That is the promise
-   the whole voxel layer exists to keep, and a fading particle would break it.
+     RAW — grains with continuous positions and a Set of occupied cells. It
+           collided, slumped and piled correctly and it was a reimplementation
+           of this file's settling rules with a hash lookup where this has an
+           array index. Its ballistic FLIGHT was the part worth keeping, and
+           that is all that survives, as GRIT below.
+     VOX — a Uint8Array(4096) per damaged block, in a Map. That is this grid,
+           sliced up per block and unable to interact across a seam. Sand
+           could not pour out of one block into the next, because there was no
+           "next": every block was its own little universe.
 
-   Flat arrays because there can be a thousand of them and every one is touched
-   every frame while it is still moving. Once landed, a grain is skipped
-   entirely — settled material costs nothing, same rule as sand.js's dirty
-   rects, for the same reason. */
-const RAW_MAX = 1400;
-const RAW_S   = BLOCK/16;                 // one grain is one voxel
-const R_SAND=0, R_ROCK=1, R_WATER=2, R_GLASS=3, R_WETSAND=4;
-/* ---------------------------------------------------------------------------
-   WHAT EACH GRAIN IS, AND WHY IT MATTERS
+   Both are now one grid over the whole world at BLOCK/16, which is the bead:
+   17.5 cm. A block is 16^3 = 4,096 of them. The dungeon is 288 x 384 x 288
+   cells and its array is 32 MB, allocated once per world and reused when the
+   next world is the same size.
+
+   WHY THE WHOLE WORLD AND NOT A BOX AROUND THE PLAYER. Persistence. A pile of
+   sand you shot an hour ago is still there when you come back, and that is the
+   entire promise of a destructible world. A box that follows you either loses
+   what it leaves behind or has to write it somewhere, and the somewhere would
+   be this array anyway. What IS bounded is the DRAWING and the TICK: only
+   awake chunks are simulated and only near chunks are drawn.
+
    ---------------------------------------------------------------------------
-   Until now every grain behaved identically: a water grain piled up like
-   gravel and a boulder slumped like dry sand. They fell correctly and they
-   collided correctly and they were all the same substance, which makes the
-   material a colour rather than a property.
+   26 NEIGHBOURS, WHICH IS THE WHOLE REASON THIS IS A SECOND PASS
+   ---------------------------------------------------------------------------
+   Noita is 2D and uses the 8-neighbour Moore neighbourhood. The faithful 3D
+   analogue of Moore-8 is Moore-26 — 6 faces, 12 edges, 8 corners — and NOT the
+   6 faces, which is a downgrade rather than a translation.
 
-     kind    POWDER heaps, LIQUID does not. That one bit is the difference
-             between a pile and a puddle, and no amount of tuning gets a
-             powder to find its own level.
-     dens    kg/m3, and it decides who sinks through whom. Sand through water
-             is not a special case, it is one comparison — the same rule
-             sand.js has used since its first bench.
-     slip    how readily it slides off a heap: the angle of repose, as a
-             probability rather than an angle, because the grid is discrete
-             and an angle would have to be turned into one of these anyway.
-             Dry sand runs (34 degrees), wet sand stands up (45 and it can
-             overhang, which is why sandcastles exist), rock locks (angular
-             fragments interlock and hold far steeper than round ones).
-     spread  how far a LIQUID reaches sideways looking for its level. Ignored
-             by anything that heaps. */
-const RAWMAT = [
-  /* sand     */ {kind:1, dens:1600, slip:0.92, spread:0},
-  /* rock     */ {kind:1, dens:2700, slip:0.28, spread:0},
-  /* water    */ {kind:2, dens:1000, slip:1.00, spread:5},
-  /* glass    */ {kind:1, dens:2500, slip:0.45, spread:0},
-  /* wet sand */ {kind:1, dens:2000, slip:0.18, spread:0}
-];
-const RK_POWDER=1, RK_LIQUID=2;
-/* HOW MANY GRAINS ARE IN A VOXEL. Marcelo: "at least as many vertices a voxel
-   have number of grains of sand". The voxel is a Kuhn tetrahedron and a
-   tetrahedron has four vertices, so four is the floor and four is what this
-   uses. A block is 4,096 voxels, so a block is 16,384 grains — and RAW_MAX is
-   1,400, which means what you SEE is a sample of about one in twelve. The
-   bookkeeping knows the real number (RAW.owed); the floor only ever shows what
-   fits in a frame. NEXT.md rule 3, again. */
-const GRAINS_PER_VOXEL = 4;
-/* Pale tan and dark grey, and the contrast is deliberate: raw sand and raw
-   rock have to be told apart on the ground at a glance, or "it left sand and
-   rock" is a claim nobody can check. */
-const RAW_COL = [[0.80,0.68,0.44],[0.30,0.28,0.26],[0.22,0.44,0.76],
-                 [0.66,0.86,0.88],    // glass: pale, cold, and brighter
-                 [0.44,0.37,0.26]];   // wet sand: darker, and it holds a face
-const RAW = {
-  n:0, x:new Float32Array(RAW_MAX), y:new Float32Array(RAW_MAX), z:new Float32Array(RAW_MAX),
-  vx:new Float32Array(RAW_MAX), vy:new Float32Array(RAW_MAX), vz:new Float32Array(RAW_MAX),
-  m:new Uint8Array(RAW_MAX), rest:new Uint8Array(RAW_MAX), moving:0,
-  /* Where the settled grains ARE, so falling ones can land on them. This is
-     what makes a pile a pile: without it every grain falls to the floor and
-     they stack into a coat of paint one grain thick. */
-  occ:new Set(), owed:0, fused:0,
-  /* WHICH CELL EACH GRAIN CLAIMED, so it can give it back. Without this the
-     occupancy set only ever grows: past the cap rawAdd reuses a slot, the new
-     grain overwrites the old one's position, and the OLD one's key stays in
-     occ for ever — an invisible solid cell that later grains land on. That is
-     precisely the bug in the screenshot: after a few hundred blocks the air is
-     full of ghosts and the grains hang in it. */
-  key:new Int32Array(RAW_MAX),
-  /* occ says a cell is TAKEN; under says BY WHICH GRAIN. Sinking needs the
-     second one — you cannot ask what a thing is made of if all you know is
-     that something is there. */
-  under:new Map(), tick:0
-};
-const rawCell = v => Math.floor(v/RAW_S);
-const rawKeyC = (cx,cy,cz) => ((cx+512)*1024 + (cy+512))*1024 + ((cz+512)&1023);
-const rawKey  = (x,y,z) => rawKeyC(rawCell(x), rawCell(y), rawCell(z));
-/* SNAP TO THE LATTICE WHEN IT STOPS, and this was the bug that made every
-   material behave identically. Positions were continuous and occupancy was by
-   CELL, so two grains seven centimetres apart shared a cell: the second landed
-   INSIDE the first, rested there, and the heap never grew. All five materials
-   dutifully reported a pile 0.00 m tall.
+   sand.js shipped with 6 because 6 is right for solids and cheap. The price
+   shows up in two places and both are visible:
 
-   A grain in flight can be anywhere — that is what makes the arc look right —
-   but the moment it stops it takes a cell and sits in the middle of it. Then
-   occupancy and position agree, and the next grain lands one cell higher,
-   which is the only way a heap can exist at all. */
-const rawSnap = v => (Math.floor(v/RAW_S) + 0.5) * RAW_S;
-/* Solid to a grain: the world, or another grain that has already stopped. */
-function rawBlocked(x,y,z){
-  return solidAtWorld(x,y,z) || RAW.occ.has(rawKey(x,y,z));
+     * fluids go anisotropic. Flow prefers the axis directions and a vortex
+       comes out square. This is the known lattice-gas failure and the reason
+       lattice-Boltzmann exists; D3Q27 is the 27-velocity set fluid people use
+       for exactly this.
+     * powders heap into PYRAMIDS. With four lateral directions a pile has
+       four-fold symmetry and a square base. Nobody looks for that, which is
+       why voxel/sand.js measured a sand cone at 1.00 m radius for a whole
+       session without anyone asking whether it was round.
+
+   So: 9 downward directions instead of 5 (straight down, 4 edge-diagonals,
+   4 corner-diagonals) and 8 lateral instead of 4, for POWDER, LIQUID and GAS
+   alike. Marcelo: "instead of 8 neighbours we have like 26" — and "I want
+   powder and fluids", which is what makes the piles round.
+
+   Measured in voxel/storm.html: 49.4 ns/particle at 26 against 13.1 at 6, and
+   the extra is CACHE, not arithmetic, because the corners live on other rows
+   and other planes. It is paid only by cells that failed to fall straight
+   down, which on a settled world is none of them.
+
+   Two corrections that come with the corners and are not optional:
+
+     * LATERAL CLEARANCE. A grain may not slide diagonally through a wall. The
+       edge-diagonal needs its own lateral cell open; the corner needs at
+       least one of the two axis cells beside it open. Without this, adding the
+       corners lets a grain escape a sealed shaft through the seam where three
+       solid cells meet, and it reads as material walking through stone.
+     * CORNERS ARE FARTHER. A corner step is sqrt(2) longer, so it is taken at
+       0.707 of the rate — one random number, two thresholds, no extra cost.
+       Without it piles come out flatter along the diagonals, which is the same
+       artefact as before wearing a different hat.
+   ========================================================================== */
+const SAND_DIV = 16;                       // cells per block edge
+const CELL_M   = BLOCK/SAND_DIV;           // 0.175 m — the bead
+const SCS = 32;                            // chunk edge, in cells
+const SCS3 = SCS*SCS*SCS;
+
+/* How a material moves. This is the whole of its physics. */
+const K_STATIC=0, K_POWDER=1, K_LIQUID=2, K_GAS=3;
+
+const SMAT = [];
+const SM_K    = new Uint8Array(256);   // kind
+const SM_D    = new Uint16Array(256);  // kg/m3, and it decides who sinks through whom
+const SM_S    = new Uint8Array(256);   // how far a fluid reaches for its level
+const SM_LIFE = new Uint8Array(256);   // ticks before it becomes its successor
+const SM_NEXT = new Uint8Array(256);   // what it becomes when its life runs out
+const SM_SLIP = new Float32Array(256); // angle of repose, as a probability
+const SM_NB   = new Uint8Array(256);   // 6 or 26: how many neighbours it reacts with
+const SM_COL  = new Float32Array(256*3);
+const SM_EMIS = new Float32Array(256);
+const SM_SEE  = new Uint8Array(256);   // drawn by the sand layer at all?
+
+/* Adding a material is a row, not a code path. The ceiling is 255 because a
+   cell is one byte and that is the whole reason the grid is affordable.
+   Nothing in the tick loop is sized by how many materials exist — kind,
+   density, spread, slip and the reaction test are all array reads — so
+   twenty-seven materials in one room cost exactly what two do.
+   voxel/many.html measures that rather than asserting it. */
+function addMat(spec){
+  const id = SMAT.length;
+  if(id > 255) throw new Error('a material id is one byte: 256 is the ceiling');
+  SMAT.push(spec);
+  SM_K[id]=spec.k; SM_D[id]=spec.d|0; SM_S[id]=spec.s|0;
+  SM_LIFE[id]=spec.life|0; SM_NEXT[id]=spec.next|0;
+  SM_SLIP[id]= spec.slip===undefined ? 1 : spec.slip;
+  /* STATIC never moves, so its neighbourhood only matters for reactions, and
+     6 faces is enough to find a neighbour that is coming for it anyway: the
+     mover on the other side is probing 26 and will find the pair first. */
+  SM_NB[id]  = spec.k===K_STATIC ? 6 : 26;
+  const c = spec.c||[0.5,0.5,0.5];
+  SM_COL[id*3]=c[0]; SM_COL[id*3+1]=c[1]; SM_COL[id*3+2]=c[2];
+  SM_EMIS[id]= spec.emis||0;
+  SM_SEE[id] = spec.see===undefined ? 1 : spec.see;
+  return id;
 }
-function rawAdd(x,y,z, vx,vy,vz, mat){
-  /* Past the cap the oldest grain is recycled rather than the new one dropped:
-     what you just shot is always what you see, and the floor stops growing.
-     NEXT.md rule 3 — visible debris is a budget, not a consequence. */
-  const i = RAW.n < RAW_MAX ? RAW.n++ : ((RAW.oldest = ((RAW.oldest||0)+1) % RAW_MAX));
-  /* Give back whatever cell the grain in this slot was holding, BEFORE the new
-     one takes the slot. A recycled grain that keeps its claim is a ghost. */
-  if(RAW.rest[i] && RAW.key[i]){ RAW.occ.delete(RAW.key[i]); RAW.under.delete(RAW.key[i]); }
-  RAW.key[i]=0;
-  RAW.x[i]=x; RAW.y[i]=y; RAW.z[i]=z;
-  RAW.vx[i]=vx; RAW.vy[i]=vy; RAW.vz[i]=vz;
-  RAW.m[i]=mat; RAW.rest[i]=0;
+
+/* AIR and ROCK are the two the engine itself needs. ROCK is the world's own
+   geometry — an undug block, or the wall at the edge of everything — and the
+   sand layer never draws it, because the block renderer already did. Debris
+   from broken stone is RUBBLE, a powder, and that separation is what lets the
+   grid hold "there is a block here" and "there is a heap of stone here" in the
+   same byte without confusing them. */
+const S_AIR = addMat({n:'air', k:K_STATIC, d:0, s:0, c:[0,0,0], see:0});
+const S_ROCK= addMat({n:'rock',k:K_STATIC, d:2700, s:0, c:[0.30,0.27,0.26], see:0});
+/* The five the game already had, with the properties RAW gave them — slip is
+   the angle of repose as a probability, because the grid is discrete and an
+   angle would have to be turned into one of these anyway. Dry sand runs (34
+   degrees), wet sand stands up and can overhang (45, which is why sandcastles
+   exist), rock locks because angular fragments interlock. */
+const S_SAND   = addMat({n:'sand',    k:K_POWDER, d:1600, slip:0.92, c:[0.80,0.68,0.44], emis:0.42});
+const S_RUBBLE = addMat({n:'rubble',  k:K_POWDER, d:2700, slip:0.28, c:[0.30,0.28,0.26], emis:0.42});
+const S_WATER  = addMat({n:'water',   k:K_LIQUID, d:1000, s:5, slip:1.0, c:[0.22,0.44,0.76], emis:0.30});
+const S_GLASS  = addMat({n:'glass',   k:K_POWDER, d:2500, slip:0.45, c:[0.66,0.86,0.88], emis:0.50});
+const S_WETSND = addMat({n:'wetsand', k:K_POWDER, d:2000, slip:0.18, c:[0.44,0.37,0.26], emis:0.34});
+/* And the ones that arrive with the engine. The game has never had any of
+   these, because it had nowhere to put a reaction. */
+const S_SALT   = addMat({n:'brine',   k:K_LIQUID, d:1025, s:6, slip:1.0, c:[0.13,0.34,0.62], emis:0.26});
+const S_OIL    = addMat({n:'oil',     k:K_LIQUID, d:900,  s:4, slip:1.0, c:[0.22,0.18,0.12], emis:0.20});
+const S_SMOKE  = addMat({n:'smoke',   k:K_GAS,    d:3,  s:2, slip:1.0, life:120, next:0, c:[0.24,0.24,0.26], emis:0.10});
+const S_FIRE   = addMat({n:'fire',    k:K_GAS,    d:5,  s:1, slip:1.0, life:40,  next:S_SMOKE, c:[1.00,0.55,0.12], emis:1.0});
+const S_STEAM  = addMat({n:'steam',   k:K_GAS,    d:2,  s:3, slip:1.0, life:200, next:0, c:[0.65,0.70,0.78], emis:0.22});
+const S_LAVA   = addMat({n:'lava',    k:K_LIQUID, d:2600, s:2, slip:1.0, c:[0.95,0.35,0.06], emis:1.0});
+const S_ACID   = addMat({n:'acid',    k:K_LIQUID, d:1050, s:4, slip:1.0, c:[0.55,0.85,0.15], emis:0.75});
+const S_EMBER  = addMat({n:'ember',   k:K_POWDER, d:1500, slip:0.5, life:90, next:S_SMOKE, c:[0.85,0.25,0.05], emis:0.9});
+const S_WOOD   = addMat({n:'wood',    k:K_STATIC, d:700,  c:[0.36,0.24,0.13], emis:0.30});
+const S_LEAF   = addMat({n:'leaf',    k:K_POWDER, d:300, slip:0.98, c:[0.22,0.45,0.16], emis:0.30});
+const S_IRON   = addMat({n:'iron',    k:K_POWDER, d:7800, slip:0.20, c:[0.45,0.42,0.40], emis:0.40});
+/* Gunpowder is saltpeter, charcoal and sulfur — voxel/compose.js prices the
+   mix; here it is one powder that catches. */
+const S_GPOWD  = addMat({n:'gunpowder', k:K_POWDER, d:1700, slip:0.80, c:[0.18,0.16,0.14], emis:0.20});
+
+/* Reactions: what happens when a touches b, order-independent because the row
+   is written both ways. Flat rather than a Map — 65,536 entries of "what this
+   pair becomes", -1 for the vast majority that become nothing. SRXANY is the
+   bigger win of the two: it says whether a material reacts with ANYTHING, so
+   sand and rubble skip the whole neighbour probe rather than performing it and
+   finding nothing. */
+const SRXP = new Int32Array(65536).fill(-1);
+const SRXANY = new Uint8Array(256);
+function srx(a,b,ra,rb){
+  SRXP[a*256+b] = (ra<<8)|rb;
+  SRXP[b*256+a] = (rb<<8)|ra;
+  SRXANY[a]=1; SRXANY[b]=1;
 }
-/* Break a block into its constituents and throw them. The recipe is the same
-   one the voxel layer uses, so what falls out of a block is what was in it. */
-function rawBurst(bx,by,bz, dirx,diry,dirz, count, thermJ){
-  const i = idx(bx,by,bz);
-  const rec = voxRecipe(i);
-  const cx=(bx+0.5)*BLOCK, cy=(by+0.5)*BLOCK, cz=(bz+0.5)*BLOCK;
-  /* WHAT IS REALLY IN THERE, against what fits on screen. A block is 4,096
-     voxels and a voxel is GRAINS_PER_VOXEL grains, so a block is 16,384 grains
-     and `count` is a sample of them. Keeping the real number is what lets the
-     glass arithmetic below be about mass rather than about pixels. */
-  RAW.owed += 4096*GRAINS_PER_VOXEL;
+srx(S_FIRE, S_WATER, S_STEAM, S_STEAM);
+srx(S_FIRE, S_SALT,  S_STEAM, S_STEAM);
+srx(S_LAVA, S_WATER, S_ROCK,  S_STEAM);
+srx(S_LAVA, S_SALT,  S_ROCK,  S_STEAM);
+srx(S_FIRE, S_OIL,   S_FIRE,  S_FIRE);
+srx(S_FIRE, S_WOOD,  S_FIRE,  S_EMBER);
+srx(S_FIRE, S_LEAF,  S_FIRE,  S_FIRE);
+srx(S_FIRE, S_GPOWD, S_FIRE,  S_FIRE);
+srx(S_LAVA, S_OIL,   S_LAVA,  S_FIRE);
+srx(S_LAVA, S_WOOD,  S_LAVA,  S_FIRE);
+srx(S_LAVA, S_LEAF,  S_LAVA,  S_FIRE);
+srx(S_LAVA, S_GPOWD, S_LAVA,  S_FIRE);
+/* SAND TO GLASS, and it is the row Marcelo asked for: "some day it will almost
+   turn sand to glass". A gun cannot — voxel/impact.js priced it and 22 kJ of
+   heat fuses 17 grams, a five-hundredth of one bead. Lava can, because lava is
+   there for as long as it takes. */
+srx(S_LAVA, S_SAND,  S_LAVA,  S_GLASS);
+srx(S_ACID, S_ROCK,  S_AIR,   S_AIR);
+srx(S_ACID, S_WOOD,  S_ACID,  S_AIR);
+srx(S_ACID, S_IRON,  S_ACID,  S_AIR);
+/* Water wets sand rather than being consumed by it, so this terminates: once
+   the sand touching the water is wet sand there is no pair left to find. It is
+   also where the island's wet shoreline comes from without anyone drawing it. */
+srx(S_WATER, S_SAND, S_WATER, S_WETSND);
+srx(S_SALT,  S_SAND, S_SALT,  S_WETSND);
 
-  /* AND HEAT MAKES GLASS — in principle. Fusing silica is 1.32 MJ/kg, and one
-     RENDERED grain here is 17 cm of sand, which is 8.6 kg and 11.3 MJ. A shot
-     carries 110 kJ of which 20% is heat: 22 kJ, enough for 17 GRAMS. So a
-     shotgun cannot vitrify even a fiftieth of one grain, and the honest
-     display of that is NONE — which is exactly what impact.js said when it
-     found glass takes a hundred shots to make a crust.
-
-     The mechanism is here and correct, and it will fire the day something hot
-     enough touches sand: a mine's 240 kJ, a lava pool, a furnace. It does not
-     fire for a gun and it should not. */
-  const grainKg = 1600 * RAW_S*RAW_S*RAW_S;
-  const fuseKg  = (thermJ||0) / 1.32e6;
-  RAW.fused += fuseKg;
-  let glassLeft = Math.floor(fuseKg / grainKg);
-  for(let k=0;k<count;k++){
-    const t = rnd();
-    let mat = t < rec.rock ? R_ROCK : (t < rec.rock+rec.water ? R_WATER : R_SAND);
-    if(mat===R_SAND && glassLeft>0){ mat = R_GLASS; glassLeft--; }
-    const sp = 2.0 + rnd()*5.5;
-    rawAdd(cx+(rnd()-.5)*BLOCK*0.9, cy+(rnd()-.5)*BLOCK*0.9, cz+(rnd()-.5)*BLOCK*0.9,
-           -dirx*sp*0.5 + (rnd()-.5)*sp,
-           rnd()*sp*0.75 + 1.2,
-           -dirz*sp*0.5 + (rnd()-.5)*sp, mat);
+/* --------------------------------------------------------------------------
+   THE 26-NEIGHBOURHOOD
+   --------------------------------------------------------------------------
+   Ordered faces, then edges, then corners, so a 6-neighbour probe is a PREFIX
+   of the same table: one array, two lengths, no second copy to keep in step. */
+const NB26X = new Int8Array(26), NB26Y = new Int8Array(26), NB26Z = new Int8Array(26);
+{
+  let f=0, e=6, c=18;
+  for(let dx=-1;dx<=1;dx++) for(let dy=-1;dy<=1;dy++) for(let dz=-1;dz<=1;dz++){
+    const n = (dx?1:0)+(dy?1:0)+(dz?1:0);
+    if(n===0) continue;
+    const k = n===1 ? f++ : n===2 ? e++ : c++;
+    NB26X[k]=dx; NB26Y[k]=dy; NB26Z[k]=dz;
   }
 }
-/* One tick. Only grains still in the air are integrated; a landed one is a
-   number in an array and nothing more. */
-/* ONE TICK, IN TWO REGIMES, and mixing them was the mistake that made every
-   material behave identically.
+/* The eight lateral directions a falling thing can slide into: four along the
+   axes, then four across the corners. The split is the point — the first four
+   are one cell away and the last four are sqrt(2), and they are taken at
+   different rates because of it. */
+const LATX = new Int8Array([ 1,-1, 0, 0,  1, 1,-1,-1]);
+const LATZ = new Int8Array([ 0, 0, 1,-1,  1,-1, 1,-1]);
+/* HOW OFTEN A CORNER IS TAKEN, RELATIVE TO AN AXIS, and the first value I put
+   here was wrong for a reason worth keeping. 1/sqrt(2) is the obvious one — a
+   corner step is sqrt(2) longer, so take it 1/sqrt(2) as often and the distance
+   covered per unit time comes out equal. Measured, that gives a heap with
+   diag/axis = 1.24, where round is 1.00 and a square is 1.41. Still much better
+   than the 0.71 diamond four directions produce, and still visibly wrong.
 
-   A grain in FLIGHT is ballistic and continuous: that is what makes the arc
-   off a shot look like an arc, and while it is in the air nothing else is in
-   its way worth testing.
+   D2Q9 - the nine-velocity set every lattice-Boltzmann fluid in the plane is
+   built on - weights the four axes 1/9 and the four corners 1/36, so a corner
+   is worth a QUARTER of an axis there. That is closer but still not this rule,
+   because a lattice-gas PROPAGATES along every direction at once and this picks
+   the FIRST PASSABLE one out of a random rotation. At the edge of a heap the
+   corner is very often the only cell open, so it gets selected far more often
+   than its weight, and the honest way to find the number was to measure it.
 
-   A grain that has LANDED is discrete. It sits in a cell of the lattice and
-   moves cell to cell — down, then diagonally down, then (if it is a liquid)
-   sideways — exactly the rules sand.js has run since its first bench. This is
-   where the material finally matters, and it has to be discrete, because a
-   heap is a thing built out of cells sitting on cells.
+   tools/h_round.js sweeps it and pours a heap of each powder at every value:
 
-   The first version tried to do settling with continuous positions and
-   cell-keyed occupancy at the same time. Two grains seven centimetres apart
-   shared a cell, so the second rested INSIDE the first and no heap could grow;
-   patching that by shoving grains upward until they found a free cell built a
-   TOWER back up to the spout. Both are in the git history and both were me
-   refusing to let the settling be discrete. */
-function rawTake(i){
-  RAW.key[i] = rawKey(RAW.x[i], RAW.y[i], RAW.z[i]);
-  RAW.occ.add(RAW.key[i]); RAW.under.set(RAW.key[i], i);
-}
-function rawDrop(i){
-  if(RAW.key[i]){ RAW.occ.delete(RAW.key[i]); RAW.under.delete(RAW.key[i]); RAW.key[i]=0; }
-}
-/* free = no world block and no other grain */
-function rawFree(cx,cy,cz){
-  if(cy < 0) return false;
-  if(RAW.occ.has(rawKeyC(cx,cy,cz))) return false;
-  return !solidAtWorld((cx+0.5)*RAW_S, (cy+0.5)*RAW_S, (cz+0.5)*RAW_S);
-}
-const RD4X = [1,-1,0,0], RD4Z = [0,0,1,-1];
+       corner   sand   wet sand   rubble
+        0.04    0.90     0.97      0.94
+        0.06    1.03     1.00      1.00     <- round, and round for all three
+        0.08    1.06     1.06      1.02
+        0.10    1.06     1.13      1.09
 
-function rawStep(dt){
-  let moving = 0;
-  for(let i=0;i<RAW.n;i++){
-    const M = RAWMAT[RAW.m[i]] || RAWMAT[0];
+   Four lateral directions score 0.74 on the same test, which is the diamond
+   that |dx|+|dz| <= n has to be. */
+let CORNER_RATE = 0.06;
+/* HOW MANY OF THEM ARE USED, and it is here so the change can be MEASURED
+   rather than asserted. 8 is the 26-neighbourhood and what ships; 4 is the old
+   face-only set, which is what voxel/sand.js ran on for the whole project and
+   what makes a heap come out as a diamond instead of a cone. tools/h_sand.js
+   builds the same pile twice, once with each, and prints both. */
+let SAND_LAT = 8;
 
-    /* ---- in the air ---- */
-    if(RAW.rest[i]===0){
-      moving++;
-      RAW.vy[i] -= gnow()*dt;
-      const nx=RAW.x[i]+RAW.vx[i]*dt, ny=RAW.y[i]+RAW.vy[i]*dt, nz=RAW.z[i]+RAW.vz[i]*dt;
-      const cx=rawCell(nx), cy=rawCell(ny), cz=rawCell(nz);
-      if(rawFree(cx,cy,cz) && ny > RAW_S*0.5){
-        RAW.x[i]=nx; RAW.y[i]=ny; RAW.z[i]=nz;
-        continue;
-      }
-      /* it touched something: take the last free cell it was in and settle */
-      let sx=rawCell(RAW.x[i]), sy=rawCell(RAW.y[i]), sz=rawCell(RAW.z[i]);
-      if(!rawFree(sx,sy,sz)){
-        /* born inside something, or shoved: find the nearest free cell up */
-        let g=0; while(!rawFree(sx,sy,sz) && g++<40) sy++;
-        if(g>=40){ RAW.rest[i]=1; continue; }
-      }
-      RAW.x[i]=(sx+0.5)*RAW_S; RAW.y[i]=(sy+0.5)*RAW_S; RAW.z[i]=(sz+0.5)*RAW_S;
-      RAW.vx[i]=RAW.vy[i]=RAW.vz[i]=0;
-      RAW.rest[i]=2;                       // settling
-      rawTake(i);
-      continue;
+/* Scratch for the tick, kept off the object so the inner loop is not writing
+   through a property every cell. Written back when it ends. */
+let SRS = 0, SSCAN = 0, SMOV = 0;
+
+class SandWorld {
+  constructor(W,H,D){
+    this.W=W; this.H=H; this.D=D;
+    this.CW = Math.ceil(W/SCS); this.CH = Math.ceil(H/SCS); this.CD = Math.ceil(D/SCS);
+    this.AW = this.CW*SCS; this.AH = this.CH*SCS; this.AD = this.CD*SCS;
+    this.PW = this.AW+2;    this.PH = this.AH+2;    this.PD = this.AD+2;
+    /* x fastest, then z, then y — the order the scan runs in, so one row of
+       the scan is a run of consecutive bytes. */
+    this.SX = 1; this.SZ = this.PW; this.SY = this.PW*this.PD;
+    this.N  = this.PW*this.PH*this.PD;
+
+    this.m = new Uint8Array(this.N);
+    /* The age array is only allocated when something with a life first
+       appears. Most worlds never see fire, and 32 MB not allocated is 32 MB
+       not paid for. */
+    this.t = null;
+    this.N26 = new Int32Array(26);
+    for(let k=0;k<26;k++) this.N26[k] = NB26X[k] + NB26Y[k]*this.SY + NB26Z[k]*this.SZ;
+
+    /* EVERYTHING IS ROCK TO BEGIN WITH, and that is not a placeholder — it is
+       the world. A minesweeper board starts solid and you dig it out, so the
+       cheap direction is to carve air where a block is already gone rather
+       than to stamp stone where one stands. The border and the chunk-alignment
+       slack are left rock for ever, which is what makes every probe in the
+       inner loop safe without a single bounds check: the edge of the world
+       answers "solid" like any other stone would.
+
+       That is safe because of a property of the rules rather than a promise.
+       EVERY probe is at most one cell outside: falls and diagonals move one
+       cell, and the fluid spread walks sideways but stops at the first cell it
+       cannot pass, and the first cell outside is rock. Nothing can reach two
+       cells out to be wrong about. */
+    this.m.fill(S_ROCK);
+
+    this.nc = this.CW*this.CH*this.CD;
+    this.cb = new Int16Array(this.nc*6);    // dirty bounds, chunk-local
+    this.cw = new Uint8Array(this.nc);      // awake: scan me next tick
+    this.cf = new Uint8Array(this.nc);      // the rect is ALREADY the whole chunk
+    this.cl = new Uint8Array(this.nc);      // might hold something the sand layer draws
+    this.awake = [];
+    for(let c=0;c<this.nc;c++) this.reset(c);
+    this.tick = 0;
+    this.stats = {moves:0, scanned:0, awake:0, rx:0, drawn:0};
+  }
+  ages(){ return this.t || (this.t = new Uint8Array(this.N)); }
+  reset(c){
+    const b=this.cb, o=c*6;
+    b[o]=SCS; b[o+1]=SCS; b[o+2]=SCS; b[o+3]=-1; b[o+4]=-1; b[o+5]=-1;
+    this.cw[c]=0; this.cf[c]=0;
+  }
+  idx(x,y,z){ return (y+1)*this.SY + (z+1)*this.SZ + (x+1); }
+  inBox(x,y,z){ return x>=0 && y>=0 && z>=0 && x<this.W && y<this.H && z<this.D; }
+  at(x,y,z){ return this.inBox(x,y,z) ? this.m[this.idx(x,y,z)] : S_ROCK; }
+
+  /* THE SATURATION FLAG, and the measurement that earned it. In a body of
+     liquid that is genuinely churning, essentially every cell moves every tick
+     and a move wakes two neighbourhoods: 65,536 cells scanned, 64,493 moves,
+     132,928 touches and 156,894 marks in one tick, and almost every mark was
+     widening a rect that already covered the whole chunk. So once a rect
+     reaches the chunk's full extent, say so in one byte. Costs nothing when
+     the world is quiet, because a quiet chunk never saturates. */
+  mark(c, lx,ly,lz){
+    this.cl[c]=1;
+    if(this.cf[c]) return;
+    const b=this.cb, o=c*6;
+    const x0 = lx>0?lx-1:0, x1 = lx<SCS-1?lx+1:SCS-1;
+    const y0 = ly>0?ly-1:0, y1 = ly<SCS-1?ly+1:SCS-1;
+    const z0 = lz>0?lz-1:0, z1 = lz<SCS-1?lz+1:SCS-1;
+    let grew = 0;
+    if(x0<b[o])   { b[o]=x0;   grew=1; }  if(x1>b[o+3]) { b[o+3]=x1; grew=1; }
+    if(y0<b[o+1]) { b[o+1]=y0; grew=1; }  if(y1>b[o+4]) { b[o+4]=y1; grew=1; }
+    if(z0<b[o+2]) { b[o+2]=z0; grew=1; }  if(z1>b[o+5]) { b[o+5]=z1; grew=1; }
+    if(!this.cw[c]){ this.cw[c]=1; this.awake.push(c); }
+    if(grew && b[o]===0 && b[o+1]===0 && b[o+2]===0 &&
+       b[o+3]===SCS-1 && b[o+4]===SCS-1 && b[o+5]===SCS-1) this.cf[c]=1;
+  }
+  /* A change on a chunk face wakes the chunk next door, or material stops dead
+     at chunk seams — the classic falling-sand bug, and it looks like a shelf. */
+  touch(x,y,z){
+    const cx=x>>5, cy=y>>5, cz=z>>5, lx=x&31, ly=y&31, lz=z&31;
+    const CWd=this.CW, CDd=this.CD;
+    const row = (cy*CDd + cz)*CWd;
+    this.mark(row+cx, lx,ly,lz);
+    if      (lx===0)      { if(cx>0)         this.mark(row+cx-1, SCS-1, ly, lz); }
+    else if (lx===SCS-1)  { if(cx<CWd-1)     this.mark(row+cx+1, 0,     ly, lz); }
+    if      (lz===0)      { if(cz>0)         this.mark(row-CWd+cx, lx, ly, SCS-1); }
+    else if (lz===SCS-1)  { if(cz<CDd-1)     this.mark(row+CWd+cx, lx, ly, 0); }
+    if      (ly===0)      { if(cy>0)         this.mark(row-CDd*CWd+cx, lx, SCS-1, lz); }
+    else if (ly===SCS-1)  { if(cy<this.CH-1) this.mark(row+CDd*CWd+cx, lx, 0,     lz); }
+  }
+  put(x,y,z,mat){
+    if(!this.inBox(x,y,z)) return;
+    const i = this.idx(x,y,z);
+    if(this.m[i]===mat) return;
+    this.m[i]=mat;
+    if(SM_LIFE[mat]) this.ages()[i]=0;
+    this.touch(x,y,z);
+  }
+  /* Wake the boundary of a box that was just carved or stamped. Only the shell
+     is touched, and that is not a shortcut: if nothing was moving then
+     everything was stable, so opening a hole can only destabilise what was
+     next to the hole. Filling every cell's neighbourhood instead would mark
+     the same chunks over and over for no extra information. */
+  wakeShell(x0,y0,z0,x1,y1,z1){
+    for(let y=y0;y<=y1;y++) for(let z=z0;z<=z1;z++){ this.touch(x0,y,z); this.touch(x1,y,z); }
+    for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++){ this.touch(x,y,z0); this.touch(x,y,z1); }
+    for(let z=z0;z<=z1;z++) for(let x=x0;x<=x1;x++){ this.touch(x,y0,z); this.touch(x,y1,z); }
+  }
+  count(mat){
+    let n=0;
+    for(let y=0;y<this.H;y++) for(let z=0;z<this.D;z++){
+      const r=(y+1)*this.SY+(z+1)*this.SZ+1;
+      for(let x=0;x<this.W;x++) if(this.m[r+x]===mat) n++;
     }
-    if(RAW.rest[i]!==2) continue;          // 1 = asleep
+    return n;
+  }
+}
 
-    /* ---- settling, on the lattice ---- */
-    moving++;
-    const cx=rawCell(RAW.x[i]), cy=rawCell(RAW.y[i]), cz=rawCell(RAW.z[i]);
-    const move=(nx,ny,nz)=>{
-      rawDrop(i);
-      RAW.x[i]=(nx+0.5)*RAW_S; RAW.y[i]=(ny+0.5)*RAW_S; RAW.z[i]=(nz+0.5)*RAW_S;
-      rawTake(i);
-    };
-    /* 1. straight down */
-    if(rawFree(cx,cy-1,cz)){ move(cx,cy-1,cz); continue; }
-    /* 2. SINK. If what holds it up is lighter, they trade places — sand
-       through water needs no special case, it is one comparison. */
-    {
-      const u = RAW.under.get(rawKeyC(cx,cy-1,cz));
-      if(u !== undefined && u !== i){
-        const mu = RAWMAT[RAW.m[u]] || RAWMAT[0];
-        if(M.dens > mu.dens){
-          rawDrop(i); rawDrop(u);
-          const ty=RAW.y[u], tx=RAW.x[u], tz=RAW.z[u];
-          RAW.x[u]=RAW.x[i]; RAW.y[u]=RAW.y[i]; RAW.z[u]=RAW.z[i];
-          RAW.x[i]=tx; RAW.y[i]=ty; RAW.z[i]=tz;
-          rawTake(i); rawTake(u);
-          if(RAW.rest[u]===1) RAW.rest[u]=2;
-          continue;
+/* ---------------- the rules ----------------
+   Each is "where would I rather be", asked in order, first answer wins. */
+
+/* Can I displace what is there? Air always; a lighter fluid yes, which is how
+   sand sinks through water and oil climbs through it with no special case. */
+function sPassable(mat, tgt){
+  if(tgt === S_AIR) return true;
+  const k = SM_K[tgt];
+  if(k === K_STATIC || k === K_POWDER) return false;
+  return SM_D[mat] > SM_D[tgt];
+}
+function sMove(w, i, x,y,z, j, dx,dy,dz){
+  const M=w.m, a=M[i], b=M[j];
+  M[i]=b; M[j]=a;
+  if(SM_LIFE[b] || SM_LIFE[a]){ const T=w.ages(); if(SM_LIFE[b]) T[i]=0; if(SM_LIFE[a]) T[j]=0; }
+  w.touch(x,y,z); w.touch(x+dx,y+dy,z+dz);
+  SMOV++;
+}
+/* 26 neighbours for anything that moves, 6 for anything that cannot. The count
+   is a table read, so this loop is the same code for both. */
+function sReact(w, i, x,y,z, a){
+  const M=w.m, N=w.N26, base=a<<8, lim=SM_NB[a];
+  for(let k=0;k<lim;k++){
+    const p = SRXP[base + M[i+N[k]]];
+    if(p >= 0){
+      w.put(x,y,z, p>>8);
+      w.put(x+NB26X[k], y+NB26Y[k], z+NB26Z[k], p&255);
+      w.stats.rx++;
+      return true;
+    }
+  }
+  return false;
+}
+
+function sStepCell(w, i, x,y,z, mat, gdir){
+  if(SRXANY[mat] && sReact(w,i,x,y,z,mat)) return true;
+  const K = SM_K[mat];
+  if(K === K_STATIC) return false;
+  const M = w.m, SZ = w.SZ;
+  const dir = (K === K_GAS) ? -gdir : gdir;     // gases rise, the rest fall
+  const dy = dir*w.SY;
+
+  /* 1. straight along gravity.
+
+     WRITTEN OUT LONGHAND, AND ONLY THIS ONE. It is sPassable() followed by
+     sMove(), and calling them costs more than the work they do: V8 will not
+     inline a nine-argument function with two method calls in its body, and on
+     a falling column — where the bottom-up scan means every grain moves every
+     tick — that one call was more than half the cost of the simulation.
+     Measured on 262,144 cells with 147,456 moves a tick: 28.3 ms through the
+     calls, 12.4 ms written out, the same moves either way. Doing the same to
+     the diagonals changed nothing (12.9 ms), so they keep the readable form.
+     Change the rule here, change sPassable too. */
+  {
+    const j = i+dy, tgt = M[j];
+    if(tgt === S_AIR || (SM_K[tgt] >= K_LIQUID && SM_D[mat] > SM_D[tgt])){
+      M[i] = tgt; M[j] = mat;
+      if(SM_LIFE[tgt] || SM_LIFE[mat]){ const T=w.ages(); if(SM_LIFE[tgt]) T[i]=0; if(SM_LIFE[mat]) T[j]=0; }
+      w.touch(x,y,z); w.touch(x,y+dir,z);
+      SMOV++;
+      return true;
+    }
+  }
+
+  /* 2. THE EIGHT DIAGONALS, which is the 26-neighbourhood arriving. Four along
+        the axes and four across the corners, started at a random one of the
+        eight so that piles are not pyramids and flows are not all left-handed.
+        Three bits off the LCG rather than a float multiply. */
+  SRS = (SRS*1664525 + 1013904223) >>> 0;
+  const o = SRS >>> 29;                       // 0..7
+  SRS = (SRS*1664525 + 1013904223) >>> 0;
+  /* TWO INDEPENDENT QUESTIONS OUT OF ONE WORD, and keeping them independent is
+     the point. "Does it slide at all" is the angle of repose and belongs to the
+     material; "in which directions" is isotropy and belongs to the lattice.
+     The first version multiplied them together, so wet sand at slip 0.18 saw a
+     corner 0.18 * 0.08 of the time — never — and went straight back to being a
+     diamond while dry sand came out round. Measured: 0.99 for sand and 0.81 for
+     wet sand off the same constant.
+
+     High bits for the slip test, low byte for the corner gate. One LCG step,
+     two answers, and no extra cost. */
+  const roll = (SRS >>> 8) / 16777216;
+  const slip = SM_SLIP[mat];
+  /* AND THE CORNER GATE SCALES WITH 1/slip, which is the second correction and
+     the one that took a measurement to find. A free-running powder gets many
+     slide attempts as it tumbles down a heap; a cohesive one gets a handful.
+     What has to match between them is the number of CORNER STEPS PER GRAIN, not
+     the corner probability per attempt — so a material that attempts less must
+     turn more often when it does. With a flat rate, sand came out at 1.02 and
+     wet sand at 0.83 off the same constant; with this, they agree. */
+  const okAxis = roll < slip, okCorner = (SRS & 255) < CORNER_RATE*256/slip;
+  const NLAT = SAND_LAT, LMASK = NLAT-1;      // hoisted: one load a cell, not one a step
+  if(okAxis){
+    for(let k=0;k<NLAT;k++){
+      const q=(o+k)&LMASK;
+      if(q>=4 && !okCorner) continue;
+      const dx=LATX[q], dz=LATZ[q];
+      const lat = dx + dz*SZ;
+      /* LATERAL CLEARANCE: a grain may not slide diagonally through a wall.
+         Along an axis it needs the cell beside it open; across a corner it
+         needs at least one of the two axis cells beside it, or it would squeeze
+         through the seam where three solid cells meet. */
+      if(q<4){ if(!sPassable(mat, M[i+lat])) continue; }
+      else   { if(!sPassable(mat, M[i+dx]) && !sPassable(mat, M[i+dz*SZ])) continue; }
+      const j = i + dy + lat;
+      if(sPassable(mat, M[j])){ sMove(w,i,x,y,z, j, dx,dir,dz); return true; }
+    }
+  }
+
+  /* 3. and if it is a fluid, sideways — up to its spread, which is the
+        difference between water (finds its level fast) and lava (crawls).
+        Eight directions here too: with four, a puddle spreads as a plus sign
+        and its front is visibly axis-aligned. This is the only rule that walks
+        more than one cell, and it stops at the first cell it cannot pass,
+        which is why one cell of wall is enough to keep the loop unchecked. */
+  if(K === K_LIQUID || K === K_GAS){
+    const s = SM_S[mat];
+    const q = (o+1)&(SAND_LAT-1), dx=LATX[q], dz=LATZ[q];
+    const off = dx + dz*SZ;
+    /* A corner run covers sqrt(2) more ground per step, so it takes fewer of
+       them to reach the same distance - and the count has to be a whole number
+       while s/sqrt(2) is not. Truncating put water's diagonal reach at 0.81 of
+       its axis reach and rounding up put it at 1.34, both of which are the
+       lattice showing through, and dithering the rounding made it 1.76, which
+       is worse still.
+
+       So it TRUNCATES, which is the principled rule stated plainly: walk while
+       the distance covered is at most s. Water measures 0.81 that way against
+       0.71 for four directions - better, and not fixed. The residual is real
+       and it is quantisation: floor(5/sqrt(2)) * sqrt(2) / 5 is 0.85 and no
+       choice of rounding beats it at a spread of five cells. It closes as the
+       spread grows (0.99 at ten), so the fix is a bigger number rather than a
+       cleverer one, and it is not worth spending a bigger number on yet.
+
+       The powder measurement is the trustworthy one: a heap is volume-limited
+       in every direction equally. A puddle is a fixed amount of water finding
+       its level, so reaching further one way means reaching less far another,
+       and the ratio moves around between runs. */
+    const lim = q<4 ? s : Math.max(1, (s*181) >> 8);
+    for(let n=1;n<=lim;n++){
+      const side = i + off*n;
+      if(!sPassable(mat, M[side])) break;
+      if(sPassable(mat, M[side+dy])){ sMove(w,i,x,y,z, side+dy, dx*n,dir,dz*n); return true; }
+      if(n === lim){ sMove(w,i,x,y,z, side, dx*n,0,dz*n); return true; }
+    }
+  }
+  return false;
+}
+
+/* ---------------- the tick ----------------
+   Only awake chunks, and inside them only the dirty rect. The scan runs along
+   gravity so a grain does not fall twice in one tick, and the x direction
+   alternates, because a fixed order makes every flow drift the same way and
+   the eye picks that up immediately. */
+function sandTick(w, gdir){
+  const M=w.m, SY=w.SY, SZ=w.SZ, CW=w.CW, CD=w.CD;
+  const flip = (w.tick & 1) === 1;
+  SRS = (w.tick*2654435761) >>> 0;
+  SSCAN = 0; SMOV = w.stats.moves;
+
+  /* Freeze this tick's rects and open fresh ones, so what happens now
+     schedules the NEXT tick rather than extending this one for ever. The
+     active set is a list of chunk indices rather than a walk of every chunk
+     that exists: a world can be large and quiet and cost nothing to find out. */
+  const was = w.awake;
+  w.awake = [];
+  const rect = [];
+  for(const c of was){
+    const o=c*6, b=w.cb;
+    rect.push(c, b[o],b[o+1],b[o+2], b[o+3],b[o+4],b[o+5]);
+    w.reset(c);
+  }
+  w.stats.awake = rect.length/7;
+  const T = w.t;
+
+  for(let r=0; r<rect.length; r+=7){
+    const c = rect[r];
+    const cx = c % CW, q = (c/CW)|0, cz = q % CD, cy = (q/CD)|0;
+    const bx = cx*SCS, by = cy*SCS, bz = cz*SCS;
+    const x0=rect[r+1], y0=rect[r+2], z0=rect[r+3];
+    const x1=rect[r+4], y1=rect[r+5], z1=rect[r+6];
+    const span = x1-x0;
+    for(let ny=y0; ny<=y1; ny++){
+      /* Bottom-up when things fall, top-down when they do not: the ending
+         flips gravity and the scan has to flip with it or everything falls a
+         whole column in one tick. */
+      const ly = gdir<0 ? ny : (y1 - (ny-y0));
+      const y = by+ly;
+      for(let lz=z0; lz<=z1; lz++){
+        const z = bz+lz;
+        /* The flat index of x=0 in this row. Everything in the innermost loop
+           is that plus an integer — no multiply, no lookup, no bounds test. */
+        const row = (y+1)*SY + (z+1)*SZ + 1 + bx;
+        for(let n=0; n<=span; n++){
+          const lx = flip ? x1-n : x0+n;
+          const i = row + lx;
+          const mat = M[i];
+          SSCAN++;
+          if(mat === S_AIR || mat === S_ROCK) continue;
+          const L = SM_LIFE[mat];
+          if(L){
+            const A = T || w.ages();
+            if(++A[i] >= L){ w.put(bx+lx, y, z, SM_NEXT[mat]); continue; }
+            w.touch(bx+lx, y, z);            // burning is never settled
+          }
+          sStepCell(w, i, bx+lx, y, z, mat, gdir);
         }
       }
     }
-    /* 3. diagonally down, if it is willing to slide. SLIP IS THE ANGLE OF
-       REPOSE: dry sand runs, wet sand stands up and can even overhang, rock
-       interlocks. Same heap of each, different shape, and that is the whole
-       reason a material is a property rather than a colour. */
-    let went=false;
-    const o=(i*7+RAW.tick)&3;
-    if(rnd() < M.slip){
-      for(let k=0;k<4 && !went;k++){
-        const d=(o+k)&3, ax=cx+RD4X[d], az=cz+RD4Z[d];
-        if(rawFree(ax,cy,az) && rawFree(ax,cy-1,az)){ move(ax,cy-1,az); went=true; }
-      }
-    }
-    if(went) continue;
-    /* 4. a LIQUID does not heap: with nowhere down to go it goes sideways,
-       as far as its spread, and that is what finding a level is. */
-    if(M.kind===RK_LIQUID){
-      for(let k=0;k<4 && !went;k++){
-        const d=(o+k)&3;
-        for(let q=1;q<=M.spread;q++){
-          const ax=cx+RD4X[d]*q, az=cz+RD4Z[d]*q;
-          if(!rawFree(ax,cy,az)) break;
-          if(rawFree(ax,cy-1,az)){ move(ax,cy-1,az); went=true; break; }
-          if(q===M.spread){ move(ax,cy,az); went=true; }
-        }
-      }
-    }
-    if(!went){ RAW.rest[i]=1; moving--; }   // nothing left to do: asleep
   }
-  RAW.tick=(RAW.tick+1)|0;
-  RAW.moving = moving;
+  w.stats.scanned = SSCAN;
+  w.stats.moves = SMOV;
+  w.tick++;
 }
 
-const VOX_DIV = 16;                       // voxels per block edge, = BLOCK/16
-const VOX_N   = VOX_DIV*VOX_DIV*VOX_DIV;
-/* THREE, not six, and the measurement is why: six carved blocks emitted 9,534
-   instances on a 240-instance Apprentice board — 91% of the batch. A DUNGEON
-   already spends about 10,000 on its own geometry, so six would have blown the
-   cap and worldB drops geometry SILENTLY past it. Three is the safe standing
-   budget and the guard below is what makes it actually safe. */
-const VOX_DRAW = 3;                       // carved blocks drawn as voxels at once
-const VOX_DRAW_R = BLOCK*9;               // and only this close
-const V_AIR=0, V_SAND=1, V_ROCK=2, V_WATER=3, V_GLASS=4, V_IRON=5, V_POWDER=6;
-const VOX_COL = [null,
-  [0.76,0.65,0.42],   // sand
-  [0.38,0.35,0.32],   // rock
-  [0.20,0.42,0.75],   // water
-  [0.62,0.78,0.80],   // glass
-  [0.45,0.42,0.40],   // iron
-  [0.18,0.16,0.14]];  // powder
-
-/* Which blocks are voxelised right now, in the order they were, so the oldest
-   can be dropped when the ninth arrives. */
-const VOX = new Map();
+/* ==========================================================================
+   THE GAME SIDE: where the grid meets the block world
+   ========================================================================== */
+let SAND = null;
 
 /* A block is sand with some rock through it and some water in it, mixed from
    its own position so composition is a property of the PLACE and comes out the
-   same every time it is asked. This is voxel/compose.js's blockRecipe, inlined
-   because index.html is one self-contained file and has no imports. */
+   same every time it is asked. voxel/compose.js's blockRecipe, inlined because
+   index.html is one self-contained file and has no imports. */
 function voxRecipe(i){
   let s = (i*2654435761 + 12345) >>> 0;
   const r = () => ((s = (s*1664525 + 1013904223) >>> 0) / 4294967296);
@@ -4020,62 +4305,349 @@ function voxRecipe(i){
   const water = r()*r()*0.18;
   return {rock, water, sand: Math.max(0.05, 1-rock-water)};
 }
-function voxelise(i){
-  let v = VOX.get(i);
-  if(v) return v;
-  /* PERSISTENT, like Noita. Nothing is ever evicted: a hole you shot an hour
-     ago is still there when you come back, which is the entire promise of a
-     destructible world and is worth more than the memory it costs. A block is
-     4 KB voxelised, so even a whole four-level dungeon gone to voxels is 32 MB
-     — affordable, and it only ever reaches that if you actually shoot all of
-     it.
-
-     What IS bounded is the DRAWING, and that is the honest constraint: the
-     instance batch holds 10,464 and one carved block emits about 1,500, so
-     only the nearest few can be drawn as voxels at once. Far ones fall back to
-     a single cube. The DATA never degrades; only the picture does, and only
-     with distance. */
-  const rec = voxRecipe(i);
-  const m = new Uint8Array(VOX_N);
-  let s = (i*40503 + 7) >>> 0;
-  const r = () => ((s = (s*1664525 + 1013904223) >>> 0) / 4294967296);
-  for(let k=0;k<VOX_N;k++){
-    const t = r();
-    m[k] = t < rec.rock ? V_ROCK : (t < rec.rock+rec.water ? V_WATER : V_SAND);
+/* Which material a given cell of a given block is made of, decided once and
+   for ever by where it is. There is no per-block array any more: the answer is
+   a hash, so a block that has never been touched costs nothing to describe. */
+function voxMatAt(bi, k){
+  /* SCENERY IS MADE OF WHAT IT LOOKS LIKE. The island's tree is wood and its
+     canopy is leaf, so shooting them leaves wood and leaves rather than the
+     generic sand-and-rock a dungeon block is mixed from. One lookup, and it is
+     what makes "a big nice tree for me to blow to smithereens" mean anything. */
+  if(G.scenery && G.scenery[bi]){
+    const gm = G.mat[bi];
+    if(gm===M_WOOD)    return S_WOOD;
+    if(gm===M_LEAF)    return S_LEAF;
+    if(gm===M_SALT)    return S_SALT;
+    if(gm===M_WETSAND) return S_WETSND;
+    if(gm===M_DRYSAND) return S_SAND;
   }
-  v = {m, alive: VOX_N};
-  VOX.set(i, v);
-  G.dirty = true;
-  return v;
+  const rec = voxRecipe(bi);
+  let s = (bi*40503 + 7 + k*2246822519) >>> 0;
+  s = (s ^ (s>>>15)) * 2246822519 >>> 0;
+  s = (s ^ (s>>>13)) * 3266489917 >>> 0;
+  const t = ((s ^ (s>>>16)) >>> 0) / 4294967296;
+  return t < rec.rock ? S_RUBBLE : (t < rec.rock+rec.water ? S_WATER : S_SAND);
 }
-/* Take voxels out of a block along a direction, contained to the face that was
-   hit — voxel/round.js's jet, with its lateral clamp, which is what stops one
-   shot spending itself on the block behind. Returns how many it removed. */
-function voxCarve(i, fx0,fy0,fz0, dx,dy,dz, budgetJ){
-  const v = voxelise(i);
-  const D = VOX_DIV;
-  /* one voxel of sand costs about 9 J to free, rock about 42 — voxel/round.js,
-     measured. Averaged here rather than tracked per voxel, for now. */
+
+/* Which blocks have been opened up into their material. A whole block is ONE
+   record until something breaks it — NEXT.md rule 1, and it is why a dungeon
+   of 7,776 blocks costs 7,776 cubes and not 31 million cells of bookkeeping. */
+const VOXD = new Set();
+const SAND_DRAW_R = BLOCK*11;              // chunks past this are not drawn
+const SAND_DRAW_MAX = 22000;               // instances the sand layer may spend
+const SAND_CHUNKS = 26;                    // chunks it may scan for them
+const SAND_HZ = 30;                        // grid ticks a second
+let sandAcc = 0, sandCells = 0;
+/* THE SAND LAYER GETS ITS OWN BATCH, and that is the point of it. The old
+   voxel layer emitted into worldB, which holds 10,464 and drops geometry
+   SILENTLY past it, so a carved block and the dungeon around it competed for
+   the same slots and the loser was whichever came second. 22,000 beads is
+   2.3 MB of instance data and about five carved blocks' worth of visible
+   surface. */
+const sandB = makeCubeBatch(SAND_DRAW_MAX + 64);
+
+function sandDir(){ return gnow() >= 0 ? -1 : 1; }
+
+/* Wake every chunk that might hold loose material. Expensive on purpose and
+   called exactly once, when gravity reverses: settled material is cheap only
+   because nobody looks at it, so the price of changing the rule it settled
+   under is looking at all of it again. */
+function sandWakeLoose(){
+  const w=SAND; if(!w) return;
+  for(let c=0;c<w.nc;c++){
+    if(!w.cl[c]) continue;
+    const b=w.cb, o=c*6;
+    b[o]=0; b[o+1]=0; b[o+2]=0; b[o+3]=SCS-1; b[o+4]=SCS-1; b[o+5]=SCS-1;
+    w.cf[c]=1;
+    if(!w.cw[c]){ w.cw[c]=1; w.awake.push(c); }
+  }
+}
+
+/* Build the grid for the world that genWorld just made: everything is rock,
+   so only the air has to be written. */
+function sandBuild(){
+  const W=G.nx*SAND_DIV, H=G.ny*SAND_DIV, D=G.nz*SAND_DIV;
+  if(!SAND || SAND.W!==W || SAND.H!==H || SAND.D!==D) SAND = new SandWorld(W,H,D);
+  else {
+    SAND.m.fill(S_ROCK); SAND.t=null; SAND.awake.length=0;
+    SAND.cl.fill(0);
+    for(let c=0;c<SAND.nc;c++) SAND.reset(c);
+    SAND.tick=0; SAND.stats.moves=0; SAND.stats.rx=0;
+  }
+  VOXD.clear();
+  for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++)
+    if(G.st[idx(x,y,z)]===AIR) sandFill(x,y,z, S_AIR, false);
+  sandCells = 0;
+}
+/* Write one block's worth of cells, in x-runs so it is a memset per row. */
+function sandFill(bx,by,bz, mat, wake){
+  const w=SAND; if(!w) return;
+  const x0=bx*SAND_DIV, y0=by*SAND_DIV, z0=bz*SAND_DIV, S=SAND_DIV;
+  if(x0<0||y0<0||z0<0||x0+S>w.W||y0+S>w.H||z0+S>w.D) return;
+  for(let y=y0;y<y0+S;y++) for(let z=z0;z<z0+S;z++){
+    const r = (y+1)*w.SY + (z+1)*w.SZ + (x0+1);
+    w.m.fill(mat, r, r+S);
+  }
+  if(wake) w.wakeShell(x0-1,y0-1,z0-1, x0+S, y0+S, z0+S);
+}
+/* Open a block into its material: 4,096 cells of sand, rubble and water where
+   there was one byte of rock. This is the moment the mountain stops being one
+   record, and nothing before it costs anything. */
+function voxelise(bi){
+  if(VOXD.has(bi)) return;
+  VOXD.add(bi);
+  const w=SAND; if(!w) return;
+  const [bx,by,bz] = cellXYZ(bi);
+  const x0=bx*SAND_DIV, y0=by*SAND_DIV, z0=bz*SAND_DIV, S=SAND_DIV;
+  if(x0<0||y0<0||z0<0||x0+S>w.W||y0+S>w.H||z0+S>w.D) return;
+  for(let ly=0;ly<S;ly++) for(let lz=0;lz<S;lz++){
+    const r = (y0+ly+1)*w.SY + (z0+lz+1)*w.SZ + (x0+1);
+    for(let lx=0;lx<S;lx++) w.m[r+lx] = voxMatAt(bi, (ly*S+lz)*S+lx);
+  }
+  w.wakeShell(x0,y0,z0, x0+S-1, y0+S-1, z0+S-1);
+  G.dirty = true;
+}
+/* Take material out along a direction, contained to the face that was hit —
+   voxel/round.js's jet with its lateral clamp, which is what stops one shot
+   spending itself on the block behind. Returns how many cells it freed, and
+   what it freed goes into the air as GRIT rather than simply ceasing. */
+function voxCarve(bi, fx0,fy0,fz0, dx,dy,dz, budgetJ, thrower){
+  voxelise(bi);
+  const w=SAND; if(!w) return 0;
+  const [bx,by,bz] = cellXYZ(bi);
+  const S=SAND_DIV, ox=bx*S, oy=by*S, oz=bz*S;
+  /* one cell of sand costs about 9 J to free, rock about 42 — voxel/round.js,
+     measured. Averaged here rather than tracked per cell, for now. */
   const COST = 20;
   let left = budgetJ, out = 0;
-  const r0 = 2.0, tan = Math.tan(7*Math.PI/180), RMAX = D/2;
-  for(let step=0; step<D && left>=COST; step++){
+  const r0 = 2.0, tan = Math.tan(7*Math.PI/180), RMAX = S/2;
+  for(let step=0; step<S && left>=COST; step++){
     const rad = Math.min(r0 + step*tan, RMAX);
     const cx = fx0 + dx*step, cy = fy0 + dy*step, cz = fz0 + dz*step;
-    for(let z=Math.max(0,Math.floor(cz-rad)); z<=Math.min(D-1,cz+rad); z++)
-    for(let y=Math.max(0,Math.floor(cy-rad)); y<=Math.min(D-1,cy+rad); y++)
-    for(let x=Math.max(0,Math.floor(cx-rad)); x<=Math.min(D-1,cx+rad); x++){
+    for(let z=Math.max(0,Math.floor(cz-rad)); z<=Math.min(S-1,cz+rad); z++)
+    for(let y=Math.max(0,Math.floor(cy-rad)); y<=Math.min(S-1,cy+rad); y++)
+    for(let x=Math.max(0,Math.floor(cx-rad)); x<=Math.min(S-1,cx+rad); x++){
       if(left < COST) break;
       const ex=x-cx, ey=y-cy, ez=z-cz;
       if(ex*ex+ey*ey+ez*ez > rad*rad) continue;
-      const k = (y*D + z)*D + x;
-      if(v.m[k]===V_AIR) continue;
-      v.m[k]=V_AIR; v.alive--; out++; left -= COST;
+      const i = w.idx(ox+x, oy+y, oz+z);
+      const mt = w.m[i];
+      if(mt===S_AIR) continue;
+      w.m[i]=S_AIR; out++; left -= COST;
+      /* WHAT WAS THERE GOES SOMEWHERE. A sample of it is thrown as grit and
+         the rest is gone — NEXT.md rule 3, visible debris is a budget and not
+         a consequence. Everything that lands rejoins the grid, so the pile at
+         your feet is the same substance as the wall it came out of. */
+      if(thrower && (out&3)===0) thrower((ox+x+0.5)*CELL_M, (oy+y+0.5)*CELL_M, (oz+z+0.5)*CELL_M, mt);
     }
   }
+  if(out) w.wakeShell(ox,oy,oz, ox+S-1, oy+S-1, oz+S-1);
   G.dirty = true;
   return out;
 }
+/* A block came out of the world: its cells become air and whatever was
+   standing on them finds that out. */
+function sandDig(bx,by,bz){
+  if(!SAND) return;
+  VOXD.delete(idx(bx,by,bz));
+  sandFill(bx,by,bz, S_AIR, true);
+}
+/* And a block came out violently: a sample of what it was made of is thrown
+   into the air, to land as real material wherever it lands. */
+function sandBurst(bx,by,bz, dirx,diry,dirz, count){
+  const bi = idx(bx,by,bz);
+  const cx=(bx+0.5)*BLOCK, cy=(by+0.5)*BLOCK, cz=(bz+0.5)*BLOCK;
+  const S=SAND_DIV;
+  for(let k=0;k<count;k++){
+    const mat = voxMatAt(bi, (rnd()*(S*S*S))|0);
+    const sp = 2.0 + rnd()*5.5;
+    gritAdd(cx+(rnd()-.5)*BLOCK*0.9, cy+(rnd()-.5)*BLOCK*0.9, cz+(rnd()-.5)*BLOCK*0.9,
+            -dirx*sp*0.5 + (rnd()-.5)*sp,
+            rnd()*sp*0.75 + 1.2,
+            -dirz*sp*0.5 + (rnd()-.5)*sp, mat);
+  }
+  sandDig(bx,by,bz);
+}
+
+/* --------------------------------------------------------------------------
+   GRIT — the only thing left of RAW, and the part that was worth keeping
+   --------------------------------------------------------------------------
+   A bead in FLIGHT is ballistic and continuous, and that is what makes the arc
+   off a shot look like an arc. A bead that has LANDED is discrete: it sits in
+   a cell and moves cell to cell. The first version of this tried to do both
+   with continuous positions and cell-keyed occupancy at once, and two beads
+   seven centimetres apart shared a cell, so the second rested INSIDE the first
+   and no heap could grow. Both attempts are in the git history and both were
+   me refusing to let the settling be discrete.
+
+   Now the settling is not merely discrete, it is the grid: a bead that lands
+   is written into SAND and forgotten. There is no occupancy set to keep in
+   step with anything, which is where the ghost cells came from, and there is
+   no cap on how much material can be at rest — only on how much can be in the
+   air at once, which is a frame budget and belongs to the picture. */
+const GRIT_MAX = 1400;
+const GRIT = {
+  n:0, next:0,
+  x:new Float32Array(GRIT_MAX), y:new Float32Array(GRIT_MAX), z:new Float32Array(GRIT_MAX),
+  vx:new Float32Array(GRIT_MAX), vy:new Float32Array(GRIT_MAX), vz:new Float32Array(GRIT_MAX),
+  m:new Uint8Array(GRIT_MAX), live:new Uint8Array(GRIT_MAX)
+};
+function gritAdd(x,y,z, vx,vy,vz, mat){
+  let i = -1;
+  if(GRIT.n < GRIT_MAX) i = GRIT.n++;
+  else { i = GRIT.next; GRIT.next = (GRIT.next+1) % GRIT_MAX; gritLand(i); }
+  GRIT.x[i]=x; GRIT.y[i]=y; GRIT.z[i]=z;
+  GRIT.vx[i]=vx; GRIT.vy[i]=vy; GRIT.vz[i]=vz;
+  GRIT.m[i]=mat; GRIT.live[i]=1;
+}
+const sandCell = v => Math.floor(v/CELL_M);
+/* Put a bead into the grid at the first free cell against gravity, so a bead
+   that lands inside something climbs out rather than vanishing into it. */
+function gritLand(i){
+  if(!GRIT.live[i]) return;
+  GRIT.live[i]=0;
+  const w=SAND; if(!w) return;
+  let cx=sandCell(GRIT.x[i]), cy=sandCell(GRIT.y[i]), cz=sandCell(GRIT.z[i]);
+  const up = -sandDir();
+  for(let g=0; g<24; g++){
+    if(w.inBox(cx,cy,cz) && w.m[w.idx(cx,cy,cz)]===S_AIR){ w.put(cx,cy,cz, GRIT.m[i]); sandCells++; return; }
+    cy += up;
+  }
+}
+function gritStep(dt){
+  const w=SAND, g=gnow();
+  let live=0;
+  for(let i=0;i<GRIT.n;i++){
+    if(!GRIT.live[i]) continue;
+    live++;
+    GRIT.vy[i] -= g*dt;
+    const nx=GRIT.x[i]+GRIT.vx[i]*dt, ny=GRIT.y[i]+GRIT.vy[i]*dt, nz=GRIT.z[i]+GRIT.vz[i]*dt;
+    const cx=sandCell(nx), cy=sandCell(ny), cz=sandCell(nz);
+    /* The grid answers "is this solid" in one array read, which is the whole
+       reason the flight can be this cheap: no ray, no block lookup, no Set. */
+    if(w && w.inBox(cx,cy,cz) && w.m[w.idx(cx,cy,cz)]===S_AIR){
+      GRIT.x[i]=nx; GRIT.y[i]=ny; GRIT.z[i]=nz;
+      continue;
+    }
+    gritLand(i); live--;
+  }
+  GRIT.moving = live;
+}
+
+/* One frame: the beads in the air, then the grid, at a fixed rate so the
+   physics does not change speed with the frame rate. */
+function sandStep(dt){
+  if(!SAND) return;
+  gritStep(dt);
+  sandAcc += Math.min(dt, 0.1);
+  const period = 1/SAND_HZ;
+  let budget = 2;                        // never more than two ticks in a frame
+  const gd = sandDir();
+  while(sandAcc >= period && budget-- > 0){ sandAcc -= period; sandTick(SAND, gd); }
+  if(sandAcc > period) sandAcc = period;
+  if(SAND.awake.length) G.dirty = true;
+}
+
+/* --------------------------------------------------------------------------
+   DRAWING THE GRID
+   --------------------------------------------------------------------------
+   Cap what is DRAWN, never what is simulated. The grid holds as much settled
+   material as the world has room for and none of it costs a tick; the picture
+   gets a fixed budget of instances and a fixed number of chunks it may look
+   inside, and the two numbers are the whole of the constraint.
+
+   Its own batch, and that is the point of it. The old voxel layer emitted
+   through the world's batch, which holds 10,464 and drops geometry SILENTLY
+   past it — so a carved block and the dungeon around it were competing for the
+   same slots and the loser was whichever came second. A separate batch means
+   the sand layer can be given a real budget instead of the world's leftovers.
+
+   cl says a chunk MIGHT hold something worth drawing. It is set whenever a
+   chunk is marked dirty, which over-approximates on purpose: setting it is one
+   byte in a path that already exists, and a scan that finds nothing clears it
+   again. A chunk of settled sand keeps its flag and is rescanned; a chunk that
+   only ever saw air passing through loses it on the first look. */
+const SAND_SEEN = new Int32Array(2048);
+function sandDraw(){
+  const w=SAND;
+  sandB.count = 0;
+  if(!w || G.state!=='play' && G.state!=='pause' && !G.island) return 0;
+  const d=sandB.data;
+  const CW=w.CW, CD=w.CD, CH=w.CH;
+  const R = SAND_DRAW_R, R2 = R*R, CM = SCS*CELL_M;
+  /* Nearest chunks first, and no sort: a fixed number of buckets by distance
+     is enough to order them and costs one pass. */
+  let ns=0;
+  for(let c=0;c<w.nc && ns<SAND_SEEN.length;c++){
+    if(!w.cl[c]) continue;
+    const cx=c%CW, q=(c/CW)|0, cz=q%CD, cy=(q/CD)|0;
+    const px=(cx+0.5)*CM - P.x, py=(cy+0.5)*CM - P.y, pz=(cz+0.5)*CM - P.z;
+    const dd = px*px+py*py+pz*pz;
+    if(dd > R2 + CM*CM) continue;
+    SAND_SEEN[ns++] = c;
+    SAND_SEEN[ns++] = dd|0;
+  }
+  /* Selection sort over the few that are near enough. ns/2 is at most a few
+     dozen in practice, because a chunk is 5.6 m across. */
+  const nsel = Math.min(SAND_CHUNKS, ns>>1);
+  for(let a=0;a<nsel;a++){
+    let best=a;
+    for(let b=a+1;b<(ns>>1);b++) if(SAND_SEEN[b*2+1] < SAND_SEEN[best*2+1]) best=b;
+    if(best!==a){
+      const c0=SAND_SEEN[a*2], d0=SAND_SEEN[a*2+1];
+      SAND_SEEN[a*2]=SAND_SEEN[best*2]; SAND_SEEN[a*2+1]=SAND_SEEN[best*2+1];
+      SAND_SEEN[best*2]=c0; SAND_SEEN[best*2+1]=d0;
+    }
+  }
+  const M=w.m, SY=w.SY, SZ=w.SZ;
+  let n=0;
+  for(let s=0; s<nsel && n<SAND_DRAW_MAX; s++){
+    const c = SAND_SEEN[s*2];
+    const cx=c%CW, q=(c/CW)|0, cz=q%CD, cy=(q/CD)|0;
+    const bx=cx*SCS, by=cy*SCS, bz=cz*SCS;
+    let found=0;
+    for(let ly=0; ly<SCS && n<SAND_DRAW_MAX; ly++){
+      const y=by+ly; if(y>=w.H) break;
+      for(let lz=0; lz<SCS && n<SAND_DRAW_MAX; lz++){
+        const z=bz+lz; if(z>=w.D) break;
+        const row=(y+1)*SY + (z+1)*SZ + 1 + bx;
+        for(let lx=0; lx<SCS && n<SAND_DRAW_MAX; lx++){
+          const x=bx+lx; if(x>=w.W) break;
+          const i=row+lx, mt=M[i];
+          if(!SM_SEE[mt]) continue;         // air, and the world's own stone
+          found++;
+          /* ONLY WHAT HAS A FACE ON THE OPEN AIR. A cell packed on all six
+             sides cannot be seen from anywhere a player can stand, and drawing
+             it costs an instance and its share of a hard cap. A solid block
+             opened into cells is 4,096 of them and 1,352 can be seen. */
+          if(M[i+1]!==S_AIR && M[i-1]!==S_AIR && M[i+SY]!==S_AIR &&
+             M[i-SY]!==S_AIR && M[i+SZ]!==S_AIR && M[i-SZ]!==S_AIR) continue;
+          const o=n*CUBE_STRIDE;
+          composeAA(d,o, (x+0.5)*CELL_M, (y+0.5)*CELL_M, (z+0.5)*CELL_M,
+                    CELL_M, CELL_M, CELL_M);
+          d[o+16]=SM_COL[mt*3]; d[o+17]=SM_COL[mt*3+1]; d[o+18]=SM_COL[mt*3+2];
+          /* A LITTLE EMISSIVE, and it is a readability choice rather than
+             physics: the cave is dark on purpose and a 17 cm bead of sand at
+             0.12 is invisible from three metres. Enough to be seen lying on
+             the floor, not enough to light anything — except fire and lava,
+             which are meant to. */
+          d[o+19]=((x*7+y*13+z*29)%1000)/1000; d[o+20]=SM_EMIS[mt];
+          d[o+21]=0; d[o+22]=0; d[o+23]=d[o+24]=d[o+25]=0;
+          n++;
+        }
+      }
+    }
+    if(!found) w.cl[c]=0;                   // nothing in it: stop looking
+  }
+  sandB.count = n;
+  w.stats.drawn = n;
+  return n;
+}
+
+
+/* voxRecipe, voxelise and voxCarve moved up into the SAND section: they are
+   the same three functions, writing into the one grid instead of into a
+   Uint8Array per block that could not spill into its neighbour. */
 
 function rebuildWorld(){
   const d = worldB.data; let n=0;
@@ -4101,22 +4673,7 @@ function rebuildWorld(){
 
      The board changes and G.dirty is set, so this is recomputed the moment a
      block comes out and its neighbours are exposed. */
-  /* WHICH CARVED BLOCKS GET TO BE VOXELS THIS FRAME. Persistence is in the
-     data; this is the picture's budget. Nearest first, capped, and everything
-     else draws as the plain cube it used to be — so a world you have shot to
-     pieces stays shot to pieces without ever overflowing the batch. */
-  {
-    const cand = [];
-    for(const [bi,v] of VOX){
-      v.draw = false;
-      if(v.alive >= VOX_N) continue;
-      const [bx,by,bz] = cellXYZ(bi);
-      const d = Math.hypot((bx+0.5)*BLOCK-P.x, (by+0.5)*BLOCK-P.y, (bz+0.5)*BLOCK-P.z);
-      if(d < VOX_DRAW_R) cand.push([d, v]);
-    }
-    cand.sort((a,b)=>a[0]-b[0]);
-    for(let k=0;k<Math.min(VOX_DRAW,cand.length);k++) cand[k][1].draw = true;
-  }
+  /* Which blocks are open is SAND's business now: VOXD, and the grid. */
   const FACE6 = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
   /* ...unless the puzzle cells are drawn SMALLER than their block, in which
      case there are gaps between them and a "buried" cube is visible through
@@ -4146,30 +4703,14 @@ function rebuildWorld(){
     const i=idx(x,y,z);
     if(G.st[i]===AIR) continue;
     if(!facesAir(x,y,z)) continue;
-    /* DAMAGED: draw what is left of it, voxel by voxel. Only voxels with a
-       face on air are emitted — a solid 16^3 is 4,096 of them and just 1,352
-       can be seen from outside, and the batch cap is 10,464 for the whole
-       world. */
-    const vx = VOX.get(i);
-    if(vx && vx.alive < VOX_N && vx.draw){
-      const D=VOX_DIV, S=BLOCK/D, bx=x*BLOCK, by=y*BLOCK, bz=z*BLOCK;
-      const at=(a,b,c)=> (a<0||b<0||c<0||a>=D||b>=D||c>=D) ? V_AIR : vx.m[(b*D+c)*D+a];
-      /* AND A HARD FLOOR UNDER IT. VOX_DRAW is a guess about how much room is
-         left; this is the fact. worldB drops geometry silently when full, so a
-         voxelised block must never be the thing that fills it — better a block
-         that stays a plain cube than a wall that quietly stops existing. */
-      const ROOM = worldB.max - 64;
-      for(let vy=0;vy<D && n<ROOM;vy++) for(let vz=0;vz<D && n<ROOM;vz++)
-      for(let vxx=0;vxx<D && n<ROOM;vxx++){
-        const mt = vx.m[(vy*D+vz)*D+vxx];
-        if(mt===V_AIR) continue;
-        if(at(vxx+1,vy,vz)&&at(vxx-1,vy,vz)&&at(vxx,vy+1,vz)&&
-           at(vxx,vy-1,vz)&&at(vxx,vy,vz+1)&&at(vxx,vy,vz-1)) continue;
-        const c = VOX_COL[mt];
-        put(bx+(vxx+0.5)*S, by+(vy+0.5)*S, bz+(vz+0.5)*S, S, c,
-            ((vxx*7+vy*13+vz*29)%1000)/1000, 0, 0, 0);
-      }
-      continue;
+    /* OPENED UP: the sand layer draws what is left of it, cell by cell, from
+       the grid rather than from a per-block array. Skip the cube entirely, but
+       only while it is near enough for the sand layer to actually be drawing
+       it - past SAND_DRAW_R the block reverts to one cube, which looks worse
+       at forty metres and never leaves a hole in the world. */
+    if(VOXD.has(i)){
+      const dx0=(x+0.5)*BLOCK-P.x, dy0=(y+0.5)*BLOCK-P.y, dz0=(z+0.5)*BLOCK-P.z;
+      if(dx0*dx0+dy0*dy0+dz0*dz0 < SAND_DRAW_R*SAND_DRAW_R) continue;
     }
     /* Structure reads as the same stone as the shell, so a wall inside the
        cave and the wall at its edge are visibly the same promise: this does
@@ -4594,12 +5135,20 @@ function shoot(){
          no-spread rule from voxel/round.js — so the block behind is untouched
          however many times you fire. */
       {
-        const D=VOX_DIV;
+        const D=SAND_DIV;
         const nx=Math.sign(hit.nx||0), ny=Math.sign(hit.ny||0), nz=Math.sign(hit.nz||0);
         const ex = nx? (nx>0?D-1:0) : Math.floor(((hit.px||0.5))*D);
         const ey = ny? (ny>0?D-1:0) : Math.floor(((hit.py||0.5))*D);
         const ez = nz? (nz>0?D-1:0) : Math.floor(((hit.pz||0.5))*D);
-        const took = voxCarve(w, ex,ey,ez, -nx,-ny,-nz, 26000);
+        const took = voxCarve(w, ex,ey,ez, -nx,-ny,-nz, 26000,
+          /* AND WHAT COMES OUT IS WHAT WAS IN THERE. Every cell the jet frees
+             is material that went somewhere: a sample of it is thrown as grit
+             and lands as the same substance in the grid. */
+          (gx,gy,gz,mt)=>{
+            const sp = 3.5 + wrnd()*7.0;
+            gritAdd(gx,gy,gz, -r.dx*sp*0.55 + (wrnd()-.5)*sp,
+                    (wrnd()*0.7)*sp + 1.4, -r.dz*sp*0.55 + (wrnd()-.5)*sp, mt);
+          });
         /* SPREAD IT. Every voxel taken out is material that went somewhere, and
            watching it go is most of what makes destruction read as destruction
            rather than as a texture swap. Sampled rather than one particle per
@@ -4617,6 +5166,7 @@ function shoot(){
       }
       if(n >= CINDER_HP){
         G.st[w] = AIR;
+        { const cb3 = cellXYZ(w); sandDig(cb3[0],cb3[1],cb3[2]); }
         if(G.rockCount>0) G.rockCount--;
         spawnCrumble(hit.x,hit.y,hit.z, G.mat[w]);
         /* A lantern walled up behind it, if this is the one. */
@@ -4665,7 +5215,7 @@ function shoot(){
   revealAt(i,false);
   /* 22 kJ of heat: the thermal share of a shot, from voxel/round.js's mix.
      It is nowhere near enough to fuse a grain and that is the point. */
-  rawBurst(hit.x, hit.y, hit.z, r.dx, r.dy, r.dz, 150, 110482*0.20);
+  sandBurst(hit.x, hit.y, hit.z, r.dx, r.dy, r.dz, 150);
   noteDigNear(i);          // only a shot counts, never a cascade or a blast
   digSpawn(i, hit.x, hit.y, hit.z);
   checkWin();
@@ -6599,8 +7149,8 @@ function buildIsland(){
   P.yaw=Math.atan2(-((hx-sx)), -((hz-sz)));
   G.island=true; G.dungeon=false; G.dirty=true;
   /* whatever the cave left lying about does not come with you */
-  RAW.n=0; RAW.oldest=0; RAW.occ.clear(); RAW.under.clear();
-  RAW.key.fill(0); RAW.rest.fill(0); VOX.clear();
+  GRIT.n=0; GRIT.next=0; GRIT.live.fill(0);
+  sandBuild();
 }
 
 function bossBlows(x,y,z){
@@ -6623,7 +7173,13 @@ function bossBlows(x,y,z){
      it has been running all along, told to point the other way. */
   G.gravK = -0.42;
   P.vy = Math.max(P.vy, 6.5);
-  for(let i=0;i<RAW.n;i++){ RAW.rest[i]=0; RAW.vy[i]=2+rnd()*6; }
+  /* AND EVERYTHING SETTLED HAS TO BE TOLD. Settled material costs nothing
+     precisely because nobody looks at it, so a world where gravity has just
+     reversed is a world full of sand that does not know. Every chunk holding
+     anything loose is woken once, and it is the only place in the game that
+     ever wakes the whole grid — which is why it can afford to. */
+  sandWakeLoose();
+  for(let i=0;i<GRIT.n;i++) if(GRIT.live[i]) GRIT.vy[i] = 2+rnd()*6;
 }
 
 function checkWin(){
@@ -6727,6 +7283,7 @@ function blast(){
     addP(cx,cy2,cz, dx/dd*push+(rnd()-.5)*6, dy/dd*push+8+rnd()*8, dz/dd*push+(rnd()-.5)*6,
          BLOCK*(0.34+rnd()*0.30), 2.4+rnd()*2.4, c, G.mine[i]?1:0);
     G.st[i]=AIR;
+    sandDig(x,y,z);
   }
   // shockwave + corny sparks
   for(let k=0;k<260;k++){
@@ -8412,6 +8969,9 @@ $('fzTest').onclick = ()=>{
   startGame();
   const n = G.nx*G.ny*G.nz;
   for(let i=0;i<n;i++) if(G.st[i]===SOLID && !G.mine[i]){ G.st[i]=AIR; G.revealed++; }
+  /* One rebuild rather than seven thousand carves: the grid is read off the
+     board, so re-reading it is cheaper than telling it about every block. */
+  sandBuild();
   for(let i=0;i<n;i++) if(G.mine[i] && G.st[i]!==MARKED){ G.st[i]=MARKED; G.marked++; }
   G.dirty = true; G.rehearsal = true;
   checkWin();
@@ -8466,7 +9026,7 @@ function frame(now){
   swayX -= swayX*Math.min(1, dt*6); swayY -= swayY*Math.min(1, dt*6);
   G.shake = Math.max(0, G.shake - dt*0.55);
 
-  rawStep(sim);
+  sandStep(sim);
   // ------- particles -------
   for(let i=particles.length-1;i>=0;i--){
     const p=particles[i]; p.l-=sim;
@@ -8564,6 +9124,8 @@ function frame(now){
   gl.uniform4fv(uC.lightC, lightCBuf);
   gl.uniform1f(uC.wallGrey, 0.38);
   drawCubes(worldB);
+  /* The sand layer, in its own batch and on its own budget. */
+  if(sandDraw()) drawCubes(sandB);
   gl.uniform1f(uC.wallGrey, 0.0);
 
   /* The fireflies themselves: no wings, no body, no shading — a cube of pure
@@ -8592,19 +9154,20 @@ function frame(now){
   // escombros
   {
     const d=debris.data; let n=0;
-    /* RAW GOES IN FIRST, on purpose. It persists and the particles do not, so
-       when the batch is tight it is the fading smoke that should lose its
-       place, not the pile of sand that is meant to still be there tomorrow. */
-    for(let i=0;i<RAW.n && n<debris.max;i++){
-      const o=n*CUBE_STRIDE, c=RAW_COL[RAW.m[i]];
-      composeAA(d,o, RAW.x[i],RAW.y[i],RAW.z[i], RAW_S,RAW_S,RAW_S);
-      d[o+16]=c[0]; d[o+17]=c[1]; d[o+18]=c[2];
+    /* GRIT GOES IN FIRST, on purpose. It is on its way to becoming permanent
+       and the particles are on their way to nothing, so when the batch is
+       tight it is the fading smoke that should lose its place. */
+    for(let i=0;i<GRIT.n && n<debris.max;i++){
+      if(!GRIT.live[i]) continue;
+      const o=n*CUBE_STRIDE, mt=GRIT.m[i];
+      composeAA(d,o, GRIT.x[i],GRIT.y[i],GRIT.z[i], CELL_M,CELL_M,CELL_M);
+      d[o+16]=SM_COL[mt*3]; d[o+17]=SM_COL[mt*3+1]; d[o+18]=SM_COL[mt*3+2];
       /* A LITTLE EMISSIVE, and it is a readability choice rather than physics.
          The cave is dark on purpose and a 17 cm grain of sand at 0.12 is
          invisible from three metres — the pellets already carry the same
          concession for the same reason. Enough to be seen lying on the floor,
          not enough to light anything. */
-      d[o+19]=(i*0.317)%1; d[o+20]=0.42; d[o+21]=0; d[o+22]=0;
+      d[o+19]=(i*0.317)%1; d[o+20]=SM_EMIS[mt]; d[o+21]=0; d[o+22]=0;
       d[o+23]=d[o+24]=d[o+25]=0;
       n++;
     }
