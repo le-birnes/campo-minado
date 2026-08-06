@@ -172,7 +172,7 @@ canvas#gl{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:
 .screen.on{display:grid;}
 
 /* every screen is a window: raised frame, navy title bar, gray client area */
-.panel{width:min(760px,92vw);max-height:94vh;overflow:auto;padding:3px;
+.panel{width:min(680px,92vw);max-height:88vh;overflow:auto;padding:3px;
        background:var(--w95);color:#000;font-family:var(--ui);
        box-shadow:var(--out), 6px 6px 0 rgba(0,0,0,.4);}
 .titlebar{display:flex;align-items:center;justify-content:space-between;gap:10px;
@@ -446,12 +446,18 @@ body.touch.portrait #rotate{display:grid;}
         <div class="opt"><label for="cde">Mines</label>
           <input type="range" id="cde" min="6" max="32" value="13"><span id="cdeV">13%</span></div>
         <p class="diffnote" id="cWarn"></p>
+        <div class="startRow" style="margin-top:12px">
+          <button class="go" id="btnStart">Enter the cave</button>
+        </div>
       </div>
 
       <div class="rule"></div>
 
-      <button id="btnHow" class="how" type="button" aria-expanded="false"
-              aria-controls="howBox">How to play?</button>
+      <div class="startRow" style="margin-bottom:10px">
+        <button id="btnHow" class="how" type="button" aria-expanded="false"
+                aria-controls="howBox" style="margin:0">How to play?</button>
+        <button id="btnForge" class="small" type="button">Creature Forge</button>
+      </div>
       <div id="howBox">
       <p class="lede">You are <b>inside</b> the board. Sand above, sand below, sand all around —
         three layers of blocks and a shotgun. Every block touches <b>26 others</b> (3×3×3 minus itself),
@@ -506,11 +512,7 @@ body.touch.portrait #rotate{display:grid;}
         <button id="btnMusic" class="big">Music: on</button>
       </div>
 
-      <div class="rule"></div>
-      <div class="startRow">
-        <button id="btnForge" class="small" type="button">Creature Forge</button>
-        <button class="go" id="btnStart">Enter the cave</button>
-      </div>
+
       </div>
     </div>
   </div>
@@ -2379,6 +2381,7 @@ function genWorld(d){
   G.crack=new Uint8Array(N);
   G.rockHit=new Uint8Array(N);      // shots taken by each cinderstone wall
   G.lamp=0;                         // lanterns found: each adds to the ambient
+  G.noWin=false; G.island=false; G.emerge=0; G.gravK=1;
   /* A NEW BOARD STARTS WITH NO RUBBLE ON IT. Without this the grains and, far
      worse, their occupancy claims survive into the next game — so the second
      run of a session has invisible solid cells scattered through its air. */
@@ -6549,15 +6552,46 @@ function buildIsland(){
     const d=Math.hypot(x-hx,(y-(htop-hr*0.4))*1.1,z-hz);
     if(d<hr){ const i=idx(x,y,z); G.st[i]=AIR; G.scenery[i]=0; }
   }
-  /* THE TREE, attached to the bank */
+  /* THE TREE, attached to the bank. Five wood blocks and a ball of leaves was
+     not a tree, it was a lollipop. A trunk, real BRANCHES going out and up,
+     and a leaf CLUSTER hung on each branch tip — because a canopy is a set of
+     separable handfuls and not one green sphere, which is also what lets wind
+     take one clump and leave the next.
+
+     MORTAL: leaf clusters carry the flag that says a thing is allowed to stop
+     existing. Nothing else in the world does yet. */
   const tx=Math.round(cx-R*0.4), tz=Math.round(cz+R*0.25), tb=top(tx,tz);
-  const th=Math.max(4,(G.ny*0.22)|0);
-  for(let y=tb+1;y<=tb+th;y++) set(tx,y,tz,M_WOOD);
-  for(let dy=-1;dy<=2;dy++) for(let dz=-2;dz<=2;dz++) for(let dx=-2;dx<=2;dx++){
-    if(dx*dx+dy*dy+dz*dz > 5) continue;
-    if(!dx && !dz && dy<=0) continue;
-    set(tx+dx, tb+th+dy, tz+dz, M_LEAF);
+  /* and it has to FIT. The first branchy version reported 8 wood blocks for a
+     trunk meant to be a dozen: it was growing through the ceiling and set()
+     was silently dropping everything past it. A tree is as tall as the room
+     allows, less the crown. */
+  const th=Math.max(4, Math.min((G.ny*0.30)|0, G.ny-tb-4));
+  for(let y=tb+1;y<=tb+th;y++){
+    set(tx,y,tz,M_WOOD);
+    if(y>tb+2 && y<tb+th-1 && ((y-tb)&1)===0){   // a slight taper of buttress
+      set(tx+1,y,tz,M_WOOD); set(tx,y,tz+1,M_WOOD);
+    }
   }
+  /* branches: out and up from the top third, then a cluster at each tip */
+  const tips=[];
+  for(let b=0;b<7;b++){
+    const a=(b/7)*Math.PI*2 + 0.4;
+    const len=2+((b%3));
+    const y0=tb+th-Math.round((b%4));
+    let bx=tx, by=y0, bz=tz;
+    for(let t=1;t<=len;t++){
+      bx=Math.round(tx+Math.cos(a)*t); bz=Math.round(tz+Math.sin(a)*t);
+      by=y0+Math.round(t*0.55);
+      set(bx,by,bz,M_WOOD);
+    }
+    tips.push([bx,by,bz]);
+  }
+  tips.push([tx, tb+th+1, tz]);
+  for(const [lx,ly,lz] of tips)
+    for(let dy=-1;dy<=2;dy++) for(let dz=-2;dz<=2;dz++) for(let dx=-2;dx<=2;dx++){
+      if(dx*dx+dy*dy*1.6+dz*dz > 4.4) continue;
+      set(lx+dx, ly+dy, lz+dz, M_LEAF);
+    }
   /* stand on the bank beside the hole */
   const sx=hx-hr-1, sz=hz, sy=top(sx,sz);
   P.x=(sx+0.5)*BLOCK; P.y=(sy+1)*BLOCK+0.05; P.z=(sz+0.5)*BLOCK;
@@ -6570,6 +6604,8 @@ function buildIsland(){
 }
 
 function bossBlows(x,y,z){
+  /* no ending screen after this, ever. The island IS the ending. */
+  G.noWin = true;
   G.emerge = EMERGE_T;
   G.shake = 1.0;
   snd.boom && snd.boom();
@@ -6621,12 +6657,33 @@ function checkWin(){
   /* safeTotal>0 guards the degenerate case: a board that has not been generated
      yet has 0 revealed of 0 safe, and >= would call that a win the instant the
      level loads. The flag branch has always carried the same guard as mines>0. */
+  /* ONCE THE BOSS HAS BLOWN, THE RUN DOES NOT END. Marcelo: it kept showing
+     the end screen instead of the ending, and the reason is that killing the
+     finale creature is the LAST thing on a board that is already fully
+     flagged - so `done` was already true, and the very next checkWin() from
+     any other call site won the game out from under the blast.
+
+     bossBlows() sets G.noWin and nothing clears it. From that moment the world
+     is the island and it runs until the window is closed or R is pressed. */
+  if(G.noWin || G.emerge > 0 || G.island) return;
   const dug = G.safeTotal > 0 && G.revealed >= G.safeTotal;
   const done = G.dungeon
     ? (dug || (G.mines>0 && G.marked===G.mines && correctFlags()===G.mines))
     : dug;
   if(done && G.dungeon && !G.finale){ startFinale(); return; }
   if(done && G.dungeon && enemies.some(e=>e.hell)) return;
+  /* AND A FINISHED DUNGEON GOES TO THE ISLAND, NEVER TO A SCREEN.
+     Hooking only killEnemy was not enough and Marcelo hit it in play: that
+     hook fires when the FINALE CREATURE dies, and there are paths where the
+     dungeon completes without one being alive to kill - the boss failing to
+     spawn, or `done` becoming true again after it is already gone. Every one
+     of those fell through to showOver().
+     So the ending is triggered HERE, where completion is actually decided,
+     and killEnemy's call is now merely the usual way of arriving. */
+  if(done && G.dungeon){
+    if(!G.noWin) bossBlows(P.x, P.y+EYE, P.z);
+    return;
+  }
   if(done){
     G.win=true; G.state='over'; G.boom=0.0001;
     snd.fanfare();

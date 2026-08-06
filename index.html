@@ -172,7 +172,7 @@ canvas#gl{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:
 .screen.on{display:grid;}
 
 /* every screen is a window: raised frame, navy title bar, gray client area */
-.panel{width:min(760px,92vw);max-height:94vh;overflow:auto;padding:3px;
+.panel{width:min(680px,92vw);max-height:88vh;overflow:auto;padding:3px;
        background:var(--w95);color:#000;font-family:var(--ui);
        box-shadow:var(--out), 6px 6px 0 rgba(0,0,0,.4);}
 .titlebar{display:flex;align-items:center;justify-content:space-between;gap:10px;
@@ -446,12 +446,18 @@ body.touch.portrait #rotate{display:grid;}
         <div class="opt"><label for="cde">Mines</label>
           <input type="range" id="cde" min="6" max="32" value="13"><span id="cdeV">13%</span></div>
         <p class="diffnote" id="cWarn"></p>
+        <div class="startRow" style="margin-top:12px">
+          <button class="go" id="btnStart">Enter the cave</button>
+        </div>
       </div>
 
       <div class="rule"></div>
 
-      <button id="btnHow" class="how" type="button" aria-expanded="false"
-              aria-controls="howBox">How to play?</button>
+      <div class="startRow" style="margin-bottom:10px">
+        <button id="btnHow" class="how" type="button" aria-expanded="false"
+                aria-controls="howBox" style="margin:0">How to play?</button>
+        <button id="btnForge" class="small" type="button">Creature Forge</button>
+      </div>
       <div id="howBox">
       <p class="lede">You are <b>inside</b> the board. Sand above, sand below, sand all around —
         three layers of blocks and a shotgun. Every block touches <b>26 others</b> (3×3×3 minus itself),
@@ -506,11 +512,7 @@ body.touch.portrait #rotate{display:grid;}
         <button id="btnMusic" class="big">Music: on</button>
       </div>
 
-      <div class="rule"></div>
-      <div class="startRow">
-        <button id="btnForge" class="small" type="button">Creature Forge</button>
-        <button class="go" id="btnStart">Enter the cave</button>
-      </div>
+
       </div>
     </div>
   </div>
@@ -6670,6 +6672,18 @@ function checkWin(){
     : dug;
   if(done && G.dungeon && !G.finale){ startFinale(); return; }
   if(done && G.dungeon && enemies.some(e=>e.hell)) return;
+  /* AND A FINISHED DUNGEON GOES TO THE ISLAND, NEVER TO A SCREEN.
+     Hooking only killEnemy was not enough and Marcelo hit it in play: that
+     hook fires when the FINALE CREATURE dies, and there are paths where the
+     dungeon completes without one being alive to kill - the boss failing to
+     spawn, or `done` becoming true again after it is already gone. Every one
+     of those fell through to showOver().
+     So the ending is triggered HERE, where completion is actually decided,
+     and killEnemy's call is now merely the usual way of arriving. */
+  if(done && G.dungeon){
+    if(!G.noWin) bossBlows(P.x, P.y+EYE, P.z);
+    return;
+  }
   if(done){
     G.win=true; G.state='over'; G.boom=0.0001;
     snd.fanfare();
