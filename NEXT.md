@@ -98,30 +98,49 @@ statement and I may be reading them too literally.
 ## THE PROMPT
 
 ```
-Read NEXT.md, then voxel/BEAD.md, then the vault note "The 500m sphere - scope,
-state, and the boundary". Then make WATER REAL.
+Bring sand.js into the game, entirely.
 
-Salt water in the island is currently solid blocks you stand on. It should be:
+It is the falling-everything engine: flat, measured at 8.3 ns/cell, with dirty
+rects worth 11,405x on settled material, materials whose behaviour comes from a
+table, and reactions that are a row rather than a code path. It has been
+benched in voxel/ for the whole project and never once run inside index.html,
+and everything else on the list is queued behind it.
 
-  - a block VISUALLY, with a shell of interactive beads on top of it
-  - the shell depth read from how much water is below: 1 block gives 8 loose
-    layers with 2 rigid under them; 2 blocks gives 16 loose and 3 to stand on;
-    the layers between are inert and pass through
-  - TWO BINDS: bead-to-bead surface tension, which wading breaks, against the
-    block own threshold. Breaking the first is how you enter the water
-  - TRANSPARENT near, opaque with distance and with how much water is between.
-    One accumulated thickness along the ray, not per-layer sorting
-  - WAVES where there are 2+ blocks below, because the top layers then behave
-    as a fluid, including resting as one
+READ FIRST: voxel/sand.js, voxel/BEAD.md, and the vault note "The 500m sphere -
+scope, state, and the boundary" - especially sections 7 and 8: everything
+outside the simulated radius is SOLVED rather than frozen, and immortality is
+what obliges a thing to be scheduled.
 
-Build it in index.html, not in voxel/. The measured liquid rules already exist
-in sand.js and in RAW: water spreads flat to 17.45 m where sand cones at 1.00 m.
+WHAT GOING IN MEANS
 
-Verify with agy at ?lightx=3: stand at the shore and photograph. It has to show
-water transparent close and opaque far, and a surface that moves.
+  1. The RAW grains in index.html become sand.js cells. They already collide,
+     slump and pile with per-material slip, density and spread - that logic is
+     a reimplementation of sand.js's and should become the real thing.
+  2. Water stops being solid blocks. sand.js's LIQUID kind already finds its
+     level; the island sea should be it. Water spread flat to 17.45 m in the
+     RAW test where sand coned at 1.00 m, so the behaviour is proven and only
+     misplaced.
+  3. Reactions arrive with it - fire and oil, lava and water, acid and rock.
+     They are rows in RX, and the game has never had any of them.
+  4. The dirty rect is the whole reason it is affordable. Settled material must
+     cost nothing, and the bench proving it must still pass afterwards.
 
-Then, in order: the 500 m sphere, wind + MORTAL, celestial records, the spit.
+WATCH FOR, all paid for already:
+  - sand.js is a bounded flat box with a ROCK border; index.html's world is a
+    block grid. The mapping between them is the actual work.
+  - the instance batch holds 10,464 and drops geometry SILENTLY when full. Cap
+    what is DRAWN, never what is simulated.
+  - never put a tilde in a bench's log text: the pages join their lines with it.
+  - a quoted bash heredoc still collapses backslash pairs, so a python splice
+    searching for a JS newline literal matches nothing. Anchor on
+    backslash-free text.
+  - do not run 1,200 frame() calls with rendering on in a screenshot harness;
+    it blocks the main thread and reads as an endless loop.
 
-Push after every change. Small case first. Marcelo plays the build, so say
+Verify with agy at ?lightx=3. Push after every change. Small case first -
+Apprentice is 300 cells, the dungeon is 7,776. Marcelo plays the build, so say
 plainly what is untested rather than implying it works.
+
+Then, in order: the 500 m sphere and its three tiers, wind + MORTAL, celestial
+records, the spit.
 ```
