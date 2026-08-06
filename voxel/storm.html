@@ -195,6 +195,47 @@ log('  simulate what is seen, integrate the bulk. And it is the third time this'
 log('  project has arrived at it from a different direction, which is the best');
 log('  evidence available that it is the real shape of the problem.');
 log('');
+log('--- 5. A PERFECT SPHERE OF TORNADO ---');
+log('');
+log('  Marcelo: imagine a perfect sphere of it. What is the radius?');
+log('');
+log('  Solid, every bead present, every bead interacting. N * beadVolume =');
+log('  (4/3)pi r^3, so the radius is the CUBE ROOT of the particle budget -');
+log('  which is the same cube root that sets crater radius in impact.js and');
+log('  blast radius in compose.js, and it is punishing in the same way.');
+log('');
+log('     method          4 ms      16.6 ms     50 ms (20 Hz)');
+{
+  const BV = G_CELL*G_CELL*G_CELL;
+  const rad = (n)=> Math.cbrt(3*n*BV/(4*Math.PI));
+  for(const [nm,ns] of [['6-neighbour',ns6],['field',nsField],['26-nbr D3Q27',ns26]]){
+    const r=(b)=> rad(b/(ns/1e9)).toFixed(1)+' m';
+    log(`     ${nm.padEnd(14)} ${r(0.004).padStart(8)}  ${r(0.0166).padStart(9)}  ${r(0.050).padStart(12)}`);
+  }
+  log('');
+  const n26 = 0.050/(ns26/1e9), R26 = rad(n26);
+  log(`  SO THE ANSWER IS ABOUT ${R26.toFixed(0)} METRES OF RADIUS - a ball ${(2*R26).toFixed(0)} m across,`);
+  log('  fully interacting, at the 26 neighbours a rotating fluid actually needs.');
+  log('  A house. Not a storm.');
+  log('');
+  log('  And it does not grow the way anyone hopes, because radius goes as the');
+  log('  CUBE ROOT of the budget:');
+  log('');
+  log('     radius    particles needed        cost against that ball');
+  for(const T of [2*R26, 50, 100, 250]){
+    const need = (4/3)*Math.PI*T*T*T/BV;
+    log(`     ${(T.toFixed(0)+' m').padStart(7)}   ${fx(need).padStart(18)}   ${fx(need/n26,0).padStart(8)}x`);
+  }
+  log('');
+  log('  Doubling the radius costs EIGHT times the machine. Reaching 250 m - a');
+  log('  real tornado - is twelve thousand times, and no hardware between here');
+  log('  and that number changes the answer, because the exponent is the');
+  log('  problem and not the constant.');
+  log('');
+  log('  Which is the whole case for the surface, restated one last time: you');
+  log('  cannot buy a storm by filling it in. You can only ever afford its skin.');
+}
+log('');
 log('=== done ===');
 document.getElementById('out').textContent=L.join('\n');
 document.body.dataset.r=L.join('~');
