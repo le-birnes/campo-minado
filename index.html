@@ -2361,6 +2361,14 @@ function genWorld(d){
   G.crack=new Uint8Array(N);
   G.rockHit=new Uint8Array(N);      // shots taken by each cinderstone wall
   G.lamp=0;                         // lanterns found: each adds to the ambient
+  /* A NEW BOARD STARTS WITH NO RUBBLE ON IT. Without this the grains and, far
+     worse, their occupancy claims survive into the next game — so the second
+     run of a session has invisible solid cells scattered through its air. */
+  if(typeof RAW !== 'undefined'){
+    RAW.n=0; RAW.oldest=0; RAW.owed=0; RAW.fused=0; RAW.moving=0;
+    RAW.occ.clear(); RAW.key.fill(0); RAW.rest.fill(0);
+  }
+  if(typeof VOX !== 'undefined') VOX.clear();
   G.rockCount=0;
   rollDensExp();
   for(let i=0;i<N;i++) G.mat[i] = (rnd()<0.055) ? 4 : (rnd()*4)|0;
@@ -3700,34 +3708,85 @@ const hellB   = makeCubeBatch(6000);
    rects, for the same reason. */
 const RAW_MAX = 1400;
 const RAW_S   = BLOCK/16;                 // one grain is one voxel
-const R_SAND=0, R_ROCK=1, R_WATER=2;
+const R_SAND=0, R_ROCK=1, R_WATER=2, R_GLASS=3;
+/* HOW MANY GRAINS ARE IN A VOXEL. Marcelo: "at least as many vertices a voxel
+   have number of grains of sand". The voxel is a Kuhn tetrahedron and a
+   tetrahedron has four vertices, so four is the floor and four is what this
+   uses. A block is 4,096 voxels, so a block is 16,384 grains — and RAW_MAX is
+   1,400, which means what you SEE is a sample of about one in twelve. The
+   bookkeeping knows the real number (RAW.owed); the floor only ever shows what
+   fits in a frame. NEXT.md rule 3, again. */
+const GRAINS_PER_VOXEL = 4;
 /* Pale tan and dark grey, and the contrast is deliberate: raw sand and raw
    rock have to be told apart on the ground at a glance, or "it left sand and
    rock" is a claim nobody can check. */
-const RAW_COL = [[0.80,0.68,0.44],[0.30,0.28,0.26],[0.22,0.44,0.76]];
+const RAW_COL = [[0.80,0.68,0.44],[0.30,0.28,0.26],[0.22,0.44,0.76],
+                 [0.66,0.86,0.88]];   // glass: pale, cold, and brighter
 const RAW = {
   n:0, x:new Float32Array(RAW_MAX), y:new Float32Array(RAW_MAX), z:new Float32Array(RAW_MAX),
   vx:new Float32Array(RAW_MAX), vy:new Float32Array(RAW_MAX), vz:new Float32Array(RAW_MAX),
-  m:new Uint8Array(RAW_MAX), rest:new Uint8Array(RAW_MAX), moving:0
+  m:new Uint8Array(RAW_MAX), rest:new Uint8Array(RAW_MAX), moving:0,
+  /* Where the settled grains ARE, so falling ones can land on them. This is
+     what makes a pile a pile: without it every grain falls to the floor and
+     they stack into a coat of paint one grain thick. */
+  occ:new Set(), owed:0, fused:0,
+  /* WHICH CELL EACH GRAIN CLAIMED, so it can give it back. Without this the
+     occupancy set only ever grows: past the cap rawAdd reuses a slot, the new
+     grain overwrites the old one's position, and the OLD one's key stays in
+     occ for ever — an invisible solid cell that later grains land on. That is
+     precisely the bug in the screenshot: after a few hundred blocks the air is
+     full of ghosts and the grains hang in it. */
+  key:new Int32Array(RAW_MAX)
 };
+const rawKey = (x,y,z) =>
+  (((x/RAW_S)|0)+512) * 1048576 + (((y/RAW_S)|0)+512) * 1024 + ((((z/RAW_S)|0)+512) & 1023);
+/* Solid to a grain: the world, or another grain that has already stopped. */
+function rawBlocked(x,y,z){
+  return solidAtWorld(x,y,z) || RAW.occ.has(rawKey(x,y,z));
+}
 function rawAdd(x,y,z, vx,vy,vz, mat){
   /* Past the cap the oldest grain is recycled rather than the new one dropped:
      what you just shot is always what you see, and the floor stops growing.
      NEXT.md rule 3 — visible debris is a budget, not a consequence. */
   const i = RAW.n < RAW_MAX ? RAW.n++ : ((RAW.oldest = ((RAW.oldest||0)+1) % RAW_MAX));
+  /* Give back whatever cell the grain in this slot was holding, BEFORE the new
+     one takes the slot. A recycled grain that keeps its claim is a ghost. */
+  if(RAW.rest[i] && RAW.key[i]) RAW.occ.delete(RAW.key[i]);
+  RAW.key[i]=0;
   RAW.x[i]=x; RAW.y[i]=y; RAW.z[i]=z;
   RAW.vx[i]=vx; RAW.vy[i]=vy; RAW.vz[i]=vz;
   RAW.m[i]=mat; RAW.rest[i]=0;
 }
 /* Break a block into its constituents and throw them. The recipe is the same
    one the voxel layer uses, so what falls out of a block is what was in it. */
-function rawBurst(bx,by,bz, dirx,diry,dirz, count){
+function rawBurst(bx,by,bz, dirx,diry,dirz, count, thermJ){
   const i = idx(bx,by,bz);
   const rec = voxRecipe(i);
   const cx=(bx+0.5)*BLOCK, cy=(by+0.5)*BLOCK, cz=(bz+0.5)*BLOCK;
+  /* WHAT IS REALLY IN THERE, against what fits on screen. A block is 4,096
+     voxels and a voxel is GRAINS_PER_VOXEL grains, so a block is 16,384 grains
+     and `count` is a sample of them. Keeping the real number is what lets the
+     glass arithmetic below be about mass rather than about pixels. */
+  RAW.owed += 4096*GRAINS_PER_VOXEL;
+
+  /* AND HEAT MAKES GLASS — in principle. Fusing silica is 1.32 MJ/kg, and one
+     RENDERED grain here is 17 cm of sand, which is 8.6 kg and 11.3 MJ. A shot
+     carries 110 kJ of which 20% is heat: 22 kJ, enough for 17 GRAMS. So a
+     shotgun cannot vitrify even a fiftieth of one grain, and the honest
+     display of that is NONE — which is exactly what impact.js said when it
+     found glass takes a hundred shots to make a crust.
+
+     The mechanism is here and correct, and it will fire the day something hot
+     enough touches sand: a mine's 240 kJ, a lava pool, a furnace. It does not
+     fire for a gun and it should not. */
+  const grainKg = 1600 * RAW_S*RAW_S*RAW_S;
+  const fuseKg  = (thermJ||0) / 1.32e6;
+  RAW.fused += fuseKg;
+  let glassLeft = Math.floor(fuseKg / grainKg);
   for(let k=0;k<count;k++){
     const t = rnd();
-    const mat = t < rec.rock ? R_ROCK : (t < rec.rock+rec.water ? R_WATER : R_SAND);
+    let mat = t < rec.rock ? R_ROCK : (t < rec.rock+rec.water ? R_WATER : R_SAND);
+    if(mat===R_SAND && glassLeft>0){ mat = R_GLASS; glassLeft--; }
     const sp = 2.0 + rnd()*5.5;
     rawAdd(cx+(rnd()-.5)*BLOCK*0.9, cy+(rnd()-.5)*BLOCK*0.9, cz+(rnd()-.5)*BLOCK*0.9,
            -dirx*sp*0.5 + (rnd()-.5)*sp,
@@ -3744,35 +3803,54 @@ function rawStep(dt){
     moving++;
     RAW.vy[i] -= GRAV*dt;
     /* PER AXIS, and the first version was not, which is why grains ended up
-       stuck to walls. It moved all three at once, and on any collision
+       stuck to walls. It moved all three at once and, on any collision,
        reversed vy and rested as soon as vy was small — so a grain flying
-       SIDEWAYS into a vertical face had a small vy the whole time and froze
-       in the air against it. The vision review called it exactly: "floating
-       unsupported in mid-air against vertical faces".
-
-       Resolving one axis at a time means a wall stops horizontal motion and
-       leaves the fall alone, which is what a wall does. */
+       SIDEWAYS into a vertical face had a small vy throughout and froze in the
+       air against it. The vision review called it exactly: "floating
+       unsupported in mid-air against vertical faces". */
     const x0=RAW.x[i], y0=RAW.y[i], z0=RAW.z[i];
     let nx = x0 + RAW.vx[i]*dt;
-    if(solidAtWorld(nx, y0, z0)){ nx = x0; RAW.vx[i] = -RAW.vx[i]*0.25; }
+    if(rawBlocked(nx, y0, z0)){ nx = x0; RAW.vx[i] = -RAW.vx[i]*0.25; }
     let nz = z0 + RAW.vz[i]*dt;
-    if(solidAtWorld(nx, y0, nz)){ nz = z0; RAW.vz[i] = -RAW.vz[i]*0.25; }
+    if(rawBlocked(nx, y0, nz)){ nz = z0; RAW.vz[i] = -RAW.vz[i]*0.25; }
     let ny = y0 + RAW.vy[i]*dt;
     let landed = false;
-    if(solidAtWorld(nx, ny, nz) || ny < RAW_S*0.5){
+    if(rawBlocked(nx, ny, nz) || ny < RAW_S*0.5){
       ny = y0;
       landed = RAW.vy[i] < 0;              // only a DOWNWARD hit is a landing
       RAW.vy[i] = -RAW.vy[i]*0.18;
       RAW.vx[i] *= 0.45; RAW.vz[i] *= 0.45;
     }
     RAW.x[i]=nx; RAW.y[i]=ny; RAW.z[i]=nz;
-    /* AND IT ONLY RESTS IF SOMETHING IS HOLDING IT UP. Supported, slow, and
-       falling — all three, or it keeps going. That is what turns a scatter
-       into a pile instead of a coat of paint on the nearest surface. */
-    if(landed &&
-       Math.abs(RAW.vy[i]) < 0.9 &&
-       (solidAtWorld(RAW.x[i], RAW.y[i]-RAW_S*0.75, RAW.z[i]) || RAW.y[i] <= RAW_S*0.75)){
-      RAW.rest[i]=1; RAW.vx[i]=RAW.vy[i]=RAW.vz[i]=0;
+
+    if(landed && Math.abs(RAW.vy[i]) < 0.9 &&
+       (rawBlocked(RAW.x[i], RAW.y[i]-RAW_S*0.75, RAW.z[i]) || RAW.y[i] <= RAW_S*0.75)){
+      /* IT LANDED ON SOMETHING. Before it is allowed to stop, it gets to
+         SLUMP: if a diagonal step down is free, it takes it. That one rule is
+         the angle of repose, and it is the whole difference between a heap and
+         a coat of paint one grain thick — sand.js has had it since the first
+         bench and this is it arriving in the game.
+
+         Four directions tried from a rotating start, so piles do not all lean
+         the same way, which reads as fake instantly. */
+      const o = (i*7 + ((tGlobal*13)|0)) & 3;
+      let slid = false;
+      for(let k=0;k<4 && !slid;k++){
+        const d = (o+k)&3;
+        const sx = d===0?1:d===1?-1:0, sz = d===2?1:d===3?-1:0;
+        const tx = RAW.x[i]+sx*RAW_S, tz = RAW.z[i]+sz*RAW_S, ty = RAW.y[i]-RAW_S;
+        if(!rawBlocked(tx, RAW.y[i], tz) && !rawBlocked(tx, ty, tz) && ty > RAW_S*0.4){
+          RAW.x[i]=tx; RAW.y[i]=ty; RAW.z[i]=tz;
+          RAW.vy[i] = -0.6;                 // keep it live so it can slump again
+          slid = true;
+        }
+      }
+      if(!slid){
+        RAW.rest[i]=1; RAW.vx[i]=RAW.vy[i]=RAW.vz[i]=0;
+        /* and now it is something the next grain can land on */
+        RAW.key[i] = rawKey(RAW.x[i], RAW.y[i], RAW.z[i]);
+        RAW.occ.add(RAW.key[i]);
+      }
     }
   }
   RAW.moving = moving;
@@ -4443,7 +4521,9 @@ function shoot(){
      jitter. The block has to be gone before its contents can fall through
      where it was. */
   revealAt(i,false);
-  rawBurst(hit.x, hit.y, hit.z, r.dx, r.dy, r.dz, 150);
+  /* 22 kJ of heat: the thermal share of a shot, from voxel/round.js's mix.
+     It is nowhere near enough to fuse a grain and that is the point. */
+  rawBurst(hit.x, hit.y, hit.z, r.dx, r.dy, r.dz, 150, 110482*0.20);
   noteDigNear(i);          // only a shot counts, never a cascade or a blast
   digSpawn(i, hit.x, hit.y, hit.z);
   checkWin();
@@ -7213,10 +7293,20 @@ const DARK_LEARN = 0.50;
    the first one, and it is the difference between reading a number at two
    blocks and at three. Capped so a lucky run cannot switch the dark off. */
 const LAMP_STEP = 0.01, LAMP_MAX = 30;
+/* ?lightx=N — FOR THE TESTER, and only ever for the tester. The cave is dark
+   on purpose and that is right for playing, but it is wrong for a reviewer
+   that has to say whether grains of sand are lying on a floor: two reviews
+   were lost to frames where the answer was there and unlit. Multiplying the
+   ambient is honest in a way that making the grains glow is not — it changes
+   the LAMP, not the thing being photographed. Absent, it is exactly 1. */
+const LIGHT_X = (function(){
+  const m = /[?&]lightx=([\d.]+)/.exec(location.search);
+  return m ? Math.max(0.1, Math.min(12, parseFloat(m[1]))) : 1;
+})();
 function darkNow(){
-  if (LIT_DARK_Q !== null) return LIT_DARK;      // an explicit ?dark wins outright
+  if (LIT_DARK_Q !== null) return LIT_DARK * LIGHT_X;
   const base = (!G.dungeon && G.diff === 0) ? DARK_LEARN : LIT_DARK;
-  return base + Math.min(LAMP_MAX, G.lamp||0)*LAMP_STEP;
+  return (base + Math.min(LAMP_MAX, G.lamp||0)*LAMP_STEP) * LIGHT_X;
 }
 function giveLamp(where){
   G.lamp = (G.lamp||0) + 1;
