@@ -4590,6 +4590,59 @@ function askHint(){
     5200);
 }
 
+/* --------------------------------------------------------------------------
+   SHIFT+H — insta_dungeon_solve, a TEST SHORTCUT and nothing else
+   --------------------------------------------------------------------------
+   Marcelo: "the hints are spent one by one until there is 1 mine and 1 safe
+   block ... so instead of pressing H several times you do it until H doesn't
+   work or is next to triggering the boss."
+
+   It is exactly repeated H with the theatre removed. Same findHint(), same
+   proofs, same moves - no echoes, no ghosts, no toasts, no per-move sound,
+   because forty of those queued up is a slideshow rather than a shortcut.
+
+   IT STOPS ONE MOVE SHORT ON PURPOSE. The dungeon finishes when the last mine
+   is flagged and the sweeper when the last safe block falls, so running to the
+   end would fire the finale and the whole point is to be standing in front of
+   it, not past it. Down to one of either and it hands back control.
+
+   Marcelo: "later we'll remove all the hints" - so this goes when they do.
+   Nothing else calls it. */
+function insta_dungeon_solve(){
+  if(G.state!=='play'){ toast('Not in play.'); return; }
+  const t0 = performance.now();
+  /* A cap, because a solver that cannot make progress must not be able to spin
+     the tab: every pass either plays a move or breaks, and this only catches a
+     findHint that returns the same unplayable target for ever. */
+  const CAP = 20000;
+  let flagged=0, opened=0, n=0, why='ran out of proofs';
+  for(; n<CAP; n++){
+    if(G.state!=='play'){ why='the game ended'; break; }
+    const safeLeft = G.safeTotal - G.revealed;
+    const mineLeft = G.mines - G.marked;
+    if(safeLeft<=1 || mineLeft<=1){ why='one move from the finale'; break; }
+    const h = findHint();
+    if(!h){ why='nothing left that logic can prove'; break; }
+    const [x,y,z] = cellXYZ(h.target);
+    if(h.mine){
+      if(G.st[h.target]!==SOLID){ why='the proof pointed at a block already dealt with'; break; }
+      G.st[h.target]=MARKED; G.marked++; maybeSpawn(h.target,x,y,z); flagged++;
+    } else {
+      if(G.st[h.target]!==SOLID){ why='the proof pointed at a block already dealt with'; break; }
+      revealAt(h.target,false); opened++;
+    }
+    G.hints++;
+  }
+  clearEcho(); G.ghost.length=0; G.hintArrow=null; G.beacon=null;
+  G.dirty=true;
+  snd.scan();
+  const ms = performance.now()-t0;
+  toast(`insta_dungeon_solve: ${opened} opened, ${flagged} flagged in ${n} steps `+
+        `(${ms.toFixed(0)} ms) — stopped because ${why}. `+
+        `${Math.max(0,G.safeTotal-G.revealed)} safe and `+
+        `${Math.max(0,G.mines-G.marked)} mines left.`, 7000);
+}
+
 /* ==========================================================================
    12c. DUNGEON MODE — the things that live down there
    ========================================================================== */
@@ -6465,7 +6518,7 @@ window.addEventListener('keydown', e=>{
       break;
     case 'KeyE': if(dragLook) shoot(); break;
     case 'KeyQ': if(dragLook && !THINK.on) startThink(); break;
-    case 'KeyH': askHint(); break;
+    case 'KeyH': if(e.shiftKey) insta_dungeon_solve(); else askHint(); break;
     case 'KeyT':
       G.arrows=!G.arrows;
       toast('Plane arrows '+(G.arrows?'on':'off'));
