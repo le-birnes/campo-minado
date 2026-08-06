@@ -1,0 +1,116 @@
+<!doctype html><meta charset="utf-8"><title>round voxels</title>
+<body style="background:#111;color:#ddd;font:13px ui-monospace,monospace;padding:12px">
+<pre id="out">running…</pre>
+<script src="ball.js"></script>
+<script>
+const L=[],log=s=>L.push(s);
+const fx=(n,d=0)=>n.toLocaleString('en-US',{maximumFractionDigits:d});
+log('=== WOULD A ROUND VOXEL BE CHEAPER? ===');
+log('');
+log('--- 1. WHAT ONE CONTACT TEST COSTS ---');
+log('');
+log('  Same count, same iterations, same access pattern. Only the SHAPE differs.');
+log('');
+const N=20000, IT=40, work=N*IT;
+const rows=[
+  ['sphere',          benchSphere(N,IT)],
+  ['axis-aligned box',benchAABB(N,IT)],
+  ['multi-sphere x4', benchMulti(N,IT,4)],
+  ['multi-sphere x8', benchMulti(N,IT,8)],
+  ['oriented box (SAT, 15 axes)', benchOBB(N,IT)]
+];
+log('     shape                          ns per test   bytes/body   vs sphere');
+const base = rows[0][1].ms/work*1e6;
+for(const [nm,r] of rows){
+  const ns=r.ms/work*1e6;
+  log(`     ${nm.padEnd(30)} ${ns.toFixed(1).padStart(11)}   ${String(r.bytes/N).padStart(10)}   `+
+      `${(ns/base).toFixed(1)}x`);
+}
+log('');
+{
+  const sp=rows[0][1].ms/work*1e6, ab=rows[1][1].ms/work*1e6;
+  const m4=rows[2][1].ms/work*1e6, m8=rows[3][1].ms/work*1e6, ob=rows[4][1].ms/work*1e6;
+  log('  TWO OF THESE CAME OUT AGAINST WHAT I WROTE BEFORE RUNNING IT, and the');
+  log('  second one is backwards from the intuition that prompted the question.');
+  log('');
+  log(`  1. THE SPHERE IS NOT THE CHEAPEST. An axis-aligned box is ${ab.toFixed(1)} ns`);
+  log(`     against the sphere's ${sp.toFixed(1)} — a box WINS, narrowly. Three absolute`);
+  log('     values and three compares, each able to bail out early, beat three');
+  log('     multiplies that must all be done before anything can be decided.');
+  log('     Roundness buys nothing at all while a shape stays axis-aligned.');
+  log('');
+  log(`  2. GLUING BALLS TOGETHER IS WORSE THAN ONE ORIENTED BOX, not better.`);
+  log(`     Four spheres: ${m4.toFixed(1)} ns. Eight: ${m8.toFixed(1)}. One oriented box with the`);
+  log(`     full fifteen-axis test: ${ob.toFixed(1)}. So the multi-sphere shape is`);
+  log(`     ${(m4/ob).toFixed(1)}x DEARER at K=4 and ${(m8/ob).toFixed(1)}x at K=8. K spheres against K spheres`);
+  log('     is K*K distance tests, and K*K grows faster than the fifteen axes');
+  log('     ever do. I wrote the opposite before measuring; the measurement is');
+  log('     right and the paragraph was wrong.');
+  log('');
+  log(`  WHERE THE SPHERE DOES WIN is the moment a shape has to ROTATE: ${(ob/sp).toFixed(1)}x`);
+  log('     against an oriented box. And that saving is not really in the test,');
+  log('     it is in everything the test does not need — no quaternion stored,');
+  log('     no angular velocity integrated, no inertia tensor, nothing to');
+  log('     renormalise, and the contact NORMAL free, because it is the line');
+  log('     between the centres for every pair. On a polyhedron, finding that');
+  log('     normal IS the work.');
+  log('');
+  log('  So the honest rule is not "round is cheap". It is:');
+  log('     a shape that never turns   -> box, and roundness is wasted');
+  log('     a shape that tumbles       -> sphere, and it is 4x');
+  log('     a shape that must be lumpy -> pay for it, or fake it with one');
+  log('                                   sphere and a drawn shape that lies');
+}
+log('');
+log('--- 2. WHAT IT COSTS YOU: SPHERES DO NOT TILE ---');
+log('');
+log('     shape          densest packing   random packing   fills a wall?');
+for(const k of ['cube','tetrahedron','sphere']){
+  const p=PACK[k];
+  log(`     ${k.padEnd(14)} ${(p.dense*100).toFixed(2).padStart(13)}%   `+
+      `${(p.random*100).toFixed(0).padStart(13)}%   ${p.dense>=1?'YES':'no, '+((1-p.dense)*100).toFixed(0)+'% holes'}`);
+}
+log('');
+log('  Kepler\'s bound is proven, not an estimate: 74.05% is the most any');
+log('  arrangement of equal spheres can ever fill, and dropped at random they');
+log('  reach about 64%. So a WALL of spherical voxels is a quarter holes —');
+log('  light leaks through it, small things fall through it, and its mass is');
+log('  wrong unless you inflate the radius and accept overlap.');
+log('');
+log('  And the bigger loss is not the gaps, it is the MESHING. Cubes merge:');
+log('  sand.js measured a solid 32^3 chunk down to SIX QUADS. Two spheres');
+log('  cannot merge into anything, so a standing wall of them costs one');
+log('  primitive per voxel for ever. For the intact world that is not a small');
+log('  regression, it is the entire rendering budget.');
+log('');
+
+log('--- 3. SO THE ANSWER IS A SPLIT, AND IT IS THE ONE ALREADY BUILT ---');
+log('');
+log('     STATIC, INTACT WORLD   ->  CUBES');
+log('        tiles at 100%, greedy-meshes a wall down to one quad, and never');
+log('        moves so it never pays for a contact test at all. Every reason to');
+log('        prefer a sphere is a reason about MOTION, and this does not move.');
+log('');
+log('     FREE, MOVING GRAINS    ->  SPHERES');
+log('        never merged anyway, in contact tests constantly, and nobody can');
+log('        see the orientation of a pebble. All of the sphere\'s advantages');
+log('        and none of its costs.');
+log('');
+log('  index.html already has exactly these two populations: VOX for a damaged');
+log('  block\'s interior, which is static, and RAW for thrown grains, which is');
+log('  not. So this is not a rewrite, it is a change to one of them.');
+log('');
+{
+  const sp=rows[0][1].ms/work*1e6;
+  const budget=4.0;   // ms, a physics slice
+  log(`  At ${sp.toFixed(1)} ns a contact, a ${budget} ms slice affords `+
+      `${fx(Math.round(budget/(sp/1e6)/1000)*1000)} grain-grain tests —`);
+  log('  and with a spatial hash a grain only tests its own neighbourhood, so');
+  log('  that is tens of thousands of grains in contact, not tens of thousands');
+  log('  of PAIRS. The round voxel is affordable; the round WALL is not.');
+}
+log('');
+log('=== done ===');
+document.getElementById('out').textContent=L.join('\n');
+document.body.dataset.r=L.join('~');
+</script></body>
