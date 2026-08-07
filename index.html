@@ -6690,6 +6690,12 @@ const BLAST_V    = 17.0;                   // m/s at the centre
    breaks, and if it does not the bead is PROPELLED. A dense bead takes the
    same impulse, leaves slower, and hits what is behind it harder. */
 const BLAST_P    = 80.0;
+/* HOW HARD A SWIMMER KICKS, in m/s2, and how fast a fluid takes it back. The
+   terminal speed is thrust/drag: 26/2.6 is ten metres a second in water, which
+   is fast for a swimmer and right for a game, and it falls to a crawl in mud
+   because both terms scale with density. */
+const SWIM_A    = 26.0;
+const SWIM_DRAG = 2.6;
 const BLAST_MAX  = 420;                    // beads a shot may throw
 /* ROOM FOR EVERY BEAD INSIDE THE BIGGEST BLAST, and the number has to be the
    real one. Forty thousand was sized when a bead was 0.175 m and the widest
@@ -7683,37 +7689,63 @@ function physics(dt){
      float a little, in wet sand at 2,000 they float like a cork and in air they
      do not float at all. How much of you is under decides how much of that you
      get. */
-  const buoy = P.imm > 0.05 ? Math.min(1.3, P.imm*(P.immD/1000)) : 0;
-  P.vy -= gnow()*dt*(1 - buoy)*fxGrav();
-  /* and it holds you back as well as holding you up: a body in a fluid falls
-     slower, and a body in wet sand hardly falls at all */
-  if(P.imm > 0.02) P.vy -= P.vy*Math.min(0.9, P.imm*(P.immD/2000))*Math.min(1, dt*9);
-  /* AND YOU CAN SWIM, and swimming FOLLOWS THE AIM.
-     Marcelo: "nor swim down (forward while facing down/front)."
+  /* ==========================================================================
+     SWIMMING: FOUR FORCES, SUMMED. No target velocity anywhere.
+     --------------------------------------------------------------------------
+     Marcelo: "I can't swim down! When I enter water I should be able to swim
+     DOWN (or up)." Three times, and the reason it felt like fighting something
+     is that it WAS: buoyancy was an acceleration and the kick was a lerp toward
+     a target velocity, so the kick could never win - it was steering toward a
+     speed while gravity and buoyancy were adding to one. Two different kinds of
+     thing, pulling against each other, and a lerp always loses to a force.
 
-     On land, forward is a direction along the ground and the pitch is only
-     where you happen to be looking - walking at a floor does not push you into
-     it. In water there IS no ground, so forward means where you are LOOKING,
-     including straight down, and that is the only way to reach the bottom.
-     Everything above this line is unchanged, because on land it was right. */
-  const swim = (P.imm > 0.25 && P.immD > 400) ? Math.min(1, P.imm*1.5) : 0;
-  if(swim > 0){
+     So all four are forces now and they are added up:
+
+         gravity    -g                       always
+         buoyancy   +g * imm * rho/rho_body  the mass of fluid you displace
+         thrust      along where you are LOOKING, times how much of you is in it
+         drag       -v * k                   opposing motion, in proportion to it
+
+     And DENSITY THEN DECIDES EVERYTHING without anybody tuning it. A person is
+     about 1,000 kg/m3; brine at 1,025 floats you slightly, fresh water is
+     neutral, oil at 900 you sink through, mud at 1,400 you cannot get down in
+     at all. That is not four special cases, it is one ratio.
+
+     ONE SOLVER, THREE CONSUMERS: this is also what the propelled bead uses and
+     what the rocket will use - thrust is a force with a direction, drag opposes
+     it, gravity pulls. If it lived in the swimmer it would be written three
+     times and the three would disagree. */
+  const RHO_BODY = 1000;
+  const gAcc = gnow()*fxGrav();
+  if(P.imm > 0.02){
+    const rho  = P.immD || 1000;
+    const swim = P.imm;
+    let ay = -gAcc * (1 - swim*(rho/RHO_BODY));      // gravity + buoyancy
+    let ax = 0, az = 0;
+
+    /* THRUST FOLLOWS THE AIM, including straight down, which is the whole of
+       what he asked for. On land forward is a direction along the ground and
+       pitch is only where you happen to be looking; in water there is no
+       ground, so forward means where you are LOOKING. */
     const push = (IN.f-IN.b) + IN.mf;
-    /* sin(pitch) is the vertical share of where you are looking, and it goes
-       through gravity's sign for the same reason the mouse does: pitch is a
-       world angle, and "toward my feet" is the other way round once you are
-       over. */
-    const vt = Math.sin(P.pitch)*push*target*swim*1.6;
-    if(push !== 0) P.vy += (vt - P.vy)*Math.min(1, 9*dt);
-    /* AND SWIMMING DOWN BEATS FLOATING UP. Brine is denser than a person, so
-       buoyancy is pushing up the whole time; a gentle lerp toward a downward
-       target never wins against it and you simply bob. Kicking downward has to
-       cancel the float, which is what a swimmer actually does. */
-    if(vt*gsign() < 0) P.vy -= gnow()*dt*(1 - 1/Math.max(1e-3, 1 - Math.min(0.9, swim)));
-    /* and holding jump still climbs, because a swimmer treading water rises
-       without looking anywhere in particular */
-    if(IN.jumpHeld) P.vy += 11.0*gsign()*dt*swim;
-    P.ground = false;
+    if(push !== 0 && swim > 0.25){
+      const c = Math.cos(P.pitch), sy = Math.sin(P.pitch);
+      const fwx = -Math.sin(P.yaw)*c, fwz = -Math.cos(P.yaw)*c;
+      const T = SWIM_A * push * swim;
+      ax += T*fwx; ay += T*sy; az += T*fwz;
+    }
+    /* and treading water rises without looking anywhere in particular */
+    if(IN.jumpHeld && swim > 0.25) ay += SWIM_A*0.75*swim*gsign();
+
+    /* DRAG, which is what makes a terminal speed instead of a runaway. It
+       scales with the fluid: water lets you move, mud does not. */
+    const k = SWIM_DRAG * swim * (rho/RHO_BODY);
+    ax -= P.vx*k; ay -= P.vy*k; az -= P.vz*k;
+
+    P.vx += ax*dt; P.vy += ay*dt; P.vz += az*dt;
+    if(swim > 0.25) P.ground = false;
+  } else {
+    P.vy -= gAcc*dt;                                  // dry: gravity alone
   }
   if(P.vy < -60) P.vy = -60;
   if(P.vy >  60) P.vy =  60;
