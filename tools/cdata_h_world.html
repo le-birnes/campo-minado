@@ -2860,9 +2860,8 @@ function genWorld(d){
          radius, which is the open sea. "We start locked in the dungeon." */
       const L=G.lump;
       const inLump=(x,y,z)=>{
-        if(!L || y<L.y0) return false;
-        const dx=(x-L.cx)/L.r, dz=(z-L.cz)/L.r, dy=(y-L.cy)/L.ry;
-        return dx*dx+dz*dz+dy*dy <= 1.0;
+        if(!L || y < L.y0 || y > L.y1) return false;
+        return Math.hypot(x-L.cx, z-L.cz) <= L.r;
       };
       let best=-1;
       outer:
@@ -2877,16 +2876,11 @@ function genWorld(d){
         if(G.st[idx(x,y+1,z)]!==AIR) continue;          // room to stand up in
         if(G.st[idx(x,y-1,z)]===AIR) continue;          // something under you
         if(G.hull && G.hull[i]) continue;
-        /* AND NOT AGAINST THE HULL. Four blocks of rock between you and the
-           sea, so the first thing you do cannot be to shoot through it. */
-        let near=false;
-        for(let d=1;d<=4 && !near;d++){
-          for(let k=0;k<6;k++){
-            const ax=x+NB26X[k]*d, ay=y+NB26Y[k]*d, az=z+NB26Z[k]*d;
-            if(!inside(ax,ay,az) || (G.hull && G.hull[idx(ax,ay,az)])){ near=true; break; }
-          }
-        }
-        if(near) continue;
+        /* THE BUFFER FROM THE HULL IS GONE, and it should be: it existed
+           because the shell was breachable, and the shell is unbreakable black
+           rock now. In a tube of this radius nearly every cell is within two
+           blocks of the wall, so the rule found nothing and the spawn fell
+           through to a block out in the open sea. */
         best=i; break outer;
       }
       if(best>=0){
@@ -8903,102 +8897,104 @@ function buildOuterWorld(){
      is the budget everything above the waterline has to fit inside. At 0.30 it
      was seven blocks for the whole world above the sea and the house could not
      be built at all - the vial census came back empty, which is how it showed. */
-  const SEAY  = Math.max(3, Math.round(G.ny*0.54));        // the waterline
-  const ROCK0 = Math.max(SEAY+2, Math.round(G.ny*0.62));   // the top of the chunk
+  /* ------------------------------------------------------------------
+     THE SHAPE, in Marcelo's words:
+
+       "The dungeon is cylindrical. One of its faces is LEVELLED WITH THE
+        ISLAND SAND, while the sand surrounds the round side of the cylinder
+        from that face towards the other face, WHICH TOUCHES OCEAN BOTTOM (so
+        ocean is as deep as the dungeon is). The shell is a thin shell of
+        unbreakable black rock... and the dungeon lives, with its walls and
+        sand blocks and mines, INSIDE it. When boss dies, A SINGLE BLACK ROCK
+        IS DESTROYED, breaching the cylinder on the face that faces the sky."
+
+     A place you are buried in, and then a whole world around it.
+
+     THE SHELL IS THREE BLOCKS, and that number is his too: the reversed
+     gravity you are playing under pushes everything within about seven metres
+     of you toward the sky, and if that reaches the water outside, the sea
+     starts moving for reasons you cannot see. Three blocks is 8.4 m, so it
+     does not reach. "Make the cylinder thick enough for reverse gravity not to
+     be affected" - and then the whole local-gravity-field question can wait,
+     which is the simplification he offered and it is a good one.
+     ------------------------------------------------------------------ */
+  const SEAY  = Math.max(4, Math.round(G.ny*0.30));   // the waterline
+  const ISLY  = Math.max(2, SEAY-3);                  // the beach, and the top face
+  const HULLT = 3;                                    // 8.4 m, past the 7 m bubble
   const cx = G.nx/2, cz = G.nz/2;
-  const R  = Math.min(G.nx,G.nz)*0.30;                     // the island
-  const RR = Math.min(G.nx,G.nz)*0.44;                     // the chunk
-  G.seaY = SEAY; G.rock0 = ROCK0;
+  /* SIZED FOR THE BOARD IT IS ON. At 0.26 the interior came out at two blocks
+     on an 18-wide grid - a five-block tube with three of them wall, and no
+     dungeon left inside it at all: nought mines and three safe blocks. The
+     hull is a fixed three deep, so the interior is what is left over, and it
+     is the interior that has to be worth playing. */
+  const RCYL = Math.max(HULLT+3, Math.min(G.nx,G.nz)*0.36);  // wall plus dungeon
+  const RISL = Math.min(G.nx,G.nz)*0.49;                     // how far the sand reaches
+  G.seaY = SEAY; G.rock0 = ISLY; G.islY = ISLY;
+  const R = RISL;
+  const ROCK0 = ISLY;
 
-  /* 1. everything above the chunk goes, and what is left of the dungeon stops
-        being a level and becomes scenery: a lump of rock with holes in it. */
-  /* THE DUNGEON KEEPS THE PART OF THE GRID IT IS IN, and everything above it
-     becomes sky, sea and island. Only the blocks that are being taken away
-     lose their mines - the ones left are still the board you are playing. */
-  for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
-    const i=idx(x,y,z);
-    if(y < ROCK0){ G.mine[i]=0; G.st[i]=AIR; G.scenery[i]=0; }
-  }
-  /* 2. and the chunk is a LUMP. The dungeon fills its grid corner to corner,
-        so left whole it is a slab with no water beside it - and a slab is not
-        what you are meant to discover you were inside. */
-  {
-    const my=(ROCK0+G.ny-1)*0.5, ry=(G.ny-ROCK0)*0.5+1;
-    for(let y=ROCK0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
-      const dx=(x-cx)/RR, dz=(z-cz)/RR, dy=(y-my)/ry;
-      if(dx*dx+dz*dz+dy*dy > 1.0){ const i=idx(x,y,z); G.mine[i]=0; G.st[i]=AIR; G.scenery[i]=0; }
-    }
-  }
-  /* AND THE DUNGEON IS SEALED FROM THE SEA.
-     Marcelo: "dungeon should be dungeon, ocean is OUTSIDE, in the world, we
-     start locked in the dungeon and IT IS SEALED FROM THE OCEAN AROUND IT."
-
-     Taking the top of the grid away for sky and sea cuts every corridor that
-     reached up into it, so the dungeon was open water down half its length and
-     you could spawn in the ocean. A container that is open is not a container
-     and there is nothing to breach.
-
-     Found by FLOODING IN FROM OUTSIDE, the same way the sea itself is found:
-     anything the water can reach through the rock is a hole, and a hole gets
-     filled with stone. What it cannot reach is the inside of the dungeon and
-     is left exactly as the level generator built it. */
   if(!G.hull || G.hull.length !== G.nx*G.ny*G.nz) G.hull = new Uint8Array(G.nx*G.ny*G.nz);
   G.hull.fill(0);
-  {
-    /* A SHELL, not a flood fill. Two goes at asking "what can the water
-       reach" both left the dungeon open, and connectivity is the wrong tool
-       for this: what is wanted is not "seal what leaks", it is "there is a
-       wall". So every block of the lump that has anything OUTSIDE the lump
-       next to it becomes stone, whatever it was. That is closed by
-       construction and there is nothing left to be clever about.
 
-       Two blocks thick, because one is a wall you can shoot through in a
-       single shot and this one is meant to be the thing you have to work at. */
-    const mx=cx, mz=cz, my=(ROCK0+G.ny-1)*0.5, ry=(G.ny-ROCK0)*0.5+1;
-    const inLump=(x,y,z)=>{
-      if(y < ROCK0 || y >= G.ny || x<0 || z<0 || x>=G.nx || z>=G.nz) return false;
-      const dx=(x-mx)/RR, dz=(z-mz)/RR, dy=(y-my)/ry;
-      return dx*dx+dz*dz+dy*dy <= 1.0;
-    };
-    let sealed=0;
-    for(let pass=0; pass<2; pass++){
-      const todo=[];
-      for(let y=ROCK0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
-        if(!inLump(x,y,z)) continue;
-        const i=idx(x,y,z);
-        if(G.st[i]!==AIR) continue;
-        let edge = false;
-        for(let k=0;k<6 && !edge;k++){
-          const ax=x+NB26X[k], ay=y+NB26Y[k], az=z+NB26Z[k];
-          if(!inLump(ax,ay,az)) edge = true;
-          /* the second layer grows off the FIRST, and it has to ask the hull
-             rather than asking scenery - the hull is not scenery any more, so
-             asking scenery found nothing and the wall came out one thick */
-          else if(pass>0 && G.hull[idx(ax,ay,az)]) edge = true;
-        }
-        if(edge) todo.push(i);
-      }
-      for(const i of todo){
-        /* NOT SCENERY, and this is the whole point of it. Scenery is
-           BREACHABLE - that is what item 5 made it - so a two-block wall of it
-           between the player and the sea is two shots and a hole, and Marcelo
-           breached it from the spawn and saw the sky before he had walked
-           anywhere. The reveal cannot be something you can shoot your way to
-           in the first ten seconds.
+  const dist = (x,z)=>Math.hypot(x-cx, z-cz);
 
-           So while the dungeon is being played this shell is THE EDGE OF THE
-           WORLD - the same black bedrock as the outer shell, the same promise:
-           this does not open, do not waste a shot on it. revealIsland() is
-           what turns it into breachable rock, afterwards, when finding out
-           what is on the other side is the point rather than the spoiler. */
-        G.st[i]=ROCK; G.mat[i]=M_STONE; G.scenery[i]=0; G.mine[i]=0;
-        G.hull[i]=1; sealed++;
-      }
-    }
-    G.sealed = sealed;
-    /* and the shape of the lump, so the spawn can be put INSIDE it */
-    G.lump = {cx:mx, cz:mz, cy:my, r:RR, ry:ry, y0:ROCK0};
+  /* 1. everything above the top face is sky and sea; everything outside the
+        cylinder is cleared for sand and water. What is left is the dungeon. */
+  for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
+    const i=idx(x,y,z);
+    if(y < ISLY || dist(x,z) > RCYL){ G.mine[i]=0; G.st[i]=AIR; G.scenery[i]=0; }
   }
+
+  /* 2. THE SHELL. Black rock, unbreakable while the dungeon is a dungeon -
+        the same promise the edge of the world makes. revealIsland() hands it
+        over as rock you can open, afterwards. Round side, top cap, bottom cap:
+        a closed cylinder by construction, with nothing to be clever about. */
+  let sealed=0;
+  for(let y=ISLY;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
+    const d = dist(x,z);
+    if(d > RCYL) continue;
+    const side = d > RCYL-HULLT;
+    const cap  = y < ISLY+HULLT || y >= G.ny-HULLT;
+    if(!side && !cap) continue;
+    const i=idx(x,y,z);
+    G.st[i]=ROCK; G.mat[i]=M_STONE; G.scenery[i]=0; G.mine[i]=0;
+    G.hull[i]=1; sealed++;
+  }
+  G.sealed = sealed;
+  G.lump = {cx, cz, r:RCYL-HULLT, y0:ISLY+HULLT, y1:G.ny-HULLT-1, hull:HULLT};
+
+  /* 3. THE ISLAND, and it is a body of sand the cylinder is buried in rather
+        than a cap floating on the sea. It meets the top face at its own level -
+        "levelled with the island sand" - and slopes away under the water,
+        which is what puts a beach at the waterline without anybody drawing
+        one. It stands on the ocean floor, so the sea is as deep as the
+        dungeon is. */
+  const set=(x,y,z,mat)=>{
+    if(!inside(x,y,z)) return;
+    const i=idx(x,y,z);
+    if(G.hull[i]) return;                       // the shell is not sand
+    G.st[i]=ROCK; G.mat[i]=mat; G.scenery[i]=1;
+  };
+  const landY=(x,z)=>{
+    const d = dist(x,z);
+    if(d > RISL) return -1;
+    if(d <= RCYL) return ISLY;                  // the top face is the ground here
+    const t = (d-RCYL)/Math.max(1e-6, RISL-RCYL);
+    const rough = Math.sin(x*0.9)*Math.cos(z*0.7)*0.7 + Math.sin(z*1.7)*0.5;
+    return Math.round(ISLY + t*t*(SEAY+4-ISLY) + rough*t);
+  };
+  for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
+    if(dist(x,z) <= RCYL) continue;             // the cylinder is not sand
+    const t = landY(x,z); if(t<0) continue;
+    for(let y=Math.max(0,t); y<G.ny; y++)
+      set(x,y,z, y > t+2 ? M_STONE : (y >= SEAY-1 ? M_WETSAND : M_DRYSAND));
+  }
+
+  /* 4. AND THE ONE BLOCK THAT WILL GO. It is chosen now, at the middle of the
+        face that looks at the sky, so both ends of the story agree about where
+        the way out is before either of them needs it. */
+  G.holeX = Math.round(cx); G.holeZ = Math.round(cz); G.holeR = 1;
+
   /* AND THE BOARD IS COUNTED AGAIN, because it is a smaller board now. Taking
      blocks away without recounting leaves a win condition nobody can reach. */
   {
@@ -9012,36 +9008,6 @@ function buildOuterWorld(){
     G.mines=mines; G.safeTotal=safeN; G.rockCount=rock;
   }
 
-  const set=(x,y,z,mat)=>{
-    if(!inside(x,y,z)) return;
-    const i=idx(x,y,z);
-    G.st[i]=ROCK; G.mat[i]=mat; G.scenery[i]=1;
-  };
-  /* The surface of the land at (x,z) as a grid y, and SMALL IS HIGH. -1 means
-     open water there. */
-  const landY=(x,z)=>{
-    const dx=(x-cx)/R, dz=(z-cz)/R, d=Math.hypot(dx,dz);
-    if(d > 1.30) return -1;
-    const rough = Math.sin(x*0.9)*Math.cos(z*0.7)*0.9 + Math.sin(z*1.7)*0.6;
-    const h = Math.cos(Math.min(d,1)*Math.PI/2)*G.ny*0.30 + rough;
-    const y = Math.round(SEAY - h + (d>1 ? (d-1)*G.ny*0.6 : 0));
-    return y >= ROCK0 ? -1 : Math.max(0, y);
-  };
-  /* 3. the seamount: stone up from the chunk, sand where you can see it, and
-        the wet band exactly where the sea reaches. A beach is damp above the
-        tide from capillary rise rather than from splash. */
-  for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
-    const t = landY(x,z); if(t<0) continue;
-    for(let y=t; y<ROCK0; y++)
-      set(x,y,z, y > t+2 ? M_STONE : (y >= SEAY-1 ? M_WETSAND : M_DRYSAND));
-  }
-
-  /* 4. THE HOUSE, THE RACK AND THE VIALS, on the high ground.
-        A vial IS a lattice slot, which is the neat part: it needs no new kind
-        of thing, only a block whose material is one of the grid's. The rack is
-        therefore a census of the engine - every material that exists, standing
-        in a row in its own colour. Add a material anywhere and a vial for it
-        appears here without anyone writing one. */
   const house = buildVials(set, cx, cz, landY, ROCK0);
 
   /* 5. THE TREE, attached to the bank. A trunk, real BRANCHES going out and
