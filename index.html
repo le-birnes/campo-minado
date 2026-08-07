@@ -7483,7 +7483,13 @@ function buildVials(set, cx, cz, top){
      drops the last eight is worse than no census. Sized off SMAT so adding a
      material widens the house rather than falling off the end of it. */
   const NEED = SMAT.length - 1;
-  const H = Math.max(3, Math.min(6, Math.ceil(Math.sqrt(NEED*2))+1));
+  /* AND IT HAS TO FIT THE WORLD IT IS IN. set() drops anything outside the grid
+     without saying so, so a house taller than the board is a floor and some
+     litter - which is exactly what it was on a three-block world. Height is
+     what the room above the ground allows; the shelves it cannot stack go
+     sideways instead. */
+  const room = Math.max(2, G.ny - gy - 1);
+  const H = Math.max(2, Math.min(6, Math.min(room, Math.ceil(Math.sqrt(NEED*2))+1)));
   const W = Math.max(7, Math.ceil(NEED/Math.max(1,(H-1))) + 2);
   const D = 5;
   /* a wooden box with a doorway, which is all a house has to be to be one */
