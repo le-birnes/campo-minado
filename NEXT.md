@@ -133,6 +133,31 @@ drying out.
 
 > "World and physics have top priority, then cosmetics."
 
+### 0b. SWIMMING - one solver, three consumers
+
+> "I can't swim down! When I enter water I should be able to swim DOWN (or up),
+> and also shooting is no longer propelling me upwards or downwards - I used to
+> swim down by shooting up."
+
+Half of it is fixed: the recoil is real momentum on all three axes now, so
+shooting up pushes you down, and a downward kick cancels buoyancy instead of
+losing to it. What is still owed belongs with 0 rather than with the controls:
+
+BUOYANCY IS A FORCE AND SO IS A KICK, and they should be SUMMED AS FORCES.
+Right now one is an acceleration and the other is a lerp toward a target
+velocity, which is exactly why swimming down felt like fighting something - it
+was. A kick has a direction (the aim) and a magnitude (how hard); drag opposes
+it in proportion to speed; gravity pulls; buoyancy is displaced mass. Four real
+terms and no target velocity anywhere.
+
+Density then decides everything without anybody tuning it: a person is about
+1,000 and brine is 1,025, so you float slightly; fresh water is neutral; mud at
+1,400 you cannot get down in; oil at 900 you sink through.
+
+And the same solver is what the rocket in item 0 needs - thrust is a force with
+a direction, drag opposes, gravity pulls. ONE SOLVER, THREE CONSUMERS: the
+swimmer, the bead, and the rocket.
+
 ### 0. MOMENTUM - and it is a law, not a shot feature
 
 > "Shooting a bead should make it fly forward very fast, LIKE A ROCK PELLET
