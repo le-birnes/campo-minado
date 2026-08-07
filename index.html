@@ -4998,7 +4998,7 @@ function sStepCell(w, x,y,z, mat, gdir){
          divides it - that is "pressure and heat" - and humidity closes the
          loop, because air that is already full cannot take any more. */
   if(K === K_LIQUID && SM_VAP[mat]){
-    let open = 0, hot = 0;
+    let open = 0, hot = 0;   // open is reduced below when it turns out to be a body
     for(let k=0;k<26;k++){
       const t = cGet(w, x+NB26X[k], y+NB26Y[k], z+NB26Z[k]);
       if(t === S_AIR) open++;
@@ -5030,6 +5030,32 @@ function sStepCell(w, x,y,z, mat, gdir){
        only ever touches material that is loose - the scattered beads and the
        edges of a spill, which is exactly what is meant to be evaporating. The
        ladder is what makes this affordable, again. */
+    /* A BODY IS NOT A SHEET, AND THE SEA MUST NOT SPEND ETERNITY FINDING OUT
+       THAT IT IS STILL THE SEA. This is the fault h_ocean has been reporting
+       since the ocean was poured - 27 MILLION cells scanned over ninety ticks
+       of a world where nothing is happening - and the cause is the line below
+       rather than anything about evaporation.
+
+       Every cell of the sea SURFACE has open sky over it, so open is nine, so
+       it stays awake "or it would never find out". Staying awake means touch(),
+       and touch() means mark(), and mark() on a chunk holding promoted blocks
+       DEMOTES one. So the top layer of the ocean demoted its own block every
+       single tick, for ever, and the four thousand cells underneath it were
+       rescanned each time to discover they had nowhere to go. The ladder was
+       working exactly as designed and being undone once per tick by the one
+       rule that never sleeps.
+
+       The fix is the question the rule should have been asking all along: is
+       there a BODY under this bead, or is this all there is of it? Four cells -
+       seventy centimetres - is the whole test. A sea is fed from below and does
+       not evaporate at bead scale; a sheet two beads deep is not, and still
+       thins from its edges inward exactly as Marcelo asked. Heat overrides it,
+       because a fire under the sea should still boil what is above it. */
+    if((open >= 9 || hot > 0) && hot === 0){
+      let below = 0;
+      while(below < 4 && cGet(w, x, y+dir*(below+1), z) === mat) below++;
+      if(below >= 4) open = 0;                 // the top of a body: leave it alone
+    }
     if(open >= 9 || hot > 0){
       /* staggered by WHERE it is, so a sheet does not all ask on the same tick */
       if((w.tick & (EVAP_EVERY-1)) === ((x + z*3 + y*5) & (EVAP_EVERY-1))){
