@@ -75,7 +75,10 @@ and accumulated thickness for transparency.
 > empty-number-containing) are actually 3x3x3 blocks."
 
     LAT    1.5 m    the world lattice. Terrain, the island, the house, walls.
-    CELL   4.5 m    3x3x3 LAT. The minesweeper cell: a mine, a safe block, a
+    CELL   4.5 m    3x3x3 LAT.  <- WANTED, NOT YET BUILT. See the note below.
+                    Shipping today is CELL 3.0 m = 2x2x2 LAT, because 24 beads
+                    to a cell edge is not a power of two and the page still has
+                    to BE the cell. The bead is LAT/8 = 0.1875 m either way. The minesweeper cell: a mine, a safe block, a
                     number. Comfortably taller than the 2 m player, so a carved
                     cell is ALWAYS passable and the generator never has to think
                     about fit again.

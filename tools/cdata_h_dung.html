@@ -698,18 +698,34 @@ const P_H     = 2.0;    // altura do personagem
    THE BEAD IS BLOCK/8 = 12.5 cm, which is the number that matters for the
    complaint. Eight cells to a block edge instead of sixteen is 512 cells in a
    block instead of 4,096 - EIGHT TIMES FEWER BEADS to hold, tick and draw. */
-/* A BLOCK IS A METRE AND A HALF, and the proportion is deliberate rather than
-   inherited. At 2.8 m a block was twice your height and the puzzle read as
-   architecture; at 1 m it was SMALLER THAN YOU and the 3D sweeper stopped
-   working - you could not fit down a one-block corridor, so the geometry threw
-   you out of itself and you fell through the world. 1.5 m is Marcelo's number
-   and it is the largest one that still stacks into something you look over.
+/* A MINESWEEPER CELL IS TWO LATTICE BLOCKS, AND IT HAS TO CONTAIN HIM.
 
-   YOU ARE STILL TALLER THAN A BLOCK, which is new and is a constraint on the
-   GENERATOR rather than on the constant: nothing may be carved one block high
-   any more. Everything the dungeon lays out in bands is scaled with the block
-   count below so that a band is the same number of METRES it always was. */
-const BLOCK   = 1.5;
+   Marcelo: "world lattice is 1.5 m blocks, minesweeper blocks are actually
+   3x3x3 blocks", and then: "3D minesweeper is broken - perhaps you need to
+   adjust height of minesweeper areas in cells, so THE SAFE START ALWAYS CAN
+   CONTAIN THE PLAYER."
+
+   He is right, and the diagnosis is one line: shapeArena opens ONE layer for
+   the starting face, so the start chamber is one cell of headroom. At 2.8 m
+   that held a 2 m player with room over his head; at 1.5 m it is shorter than
+   he is, so the collision pushed him out of his own spawn and the world fell
+   away. And every dug cell in sweep mode has the same problem, because there
+   you walk in the holes you make.
+
+   SO THE CELL MUST BE TALLER THAN HE IS. 3.0 m is TWO lattice blocks of 1.5,
+   and it makes the bead come out at exactly the number he asked for:
+
+       CELL    3.0 m      = 2 x LAT. Holds a standing 2 m player anywhere.
+       LAT     1.5 m      the world lattice, his number
+       BEAD    0.1875 m   = LAT/8 = CELL/16, his number, exactly
+
+   His 3x3x3 wants CELL 4.5 m and 24 beads to a cell edge, and 24 is not a
+   power of two - so the page can no longer BE the cell, it has to become the
+   LAT block with a cell as 3x3x3 pages. That is the right end state and it is
+   a real refactor: the ladder is built on a chunk being exactly 2x2x2 of
+   whatever the storage unit is, and 2 and 3 do not align. Written up in
+   NEXT.md. This is 2x2x2 until then, and it is PLAYABLE, which 1.5 was not. */
+const BLOCK   = 3.0;
 const P_R     = 0.52;   // collision radius
 const EYE     = 1.72;   // eye height
 /* WHICH END OF THE BODY THE EYES ARE AT. The body is always P.y .. P.y+P_H in
@@ -923,11 +939,11 @@ const CUSTOM = 3;
    footprint still allocates a page only where something has actually moved.
    The block arrays grow with it and they are bytes - about 1.3 MB for all of
    them together. */
-const DUNGEON = {nx:52, nz:52, ny:76, dungeon:true};
+const DUNGEON = {nx:26, nz:26, ny:38, dungeon:true};
 /* HOW WIDE THE PLAYABLE DUNGEON IS, in blocks - the old whole board, which is
    what a difficulty used to mean. The WORLD around it is sized from this
    rather than the other way round. */
-const DUN_W = 34;   // 51 m of dungeon, as it was at 2.8 m blocks
+const DUN_W = 17;   // 51 m of dungeon
 /* WHERE THE SHELL IS, DECIDED ONCE. buildOuterWorld used to work these out
    for itself, which was fine while it was the only thing that needed them -
    and stopped being fine the moment the generator had to dig INSIDE them.
@@ -2448,7 +2464,7 @@ function shapeRough(D){
    any shaft here, which matters, because you win by flagging every mine in
    the dungeon and a mine you walked away from is a mine you have to return
    to. */
-const DL_H = 11;   // blocks in one level band - 16.5 m, as it was at 2.8 m blocks
+const DL_H = 6;    // cells in one level band - 18 m
 const DL_N = 4;    // three zones and the arena
 /* How many level bands the next dungeon gets. Normally DL_N; a test can turn
    it down to build the same dungeon with one mine area instead of four, which
@@ -2477,7 +2493,7 @@ function setDungeonLevels(n){
 
    Measured with these values, over 749 mines flagged by perfect logic:
      no enemy 11%, tier 1 32%, tier 2-3 27%, 4-5 17%, 6-7 7%, flying 4%. */
-const ZONE = {drop:0.17, hMin:4, hMax:9};   // in blocks, so the same metres as before
+const ZONE = {drop:0.17, hMin:2, hMax:5};
 
 function shapeDungeon(){
   /* THE DUNGEON IS DUG INTO A BOX, AND THE WORLD IS BIGGER THAN THE BOX.
@@ -4234,7 +4250,7 @@ const hellB   = makeCubeBatch(6000);
        Without it piles come out flatter along the diagonals, which is the same
        artefact as before wearing a different hat.
    ========================================================================== */
-const SAND_DIV = 8;                        // cells per block edge — BLOCK/8, his number
+const SAND_DIV = 16;                       // beads per CELL edge: the bead is LAT/8
 const CELL_M   = BLOCK/SAND_DIV;           // 0.125 m — the bead, BLOCK/8
 /* A CHUNK IS STILL EXACTLY 2x2x2 BLOCKS, which is what the whole ladder hangs
    off, so it follows the divisor rather than being written down twice. */

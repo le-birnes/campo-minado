@@ -32,6 +32,27 @@ setTimeout(()=>{ try{
     return true;
   };
 
+  /* SWEEP FIRST, because that is what he says is broken and it is the mode
+     where you WALK IN THE HOLES YOU MAKE: every cell you dig has to hold you,
+     not just the one you start in. */
+  for(const ftD of [0,1,2]){
+    document.body.dataset.r='STAGE sweep '+ftD;
+    G.mode=MODE_SWEEP; seed=5; genWorld(ftD); G.state='play';
+    const sx=Math.floor(P.x/BLOCK), sy=Math.floor(P.y/BLOCK), sz=Math.floor(P.z/BLOCK);
+    const ok = ftFree(sx,sy,sz);
+    /* and the whole opened face, which is where the first moves happen */
+    let face=0, faceOk=0;
+    for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
+      if(G.st[idx(x,sy,z)]!==AIR) continue;
+      face++; if(ftFree(x,sy,z)) faceOk++;
+    }
+    R.push(`SWEEP ${DIFFS[ftD].name} ${G.nx}x${G.ny}x${G.nz} cells of ${BLOCK} m: ` +
+           `spawn ${ok?'HOLDS YOU':'IS TOO SHORT FOR YOU'}, ` +
+           `open face ${faceOk} of ${face} cells hold you` +
+           (ok && faceOk===face ? ' ok' : '  <- FAULT'));
+    if(!ok || faceOk!==face) ftTight++;
+  }
+
   for(const ftSeed of [3,11,23]){
     document.body.dataset.r='STAGE seed '+ftSeed;
     G.mode=MODE_DUNGEON; seed=ftSeed; genWorld(0); G.state='play';
