@@ -942,3 +942,67 @@ wide. The house was authored in BLOCKS when a block was 2.8 m; at 4.5 m it is
 1.6 times bigger in every axis, and its roof now spans the whole air gap above
 the island. That is the ceiling with the orange panels - they are its lit
 faces. buildVials sizes the house in blocks and needs to size it in METRES.
+
+
+## THE WORLD OCCUPIES EVERYTHING - one height function, two consumers
+
+> "World should occupy everything, until the horizon, forming a giant
+> lump-sphere-like planet. This is direct and simple."
+
+It is, and it is the same shape as every fault in this project: ONE FACT, ONE
+OWNER. The fact is how high the ground is at a point. Today it has one owner
+(landY) and one consumer (the array), and the array ends.
+
+THE WHOLE CHANGE, IN ONE SENTENCE: H(x,z) - the planet's height above sea
+level - becomes the single source of terrain, and gets a SECOND CONSUMER: the
+sky shader, which marches it for everything the array does not store.
+
+    landY(x,z)  ->  H(p)      one function, deterministic, no storage
+      consumer 1: buildOuterWorld samples H into the array, near you
+      consumer 2: FS_SKY marches H along rays that miss geometry
+
+Both read the SAME function, so the block world and the drawn world agree
+exactly where they meet. THERE IS NO SEAM TO HIDE, AND THEREFORE NO BOX TO
+HIDE IT WITH - the bedrock shell existed only because the array had an edge
+that nothing accounted for.
+
+WHAT H SHOULD BE, three octaves each doing one job:
+    CONTINENT  a few big lumps placed by hash over the sphere - mostly ocean,
+               which is what makes an island an island
+    ISLAND     the existing landY profile: a bump from the seabed, flat-topped
+               where the dungeon is buried, sloping to a beach
+    DETAIL     noise, only within a few hundred metres - past that it is under
+               a pixel
+
+HOW THE SHADER DRAWS IT. It already ray-intersects the sea sphere; terrain is
+the same intersection with a bumpy radius, marched rather than solved:
+    1. ray vs the sea sphere gives t_sea - the far bound, and the horizon
+    2. march from the eye toward t_sea, step growing with distance
+    3. |p| against R + H(p); the first step under the surface is land, and a
+       bisection of the last two steps is the hit
+    4. shade by height and slope, fade to the horizon colour with distance
+    5. no hit before t_sea means water
+Sixty-four steps is plenty with a geometric step: the horizon is 2.8 km at eye
+level and detail past a few hundred metres is invisible anyway.
+
+WHY IT IS CHEAPER THAN IT SOUNDS:
+  * the array stops needing to be big - it only holds what you can DIG
+  * it DELETES code: the bedrock shell, the RISL clamp, the sea flood-fill from
+    the world's edge, and the outside-the-array case in blocksBody all exist to
+    paper over an edge that stops existing
+  * the seam problem INVERTS: the array becomes a high-detail PATCH over a
+    surface that is already correct - the same relationship the bead grid has
+    to the block world, one rung up
+  * and travel falls out: moving far means RE-CENTRING the array and
+    re-sampling H, not generating a new world. The dug pages are the only thing
+    that has to be remembered and they are already sparse and keyed by position
+
+THE ORDER TO BUILD IT:
+  1. H(x,z) extracted from landY, pure, with a harness that samples both at a
+     thousand points and asserts they agree
+  2. FS_SKY marches H. The island continues past the array in the picture, and
+     THE BEDROCK SHELL CAN BE DELETED rather than skipped
+  3. buildOuterWorld stops clamping at RISL and samples H over its own extent
+  4. only then: re-centring, and travel
+
+Step 2 is the one he can see, and it is one shader.
