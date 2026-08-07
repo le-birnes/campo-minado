@@ -7392,7 +7392,21 @@ function rebuildWorld(){
     }
     return false;
   };
-  // bedrock: a one-block shell around everything
+  /* THE BEDROCK SHELL - A ONE-BLOCK BOX AROUND THE ENTIRE WORLD, and it is
+     THE BOX. Not the ocean, not the island, not the sky: a literal cube of
+     bedrock drawn around everything, by name, in this loop.
+
+     Which is exactly right for a DUNGEON, because you are inside it and it is
+     the edge of the world making its promise: this does not open. And it is
+     exactly wrong for an OPEN WORLD, because you are outside it, looking at
+     the six faces of a box from the air. "The world should have 600 km radius,
+     that box needs to be GONE, it should not exist."
+
+     So it does not exist once the world opens. The floor is still there - it
+     is blocksBody that holds you up, not this - and what is past the array is
+     sea and sky, drawn by the shader, which is the whole point of a planet
+     with a radius. */
+  if(!G.island)
   for(let y=-1;y<=G.ny;y++) for(let z=-1;z<=G.nz;z++) for(let x=-1;x<=G.nx;x++){
     if(inside(x,y,z)) continue;
     if(!facesAir(x,y,z)) continue;
