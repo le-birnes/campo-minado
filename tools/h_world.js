@@ -28,5 +28,33 @@ setTimeout(()=>{ try{
   hmark(`wood ${wood} vials ${VIALS.length} ` + (wood>60 ? 'ok, the house is built' : 'FAULT'));
   hmark(`shaft above the rock: ${G.st[idx(G.holeX, G.rock0-1, G.holeZ)]===AIR ? 'open ok' : 'SHUT'}` +
        `, into the dungeon: ${G.st[idx(G.holeX, G.rock0+1, G.holeZ)]!==AIR ? 'sealed ok' : 'ALREADY OPEN'}`);
+  /* IS IT ACTUALLY SEALED? Flood the world's air from the sea and see whether
+     the water can reach where the player is standing. This is the claim -
+     "we start locked in the dungeon and it is sealed from the ocean around
+     it" - and it is the only one that cannot be argued with. */
+  {
+    const N=G.nx*G.ny*G.nz, seen=new Uint8Array(N), q=[];
+    const push=(x,y,z)=>{
+      if(x<0||y<0||z<0||x>=G.nx||y>=G.ny||z>=G.nz) return;
+      const i=idx(x,y,z);
+      if(seen[i] || G.st[i]!==AIR) return;
+      seen[i]=1; q.push(i);
+    };
+    for(const bi of (G.seaB||[])){ const c=cellXYZ(bi); push(c[0],c[1],c[2]); }
+    for(let h=0;h<q.length;h++){
+      const i=q[h], c=cellXYZ(i);
+      push(c[0]+1,c[1],c[2]); push(c[0]-1,c[1],c[2]);
+      push(c[0],c[1]+1,c[2]); push(c[0],c[1]-1,c[2]);
+      push(c[0],c[1],c[2]+1); push(c[0],c[1],c[2]-1);
+    }
+    const si=idx(Math.floor(P.x/BLOCK), Math.floor(P.y/BLOCK), Math.floor(P.z/BLOCK));
+    let inside_=0;
+    for(let y=G.rock0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
+      const i=idx(x,y,z);
+      if(G.st[i]===AIR && !seen[i]) inside_++;
+    }
+    hmark(`sealed ${G.sealed} blocks; ${inside_} air blocks the sea cannot reach; ` +
+          `where you stand is ${seen[si] ? 'REACHABLE - FAULT, the dungeon is open water' : 'DRY ok, you are locked in'}`);
+  }
   hmark(window.__err.length ? ('FAULT '+window.__err.join(' | ')) : 'no errors');
 }catch(err){ hmark('THREW: '+err.message+' @ '+((err.stack||'').split('\n')[1]||'')); }}, 200);
