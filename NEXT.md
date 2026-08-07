@@ -69,6 +69,83 @@ and accumulated thickness for transparency.
 ### 5. THE SPIT - liquids as a weapon
 
 
+## THE LIST - say "do list", or "do list except 4 7"
+
+Numbered so they can be skipped by number, each with its suggested steps.
+Ordered by what unblocks what: 1 is a controls bug you feel every second, 2-3
+are what the ending was for, 4 unblocks 5, and 6-10 are the material engine.
+
+### 1. Spin the PLAYER, not the camera
+The flip inverts left and right relative to your body, because it rotates the
+picture about the view axis while your own frame never changes.
+  a. give P a real up vector (P.up), default (0,1,0)
+  b. build the aim basis from it: forward from yaw/pitch IN that frame
+  c. map mouse dx/dy into the frame so the controls stop fighting the picture
+  d. viewFrom takes the basis directly - delete the `us` roll hack
+  e. the flip becomes P.up = -P.up, animated over about 0.6 s
+  f. harness: turn right under both signs, assert the world goes the same way
+
+### 2. Sun, moon, sky, horizon, in their place in the universe
+  a. a sky pass before the world: gradient by sun elevation, a horizon line
+  b. sun and moon as billboards at real angular size (0.53 degrees, both)
+  c. a clock: elevation and azimuth from time of day, moon on its own period
+  d. they are RECORDS, not objects - rule 1 at the largest scale
+  e. the cave sees none of it; only the island and the shaft mouth do
+  f. photograph it, and have agy say whether it reads as sky
+
+### 3. The island the player actually lands in
+Reported as "a box of wall/lava/stone with a tree", not the island.
+  a. PHOTOGRAPH IT FIRST - it has never been looked at, only counted
+  b. clear G.lava when the island is built, or the shell is hellstone
+  c. fix the mirror mixing: top() is in mirrored space and the landing
+     arithmetic mixes the two
+  d. put the player on the beach with the house in view, not beside the shaft
+     facing a wall
+  e. agy reviews: does this read as an island with a house on it
+
+### 4. The promotion ladder: beads to block to mass
+Marcelo's design, and what makes an ocean affordable.
+  a. per-block census of grid material - count by material, cheaply
+  b. a full block of one fluid collapses to ONE block record
+  c. adjacent blocks collapse to a mass, with parameters instead of cells
+  d. any disturbance at a face promotes it back down to beads, locally
+  e. bench: an ocean at rest must cost what a mountain costs, near zero
+
+### 5. The ocean as fluid, and the dungeon breachable
+Blocked on 4.
+  a. the sea becomes S_SALT in the grid rather than scenery blocks
+  b. the rock wall becomes something a shot opens - it already can, once the
+     wall is grid material and the sea is a fluid behind it
+  c. water pours in, finds its level, floods the shaft
+  d. the player swims, drowns, is pushed by it
+  e. harness: breach it, and assert the dungeon floods
+
+### 6. Water to vapour to air, with humidity
+Asked twice, still missing. Shares a lifetime column with 7, so build together.
+  a. MORTAL as a real flag with a baseline t per material
+  b. t shifts with pressure and heat
+  c. thin or hot water becomes vapour; vapour surrounded by air becomes air
+  d. air carries a humidity percent that vapour raises
+
+### 7. The full Noita material table
+  a. read https://noita.wiki.gg/wiki/Materials
+  b. every material as a row, every interaction as a row in the reaction table
+  c. keep the 255 ceiling in mind - a cell is one byte
+
+### 8. HP as a number, and Noita's damage
+  a. 50 to start, a heart is 25
+  b. damage from the material table
+  c. touching and ingesting do what they do there
+
+### 9. The spit
+  a. beads on a gravity arc from screen centre, strength on hold
+  b. the only way to throw a liquid, so it always doses you mildly
+
+### 10. The slow pour, and the house reading as a house
+  a. one block of water spills slowly until only scattered beads remain
+  b. the house needs windows, a light inside, and a plaque that carries text -
+     the glyph batch draws digits and arrows only, so this one needs a font
+
 ## THE QUEUE, as asked for and not yet built
 
 1. **Water becomes vapour becomes air.** Spread thin enough, or hot enough,
