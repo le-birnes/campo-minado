@@ -158,7 +158,45 @@ And the same solver is what the rocket in item 0 needs - thrust is a force with
 a direction, drag opposes, gravity pulls. ONE SOLVER, THREE CONSUMERS: the
 swimmer, the bead, and the rocket.
 
-### 0a. WHY A 100 m x 1000 m CYLINDER IS HARD, AND WHAT ACTUALLY BLOCKS IT
+### 0a. THE SPARSE GRID - DONE 2026-08-07, and it is what unblocked the rest
+
+A cell no longer has an address in one array. It has a PAGE - exactly one
+BLOCK, 16^3 cells - and a page is a pointer that is usually NULL, meaning
+"every cell in this block is material pgu[b]". One byte instead of four
+thousand. Allocated by the first write that differs from what the block
+already is; FREED the moment a census finds it uniform again.
+
+Which is his own ladder one rung up: bead, block, mass, and now the block rung
+is the STORAGE rung as well as the bookkeeping one, so ladPromote/ladDemote ARE
+the free list. The page is a BLOCK and not a chunk because sandFill, voxelise,
+voxCarve and ladCensus were every one of them already written in units of a
+block - the boundary was drawn, it just had nothing behind it.
+
+Measured, tools/h_sparse.js:
+
+    fresh 288x384x288        0 pages, 0.13 MB   (was 31 MB up front)
+    ten times wider          9.62 MB            where flat is 3,058 MB
+    HIS CYLINDER 100x1000 m  5.9 MB             where flat is 1.76 GB
+      and its shell, 6,048 blocks of solid rock, costs ZERO pages
+    the dungeon at rest      0 of 13,552 pages, 0.13 MB
+
+WHAT IT COST. The flat index had to go with it - a cube-shaped page cannot
+support i+1 - so every probe is by (x,y,z) through cGet. h_sand 1.0s -> 1.3s
+wall, about thirty per cent on cells actually simulated; still zero at rest.
+The pathological case (the ocean demoted bead by bead) got about twice as slow
+because demotion now allocates and fills a page, and THAT WORKLOAD IS ITSELF
+THE BUG - 0e removes it. Roundness 0.97, water isotropy 0.85 and every reaction
+come out to the same digits, so the rules are unchanged.
+
+AND ONE BUG WORTH THE NAME: S_AIR is material 0, so "0 means this block has
+cells" and "0 means this block is air" were the same byte, and a block of pure
+air is the commonest uniform block there is. It crashed the draw pass loudly
+and leaked the page of every hollowed-out block silently. Uniformity answers -1
+now. The loud one is why the quiet one was found.
+
+Vault: "The wall was one line, and it was the array".
+
+### 0a-was. WHY A 100 m x 1000 m CYLINDER WAS HARD (kept: the arithmetic)
 
 > "Why is it so hard to build a cylinder like 100m wide and 1000m tall with the
 > dungeon inside? We won't be able to have an open interactive world if we can't
