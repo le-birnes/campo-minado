@@ -68,6 +68,34 @@ and accumulated thickness for transparency.
 ### 4. CELESTIAL - sun, moon, planet
 ### 5. THE SPIT - liquids as a weapon
 
+
+## THE QUEUE, as asked for and not yet built
+
+1. **Water becomes vapour becomes air.** Spread thin enough, or hot enough,
+   water beads are MORTAL: baseline t to vapour, t shifting with pressure and
+   heat; vapour surrounded by air becomes air and raises its HUMIDITY by some
+   percent. Asked for twice and still missing. It wants the same per-material
+   lifetime column as (2), so build them together.
+2. **The full Noita material table** - https://noita.wiki.gg/wiki/Materials -
+   every material and every interaction, not the eighteen there are now.
+3. **HP as a number.** 50 to start, a heart is 25, and damage comes from
+   Noita's table. Touching and ingesting do what they do there.
+4. **The spit.** Beads on a gravity arc from screen centre, strength on hold -
+   the only way to throw a liquid, so throwing one always doses you mildly.
+5. **The promotion ladder.** Enough beads filling a block become a BLOCK of
+   fluid; enough blocks a MASS; each rung adds parameters and discards
+   fine-processing events. This is rule 1 run backwards and it is what makes an
+   ocean of beads affordable.
+6. **Minecraft-style pour**: one block of water spills slowly until only
+   scattered beads remain.
+7. **The house has to READ as a house.** It is built and photographed and it
+   does not - an unlit island, no windows, no light inside. Also: plaques carry
+   no text, because the glyph batch draws digits and arrows only.
+8. **Sun, sky, endless sea** through the hole. The reveal exists; the outside
+   is still cave-black.
+9. The 500 m sphere and its three tiers; wind + MORTAL; celestial records.
+10. The dungeon bot ceiling at 41%, still unexplained.
+
 ## THE PROMPT
 
 ```
