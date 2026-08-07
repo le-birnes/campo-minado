@@ -679,7 +679,7 @@ body.world .stat.foe-only{ display:flex !important; }
 /* ==========================================================================
    0. WORLD CONSTANTS — real proportions
    ========================================================================== */
-const P_H     = 1.8;    // altura do personagem — his number
+const P_H     = 2.0;    // altura do personagem
 /* One face is 1.4 of you, not 2. At 4 m a cube read as architecture rather than
    as a block: standing in a one-cell corridor you could not see over anything,
    the creatures looked like toys next to the walls, and crossing the cave was
@@ -698,9 +698,20 @@ const P_H     = 1.8;    // altura do personagem — his number
    THE BEAD IS BLOCK/8 = 12.5 cm, which is the number that matters for the
    complaint. Eight cells to a block edge instead of sixteen is 512 cells in a
    block instead of 4,096 - EIGHT TIMES FEWER BEADS to hold, tick and draw. */
-const BLOCK   = 1.0;
+/* A BLOCK IS A METRE AND A HALF, and the proportion is deliberate rather than
+   inherited. At 2.8 m a block was twice your height and the puzzle read as
+   architecture; at 1 m it was SMALLER THAN YOU and the 3D sweeper stopped
+   working - you could not fit down a one-block corridor, so the geometry threw
+   you out of itself and you fell through the world. 1.5 m is Marcelo's number
+   and it is the largest one that still stacks into something you look over.
+
+   YOU ARE STILL TALLER THAN A BLOCK, which is new and is a constraint on the
+   GENERATOR rather than on the constant: nothing may be carved one block high
+   any more. Everything the dungeon lays out in bands is scaled with the block
+   count below so that a band is the same number of METRES it always was. */
+const BLOCK   = 1.5;
 const P_R     = 0.52;   // collision radius
-const EYE     = 1.62;   // eye height, 0.9 of him
+const EYE     = 1.72;   // eye height
 /* WHICH END OF THE BODY THE EYES ARE AT. The body is always P.y .. P.y+P_H in
    world coordinates, whichever way gravity points - so under reversed gravity
    the end that rests on the ground is P.y+P_H, and the eyes are 1.72 m from
@@ -912,11 +923,11 @@ const CUSTOM = 3;
    footprint still allocates a page only where something has actually moved.
    The block arrays grow with it and they are bytes - about 1.3 MB for all of
    them together. */
-const DUNGEON = {nx:46, nz:46, ny:40, dungeon:true};
+const DUNGEON = {nx:52, nz:52, ny:76, dungeon:true};
 /* HOW WIDE THE PLAYABLE DUNGEON IS, in blocks - the old whole board, which is
    what a difficulty used to mean. The WORLD around it is sized from this
    rather than the other way round. */
-const DUN_W = 18;
+const DUN_W = 34;   // 51 m of dungeon, as it was at 2.8 m blocks
 /* WHERE THE SHELL IS, DECIDED ONCE. buildOuterWorld used to work these out
    for itself, which was fine while it was the only thing that needed them -
    and stopped being fine the moment the generator had to dig INSIDE them.
@@ -2437,7 +2448,7 @@ function shapeRough(D){
    any shaft here, which matters, because you win by flagging every mine in
    the dungeon and a mine you walked away from is a mine you have to return
    to. */
-const DL_H = 6;    // blocks in one level band
+const DL_H = 11;   // blocks in one level band - 16.5 m, as it was at 2.8 m blocks
 const DL_N = 4;    // three zones and the arena
 /* How many level bands the next dungeon gets. Normally DL_N; a test can turn
    it down to build the same dungeon with one mine area instead of four, which
@@ -2466,7 +2477,7 @@ function setDungeonLevels(n){
 
    Measured with these values, over 749 mines flagged by perfect logic:
      no enemy 11%, tier 1 32%, tier 2-3 27%, 4-5 17%, 6-7 7%, flying 4%. */
-const ZONE = {drop:0.17, hMin:2, hMax:5};
+const ZONE = {drop:0.17, hMin:4, hMax:9};   // in blocks, so the same metres as before
 
 function shapeDungeon(){
   /* THE DUNGEON IS DUG INTO A BOX, AND THE WORLD IS BIGGER THAN THE BOX.
@@ -5170,7 +5181,7 @@ function sStepCell(w, x,y,z, mat, gdir){
        mark(), and mark() on a chunk holding promoted blocks DEMOTES one. The
        sea demoted its own top layer every tick for ever. Heat still overrides
        all of it, because a fire under the sea should boil what is above it. */
-    if(hot === 0 && ladBodyAt(x,y,z) === mat) open = 0;
+    if(hot === 0 && ladBodyAt(w,x,y,z) === mat) open = 0;
     if(open >= 9 || hot > 0){
       /* staggered by WHERE it is, so a sheet does not all ask on the same tick */
       if((w.tick & (EVAP_EVERY-1)) === ((x + z*3 + y*5) & (EVAP_EVERY-1))){
@@ -5831,8 +5842,14 @@ let LADB  = null;      // Uint8Array, one per BLOCK: what it is a BODY of, 0 = n
 const LAD_BODY_MIN = PGC >> 3;
 const LADH = new Uint16Array(256);           // census histogram, reused
 const LADSEEN = [];                          // which of its entries were touched
-function ladBodyAt(x,y,z){
-  if(!LADB) return 0;
+function ladBodyAt(w,x,y,z){
+  /* AND IT HAS TO BE THIS WORLD'S LADDER. LADB is sized for the game's block
+     grid; a harness that builds its own SandWorld of different dimensions was
+     indexing into it anyway and reading whatever happened to be at that offset,
+     which said "you are in a body of water" to a bead sitting alone on a rock
+     and made it immortal. A second world has no ladder, and that is the answer
+     rather than a coincidence. */
+  if(!LADB || w !== SAND) return 0;
   const bx=(x>>PGSH), by=(y>>PGSH), bz=(z>>PGSH);
   if(bx<0||by<0||bz<0||bx>=G.nx||by>=G.ny||bz>=G.nz) return 0;
   return LADB[(by*G.nz + bz)*G.nx + bx];

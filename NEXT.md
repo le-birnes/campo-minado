@@ -69,6 +69,156 @@ and accumulated thickness for transparency.
 ### 5. THE SPIT - liquids as a weapon
 
 
+## THE THREE SCALES, settled 2026-08-07
+
+> "World lattice is 1.5 blocks, minesweeper blocks (mines and safe and
+> empty-number-containing) are actually 3x3x3 blocks."
+
+    LAT    1.5 m    the world lattice. Terrain, the island, the house, walls.
+    CELL   4.5 m    3x3x3 LAT. The minesweeper cell: a mine, a safe block, a
+                    number. Comfortably taller than the 2 m player, so a carved
+                    cell is ALWAYS passable and the generator never has to think
+                    about fit again.
+    BEAD   LAT/8  = 18.75 cm   loose matter, the standard
+           LAT/16 = 9.4 cm     an intact LAT block being fragmented
+
+AND SEPARATING THEM IS THE POINT. They have been one number by accident, never
+by design, and every problem of the last two days came out of that:
+
+  * at 2.8 m the CELL was right and the LATTICE was too coarse to be terrain -
+    you could not see over anything and an island was a staircase of boulders
+  * at 1.0 m the LATTICE was right and the CELL was SMALLER THAN THE PLAYER, so
+    a one-cell corridor could not be entered, the collision pushed him out of
+    the geometry and the world fell away
+  * at 1.5 m with no split, neither is right: the lattice is good and a cell is
+    still shorter than he is
+
+With the split each number answers only its own question and there is nothing
+left to trade off.
+
+### WHAT IT COSTS TO BUILD, honestly
+
+The page store already assumes PAGE = BLOCK = the thing the ladder promotes, so
+splitting them touches:
+
+  a. PGS stays 8 and a PAGE becomes one LAT block, not one cell
+  b. the block arrays (G.st, G.mat, G.mine, G.cnt) split in two: the WORLD at
+     LAT resolution, and the BOARD at CELL resolution with the mines and counts
+  c. reveal, the flood cascade, the numbers, the crack graphic and the HUD are
+     board-side and work in CELLs
+  d. rendering, collision, the sand grid and the ladder are world-side and work
+     in LAT
+  e. shooting a cell opens its 27 LAT blocks
+
+(b) is the whole job and it is also EXACTLY WHAT THE WORLD REDESIGN NEEDS: the
+board stops being the world, which is the same sentence as "a stored world has
+an edge". Do them together or the second will undo the first.
+
+## THE WORLD REDESIGN - his brief, and it is the next build
+
+> "Emergence doesn't work because you need to COMPLETELY REDESIGN the dungeon
+> world. When a player enters dungeon mode a WHOLE WORLD should be generated -
+> open, with a reachable moon and sun, an island, and a dungeon beneath the
+> island. Player starts inside that dungeon. Currently you've been generating a
+> dungeon and trying to add stuff. Forget all that, design a world with a
+> dungeon in it."
+
+> "Consider what I already told you about planet radius, so if I go on shooting
+> down I'll be propelled up in a way I'll be able to see the planet and leave
+> atmosphere."
+
+### WHY EVERY ATTEMPT HAS COME OUT A BOX
+
+The world is STORED, and a stored world has an edge by definition. G.st, G.mat
+and G.mine are dense arrays of nx*ny*nz, so "the world" is exactly as big as the
+array and the array ends in a wall. Everything since has been decoration hung on
+that wall: a cylinder cut out of the array, an island written into the array, a
+sea flood-filled through the array. His aerial photographs are what that looks
+like from outside - a lit box with a tree in it.
+
+The bead grid had the identical disease and one sentence cured it: A VALUE IS A
+FUNCTION OF POSITION UNTIL SOMEBODY CHANGES IT, AND ONLY THE CHANGES ARE STORED.
+That is what the page table is. Apply it to the BLOCK layer and the world stops
+having a size at all - there is nothing left to have an edge.
+
+### THE PLANET IS NOT DECORATION, IT IS THE FIX
+
+Gravity is -Y times a sign. Make it a VECTOR TOWARD A POINT and three separate
+problems collapse into one:
+
+  a. THE HORIZON IS FREE. Terrain becomes height(x,z) over a sphere of radius R;
+     the ground curves away instead of stopping. No wall, because there is no
+     edge to put one on.
+  b. HIS SHOT WORKS LITERALLY. Momentum is already going to be a law of the
+     engine (item 0), so shooting down pushes you up; keep doing it and you pass
+     the point where g falls off as 1/r^2 and you are in orbit looking at the
+     planet. Nothing is scripted, and escape velocity is a CONSEQUENCE of R and
+     g rather than a flag.
+  c. THE GRAVITY FLIP STOPS BEING A SPECIAL CASE. Reversed gravity is the sign
+     of the same vector, so gsign, upSign, eyeOff and the camera roll all become
+     one rotation of one direction.
+
+R is a design number. Pick it from HOW FAR HE SHOULD SEE - with g = 20 m/s^2 a
+few kilometres puts the horizon a few hundred metres off - and let escape
+velocity fall out of it, never the other way round.
+
+### THE ORDER OF GENERATION INVERTS
+
+Every build so far has gone dungeon -> crop -> island -> sea -> sky, each step
+fighting the last. It must run outward:
+
+  1. THE PLANET: R, g, sea level, atmosphere depth. Records, no storage.
+  2. THE SEA: one level over the sphere. A record.
+  3. THE ISLAND: height(x,z), a smooth bump above sea level. A function.
+  4. THE SEAMOUNT: the rock under it, down to the seabed. The same function.
+  5. THE DUNGEON VOLUME: a region inside the seamount. THE ONLY AUTHORED PART.
+  6. THE BOARD: mines and counts, in the dungeon's own small dense array at CELL
+     resolution. The world never learns what a mine is.
+
+Then the shell is not a cylinder cropping anything - it is wherever the dungeon
+volume meets rock nobody has dug, which is the shrink-wrap 0e wanted and could
+not have while the dungeon WAS the array.
+
+AND THE EMERGENCE STOPS NEEDING MACHINERY. You are in a cave inside a mountain
+under an island. The boss opens the last blocks of a shaft that has been there
+since generation. You climb it. Nothing is revealed, nothing is built, nothing
+moves - which is what he asked for in the first place.
+
+### THE TWO BEAD SCALES - his rule, and it is a PAGE property
+
+> "Inert materials (materials that don't dissolve or merge with water just by
+> touching) can have a bead of BLOCK/16, like wood. If said wood is on fire, it
+> becomes a BLOCK/8 bead of wood on fire. Acid and lava too. So we use BLOCK/8
+> as standard and BLOCK/16 only when we want to destroy things in a fun way - I
+> like shooting a block and watching it become fragmented, so BLOCK/16 can exist
+> INSIDE a block so there is realistic damage, but when material is OUTSIDE a
+> block it becomes BLOCK/8."
+
+This is the ladder pointing DOWNWARD for the first time, and it is nearly free
+because a page is already a pointer: LET THE PAGE CARRY ITS OWN RESOLUTION. 8^3
+= 512 cells normally; a LAT block being shot swaps to a 16^3 = 4,096 page so the
+damage is fine-grained; anything leaving the block coarsens to LAT/8 on the way
+out. Fire, acid and lava coarsen it IN PLACE - wood at LAT/16 that catches
+becomes LAT/8 "wood on fire" - which is his rule and is also exactly right:
+the fine scale is for a SOLID, and nothing burning, running or dissolving is a
+solid any more.
+
+One byte a page for its resolution, and one function each way. Every reader
+already goes through cGet, so they all get it for nothing.
+
+### THE CONSTRAINT THAT IS NOW PERMANENT
+
+    P_H 2.0    LAT 1.5    so THE PLAYER IS TALLER THAN A LATTICE BLOCK
+
+Nothing may be carved one LAT block high, ever. At LAT 1.0 this was not a
+warning, it was the bug: a one-block corridor is smaller than the player, the
+collision pushed him out of the geometry, and the world fell away - "structures
+rapidly falling out of vision and the game leaves me flying in the nowhere". The
+CELL at 4.5 m is what makes this safe for the puzzle; anything carved OUTSIDE
+the puzzle still has to obey it by hand, and a harness has to check it with the
+player's actual bounding box rather than block by block, because block-level
+connectivity cannot see a corridor you do not fit down.
+
 ## THE LIST - done 2026-08-07
 
 Run in the order Marcelo gave: 4, 5, 1, 2, 3, then 6 to 10. Two more (11, 12)
