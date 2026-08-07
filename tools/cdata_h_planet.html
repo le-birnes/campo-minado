@@ -4412,36 +4412,6 @@ const SM_STICK= new Float32Array(256);
    stop light almost at once; acid is somewhere between. */
 const SM_OPAC = new Float32Array(256);
 /* ==========================================================================
-   INTEGRITY, AND MOMENTUM AS A LAW OF THE ENGINE
-   --------------------------------------------------------------------------
-   Marcelo, and he has said it twice, which is why it is written as a law
-   rather than as a feature of the gun:
-
-     "Shooting a bead should make it fly forward very fast, LIKE A ROCK PELLET
-      SHOT BY A REAL GUN would, if not destroyed. If gun surpasses bead
-      integrity, then cool, but if not, item should be PROPELLED (inelastic
-      collision, those rules should apply as I intend to, later, build damn
-      rockets burning fuel and flying to the moon)."
-
-   So: momentum is conserved, an impulse arrives, and there are exactly two
-   outcomes with one test between them.
-
-       energy delivered EXCEEDS this material's integrity -> the bead breaks
-       it does NOT                                        -> the bead SURVIVES
-                                                             and leaves at v = p/m
-
-   INTEGRITY is joules to break ONE BEAD. Sand is nothing, rock is a lot, iron
-   is more. A dense bead takes the same impulse and moves slowly, and hits what
-   is behind it hard; a light one is flung. Nobody has to tune that - it falls
-   out of p = mv with a real mass in it.
-
-   AND THE GUN IS NOT SPECIAL. A rocket is a thing that throws mass one way and
-   goes the other; if conservation lived in shoot(), the rocket would be a
-   second implementation of the same idea and the two would disagree. It lives
-   here, in the material table, where the beads are. */
-const SM_INTEG = new Float32Array(256);   // joules to break one bead
-const SM_MASS  = new Float32Array(256);   // kg of one bead, from density
-/* ==========================================================================
    MORTAL
    --------------------------------------------------------------------------
    Marcelo, and this has been asked for three times:
@@ -4542,38 +4512,6 @@ function addMat(spec){
   SM_BURN[id] = spec.burn?1:0;
   SM_DOUSE[id]= spec.douse?1:0;
   SM_SEE[id] = spec.see===undefined ? 1 : spec.see;
-  /* MASS IS NOT A NEW NUMBER - it is the density it already had, times the
-     volume of a bead. Change the bead size and every mass in the game follows,
-     which is what stopped this being a table of tuned constants. */
-  SM_MASS[id] = SM_D[id] * CELL_M*CELL_M*CELL_M;
-  /* AND INTEGRITY DEFAULTS TO WHAT THE MATERIAL ALREADY SAYS ABOUT ITSELF. A
-     fluid has none - it parts around anything. A powder is held by friction
-     alone, so its integrity is small and scales with how much it grips: SLIP
-     is the angle of repose and a low slip is a cohesive material. A static
-     solid is the strong case and takes its strength from density, because
-     within a family that is what strength tracks. Anything that wants a
-     different answer says so in its own row. */
-  /* AND IT IS A TOUGHNESS PER CUBIC METRE, NOT A NUMBER PER BEAD - because a
-     bead is 18.75 cm on a side and that is SIX AND A HALF LITRES. A cube of
-     sand that size weighs ten and a half kilos, which is real and was the
-     first surprise this rule produced: the impulse that shifts a pebble does
-     nothing at all to a bead. Both numbers have to be volumetric or the whole
-     table stops meaning anything the moment the bead size changes again.
-
-         liquid, gas   0            they part around anything
-         powder        1e3 - 8e3    friction only, and cohesion raises it
-         wood          3e4          it splinters
-         stone         1.2e5        it takes real work
-
-     Multiply by the bead's own volume and the numbers below come out in
-     hundreds of joules, which is the scale a 24 g charge arrives at. */
-  const vol = CELL_M*CELL_M*CELL_M;
-  let tough;
-  if(spec.tough !== undefined) tough = spec.tough;
-  else if(spec.k === K_LIQUID || spec.k === K_GAS) tough = 0;
-  else if(spec.k === K_POWDER) tough = 1000 + (1 - SM_SLIP[id])*7000;
-  else tough = 60000 + SM_D[id]*120;   // a solid takes real work
-  SM_INTEG[id] = spec.integ !== undefined ? spec.integ : tough*vol;
   return id;
 }
 
@@ -5684,16 +5622,6 @@ function voxMatAt(bi, k){
    record until something breaks it — NEXT.md rule 1, and it is why a dungeon
    of 7,776 blocks costs 7,776 cubes and not 31 million cells of bookkeeping. */
 const VOXD = new Set();
-/* WHICH OPENED BLOCKS ARE ACTUALLY HOLLOW. The block renderer hands a voxelised
-   block to the sand layer and draws no cube for it - which is right once the
-   block has been opened up, and WRONG while it is still nearly solid, because
-   the sand layer has budgets and a block it cannot afford is then drawn by
-   nobody at all. That is the invisible wall: "blocks of different material are
-   not actually being destroyed, they just turn invisible (I can't cross or fall
-   through them)."
-   So only a block that is genuinely OPEN is left to the beads. Everything else
-   keeps its cube until it has lost enough of itself to look opened. */
-const VOXHOLLOW = new Set();
 const SAND_DRAW_R = BLOCK*11;              // chunks past this are not drawn
 /* ==========================================================================
    AND YOU CAN SEE THE RUNGS
@@ -6529,7 +6457,7 @@ function sandBuild(){
     for(let c=0;c<SAND.nc;c++) SAND.reset(c);
     SAND.tick=0; SAND.stats.moves=0; SAND.stats.rx=0;
   }
-  VOXD.clear(); VOXHOLLOW.clear();
+  VOXD.clear();
   ladInit();
   for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++)
     if(G.st[idx(x,y,z)]===AIR) sandFill(x,y,z, S_AIR, false);
@@ -6621,7 +6549,7 @@ function voxCarve(bi, fx0,fy0,fz0, dx,dy,dz, budgetJ, thrower, wide){
      wall you just shot through - is never told that the wall has a hole in it,
      and the sea sits there politely. Reaching one cell out names the
      neighbouring blocks, they come back down to beads, and the water comes in. */
-  if(out){ w.wakeShell(ox-1,oy-1,oz-1, ox+S, oy+S, oz+S); blockCollapse(bi); }
+  if(out) w.wakeShell(ox-1,oy-1,oz-1, ox+S, oy+S, oz+S);
   G.dirty = true;
   return out;
 }
@@ -6629,7 +6557,7 @@ function voxCarve(bi, fx0,fy0,fz0, dx,dy,dz, budgetJ, thrower, wide){
    standing on them finds that out. */
 function sandDig(bx,by,bz){
   if(!SAND) return;
-  VOXD.delete(idx(bx,by,bz)); VOXHOLLOW.delete(idx(bx,by,bz));
+  VOXD.delete(idx(bx,by,bz));
   sandFill(bx,by,bz, S_AIR, true);
 }
 /* And a block came out violently: a sample of what it was made of is thrown
@@ -6674,40 +6602,10 @@ function sandBurst(bx,by,bz, dirx,diry,dirz, count){
 const BLAST_FULL = 0.70/CELL_M;            // a body width, in cells
 const BLAST_HALF = 2.10/CELL_M;            // three of them
 const BLAST_V    = 17.0;                   // m/s at the centre
-/* THE IMPULSE THE SHOT DELIVERS TO ONE BEAD at the centre of the blast, in
-   kg m/s. Twenty-four grams of shot leaving at four hundred metres a second is
-   about 9.6 kg m/s of momentum in the whole charge - but the charge is 24 g of
-   TNT rather than 24 g of lead, and a hundred kilojoules going off against a
-   wall delivers a great deal more than the shot's own momentum. Eighty is the
-   number that makes the two outcomes both HAPPEN, which is the only test that
-   matters here:
-
-       sand   10.5 kg a bead   ->  7.6 m/s,  305 J  vs      7 J   BREAKS
-       rock   17.8 kg a bead   ->  4.5 m/s,  180 J  vs    920 J   SURVIVES,
-                                                                  and is thrown
-
-   which is his sentence exactly: if the gun surpasses the bead's integrity it
-   breaks, and if it does not the bead is PROPELLED. A dense bead takes the
-   same impulse, leaves slower, and hits what is behind it harder. */
-const BLAST_P    = 80.0;
 const BLAST_MAX  = 420;                    // beads a shot may throw
-/* ROOM FOR EVERY BEAD INSIDE THE BIGGEST BLAST, and the number has to be the
-   real one. Forty thousand was sized when a bead was 0.175 m and the widest
-   blast was three blocks of 2.8 m; a bead is 0.1875 m now and a breaching shot
-   opens to scale 2.2, which is a sphere of radius 25 cells and about SIXTY-FIVE
-   THOUSAND of them.
-
-   And overflowing it is not a graceful degradation - the gather stops dead, IN
-   SCAN ORDER, so the far half of the sphere is never even considered. Measured:
-   six point-blank blasts into a block of leaf, integrity 8 J, took out 27% of
-   it and left the rest standing and invisible. It is the same fault the
-   comment below the gather warns about, one stage earlier than it was looking.
-
-   A radius-30 sphere is 113,000 cells; this holds them. */
-const BLAST_CAND = new Int32Array(120000);
-/* which BLOCKS the blast ate into, so each can be asked afterwards whether it
-   is still a block at all */
-const BLAST_BLOCKS = new Set();
+/* Room for every bead inside the biggest blast radius, packed one to an int:
+   a 3-block sphere is under 30,000 cells and a cell fits in ten bits. */
+const BLAST_CAND = new Int32Array(40000);
 
 /* The first loose cell along a ray, or null. Half a cell a step, so a bead
    cannot be passed through. */
@@ -6728,54 +6626,6 @@ function sandRayHit(ox,oy,oz, dx,dy,dz, maxT){
 /* Beads within reach are lifted out of the grid and thrown. Past the budget
    they are only WOKEN, because how much can be in the air is the picture's
    business and how much exists is not — NEXT.md rule 3. */
-/* WHEN A BLOCK HAS BEEN EATEN, IT HAS TO STOP BEING A BLOCK.
-
-   Marcelo: "blocks of different material are not actually being destroyed,
-   they just turn invisible (I can't cross or fall through them)."
-
-   Exactly, and it is two systems disagreeing about the same block. The block
-   renderer SKIPS a voxelised block within the draw radius, because the sand
-   layer is drawing its beads instead - so once the beads are gone there is
-   nothing left to see. But G.st still says SOLID, so the collision still holds
-   you out. An invisible wall.
-
-   It has to be the same fact in both places. When most of a block's cells have
-   become air, the block IS gone: it leaves the block world, it stops being
-   scenery, it stops being voxelised, and what remains of its beads stays where
-   it is. Two fifths is the same threshold the breach already used, and it was
-   right there - it only ever ran for the shot that opens a wall, never for the
-   blast that eats one. */
-function blockCollapse(bi){
-  const w = SAND; if(!w || !VOXD.has(bi)) return false;
-  if(G.st[bi] === AIR) return false;
-  const [bx,by,bz] = cellXYZ(bi);
-  let air = 0;
-  for(let ay=0;ay<LAT_DIV;ay++) for(let az=0;az<LAT_DIV;az++) for(let ax=0;ax<LAT_DIV;ax++){
-    const bulk = cBlockBulk(w, bx*LAT_DIV+ax, by*LAT_DIV+ay, bz*LAT_DIV+az);
-    if(bulk >= 0){ if(bulk === S_AIR) air += PGC; continue; }
-    const pg = cBlockPage(w, bx*LAT_DIV+ax, by*LAT_DIV+ay, bz*LAT_DIV+az);
-    for(let k=0;k<PGC;k++) if(pg[k]===S_AIR) air++;
-  }
-  const tot = PGC*LAT_DIV*LAT_DIV*LAT_DIV;
-  /* A QUARTER GONE AND IT READS AS OPENED, so the beads take over the drawing
-     and the cube stops being painted over them. Below that it is a block with a
-     dent in it and it keeps its cube - which is what stops an invisible wall. */
-  if(air > tot*0.25) VOXHOLLOW.add(bi); else VOXHOLLOW.delete(bi);
-  if(air <= tot*0.60) return false;
-  /* it is gone: the world stops claiming it, and what is left of its beads
-     stays exactly where it is */
-  G.st[bi] = AIR;
-  if(G.scenery) G.scenery[bi] = 0;
-  if(G.hull && G.hull[bi]) G.hull[bi] = 0;
-  VOXD.delete(bi); VOXHOLLOW.delete(bi);
-  const S = SAND_DIV;
-  w.wakeShell(bx*S-1, by*S-1, bz*S-1, (bx+1)*S, (by+1)*S, (bz+1)*S);
-  G.dirty = true;
-  logEvent('block collapsed at ' + bx + ',' + by + ',' + bz + ' - ' +
-           (air*100/tot).toFixed(0) + '% air');
-  return true;
-}
-
 function sandBlast(wx,wy,wz, dx,dy,dz, scale){
   const w=SAND; if(!w) return 0;
   const rF=BLAST_FULL*(scale||1), rH=BLAST_HALF*(scale||1);
@@ -6792,17 +6642,7 @@ function sandBlast(wx,wy,wz, dx,dy,dz, scale){
   for(let z=cz-R;z<=cz+R;z++) for(let y=cy-R;y<=cy+R;y++) for(let x=cx-R;x<=cx+R;x++){
     if(!w.inBox(x,y,z)) continue;
     const m=cGet(w,x,y,z);
-    /* STATIC MEANS IT DOES NOT FLOW, NOT THAT IT CANNOT BE BROKEN, and reading
-       it the second way made every solid material INVULNERABLE to a shot: wood,
-       leaf, glass and stone were skipped before the blast ever looked at them.
-       Measured, six point-blank blasts into a block of leaf took out 27% of it
-       - every cell that was not leaf - and left ten thousand leaves standing.
-       Invisible, because the sand layer had nothing to draw for the rest, and
-       solid, because G.st still said so.
-       Integrity is what decides now, which is the whole point of having it.
-       S_ROCK stays out: it is the world's own bedrock and the block raycast
-       owns it. */
-    if(m===S_AIR || m===S_ROCK) continue;
+    if(m===S_AIR || m===S_ROCK || SM_K[m]===K_STATIC) continue;
     const ex=x-cx, ey=y-cy, ez=z-cz;
     const d=Math.sqrt(ex*ex+ey*ey+ez*ez);
     if(d>rH) continue;
@@ -6818,7 +6658,7 @@ function sandBlast(wx,wy,wz, dx,dy,dz, scale){
     const b = a + ((rnd()*(nc-a))|0);
     const tmp=BLAST_CAND[a]; BLAST_CAND[a]=BLAST_CAND[b]; BLAST_CAND[b]=tmp;
   }
-  let thrown=0, woken=0, razed=0, shoved=0;
+  let thrown=0, woken=0, razed=0;
   for(let c=0;c<nc;c++){
     const v=BLAST_CAND[c], ex=(v&1023)-512, ey=((v>>10)&1023)-512, ez=((v>>20)&1023)-512;
     const x=cx+ex, y=cy+ey, z=cz+ez, m=cGet(w,x,y,z);
@@ -6847,87 +6687,20 @@ function sandBlast(wx,wy,wz, dx,dy,dz, scale){
       if(d <= rF){ cSet(w,x,y,z,S_AIR); razed++; }
       w.touch(x,y,z); woken++; continue;
     }
-    /* THE LAW, AND THE ONE TEST IN IT. An impulse arrives, falling off with
-       distance; the bead's own mass turns it into a speed and an energy; and
-       its INTEGRITY decides which of the two things happens.
-
-           e >= integrity   the bead BREAKS, and what is left of the impulse
-                            throws the debris
-           e <  integrity   the bead SURVIVES AND IS PROPELLED, leaving at
-                            v = p/m, still itself
-
-       Nothing here knows it is a shotgun. The same three lines are what a
-       rocket needs - mass thrown one way, the vehicle the other - which is why
-       they are not written inside shoot(). */
+    /* radial where there is a radius, along the shot where there is not */
     let ux,uy,uz;
     if(d>0.001){ ux=ex/d; uy=ey/d; uz=ez/d; } else { ux=dx; uy=dy; uz=dz; }
     const b=0.55;
     let px=ux+dx*b, py=uy+dy*b, pz=uz+dz*b;
     const pl=Math.hypot(px,py,pz)||1;
-    px/=pl; py/=pl; pz/=pl;
-
-    const imp  = BLAST_P * k;                     // kg m/s into this bead
-    const mass = SM_MASS[m] || 1e-4;
-    const vel  = imp / mass;                      // p = mv, and this is the v
-    const e    = 0.5 * imp * vel;                 // the energy it arrived with
-
-    if(e < SM_INTEG[m]){
-      /* IT HELD. Still that material, still one bead, and now moving - which is
-         the whole of what he asked for. A dense bead takes the same impulse and
-         leaves slowly; a light one is flung. */
-      if(c < take){
-        cSet(w,x,y,z,S_AIR); w.touch(x,y,z);
-        const sv = Math.min(vel, 90);
-        gritAdd((x+0.5)*CELL_M,(y+0.5)*CELL_M,(z+0.5)*CELL_M,
-                px*sv, py*sv + sv*0.15, pz*sv, m);
-        thrown++;
-      } else {
-        /* PAST THE DRAWING BUDGET IT IS STILL PROPELLED, and leaving it where it
-           was is how "propelled" came to mean "nothing happened" for most of a
-           wall. Measured: 8,813 beads caught by one blast, 420 thrown, and
-           EIGHT THOUSAND THREE HUNDRED AND FIFTY simply woken and left standing
-           - so a block of leaf survived six point-blank shots, went invisible
-           because the sand layer had nothing left to draw, and stayed solid
-           because G.st still said so.
-
-           So it MOVES IN THE GRID instead of flying through the air: one cell
-           along the push, if there is room. No instance, no ballistic step, no
-           share of the batch - just the material being somewhere else, which is
-           what being pushed means. */
-        const sx2 = x + (px>0.35?1:px<-0.35?-1:0);
-        const sy2 = y + (py>0.35?1:py<-0.35?-1:0);
-        const sz2 = z + (pz>0.35?1:pz<-0.35?-1:0);
-        if((sx2!==x||sy2!==y||sz2!==z) && w.inBox(sx2,sy2,sz2) &&
-           cGet(w,sx2,sy2,sz2)===S_AIR){
-          cSet(w,x,y,z,S_AIR); cSet(w,sx2,sy2,sz2,m);
-          w.touch(x,y,z); w.touch(sx2,sy2,sz2);
-          shoved++;
-        } else { w.touch(x,y,z); woken++; }
-      }
-      continue;
-    }
-
-    /* IT BROKE. The cell goes whatever happens - removing it is one byte and is
-       free - and a SAMPLE of the debris flies, because how much can be in the
-       air at once is the picture's business and how much exists is not. */
-    cSet(w,x,y,z,S_AIR); w.touch(x,y,z); razed++;
-    BLAST_BLOCKS.add(((y/SAND_DIV|0)*G.nz + (z/SAND_DIV|0))*G.nx + (x/SAND_DIV|0));
-    if(c < take){
-      const sp = Math.min(vel*0.45, 60) * (0.6+rnd()*0.7);
-      gritAdd((x+0.5)*CELL_M,(y+0.5)*CELL_M,(z+0.5)*CELL_M,
-              px*sp, py*sp + sp*0.25, pz*sp, m);
-      thrown++;
-    } else woken++;
+    const sp=BLAST_V*k*(0.6+rnd()*0.7);
+    cSet(w,x,y,z,S_AIR); w.touch(x,y,z);
+    gritAdd((x+0.5)*CELL_M,(y+0.5)*CELL_M,(z+0.5)*CELL_M,
+            px/pl*sp, py/pl*sp + sp*0.25, pz/pl*sp, m);
+    thrown++;
   }
-  /* AND ANY BLOCK THE BLAST HOLLOWED OUT STOPS BEING A BLOCK. Without this a
-     shot leaves an invisible wall: nothing drawn, and still solid. */
-  if(razed||shoved){
-    let gone = 0;
-    for(const bi of BLAST_BLOCKS) if(blockCollapse(bi)) gone++;
-    logEvent('blast: '+nc+' caught, '+razed+' broke, '+shoved+' shoved, '+thrown+' thrown, '+woken+' left, '+gone+' collapsed');
-  }
-  BLAST_BLOCKS.clear();
-  if(thrown||woken||razed||shoved) G.dirty=true;
+  if(thrown||woken||razed) G.dirty=true;
+  if(razed) logEvent('blast razed '+razed+' cells, threw '+thrown);
   return thrown;
 }
 
@@ -6976,7 +6749,6 @@ function gritLand(i){
     cy += up;
   }
 }
-let GRIT_HITS = 0;   // beads that struck a bead and handed on their momentum
 function gritStep(dt){
   const w=SAND, g=gnow();
   let live=0;
@@ -6984,18 +6756,7 @@ function gritStep(dt){
     if(!GRIT.live[i]) continue;
     live++;
     GRIT.vy[i] -= g*dt;
-    /* IT WALKS THE CELLS IT CROSSES. A bead at forty metres a second covers
-       three and a half beads in a frame, so stepping a whole frame at a time
-       TUNNELS THROUGH nearly everything it should be hitting - measured, ONE
-       collision going through a wall sixteen beads thick. The chain is the
-       whole point of momentum being a law, and a chain cannot skip links.
-       Eight substeps is a ceiling and not a target: a slow bead takes one. */
-    const gsp0 = Math.hypot(GRIT.vx[i], GRIT.vy[i], GRIT.vz[i]);
-    const nsub = Math.max(1, Math.min(8, Math.ceil(gsp0*dt/(CELL_M*0.9))));
-    const sdt  = dt/nsub;
-    let gdone = 0;
-    for(let sN=0; sN<nsub && !gdone; sN++){
-    const nx=GRIT.x[i]+GRIT.vx[i]*sdt, ny=GRIT.y[i]+GRIT.vy[i]*sdt, nz=GRIT.z[i]+GRIT.vz[i]*sdt;
+    const nx=GRIT.x[i]+GRIT.vx[i]*dt, ny=GRIT.y[i]+GRIT.vy[i]*dt, nz=GRIT.z[i]+GRIT.vz[i]*dt;
     const cx=sandCell(nx), cy=sandCell(ny), cz=sandCell(nz);
     /* The grid answers "is this solid" in one array read, which is the whole
        reason the flight can be this cheap: no ray, no block lookup, no Set. */
@@ -7003,52 +6764,7 @@ function gritStep(dt){
       GRIT.x[i]=nx; GRIT.y[i]=ny; GRIT.z[i]=nz;
       continue;
     }
-    /* AND THIS IS WHERE MOMENTUM BECOMES A LAW RATHER THAN A GUN.
-       Marcelo: "a propelled bead must be able to break or propel what IT hits."
-       A bead in flight arriving at an occupied cell is the same collision the
-       blast was - an impulse, a mass and an integrity - only the impulse is the
-       one this bead is carrying rather than one the powder gave it.
-
-       INELASTIC, which is his word and also the honest one at this scale: two
-       lumps of rock do not bounce, they share their momentum and the loser
-       comes apart. The mover's p goes into the target; if that is more than the
-       target can take the target BREAKS and the mover flies on with what is
-       left; if not, the target is PROPELLED and the mover stops in its place.
-
-       The chain is the point. A pellet through a wall of sand throws sand
-       forward, that sand throws what is behind it, and it dies out where the
-       arithmetic says rather than where a counter does. */
-    if(w && w.inBox(cx,cy,cz)){
-      const tgt = cGet(w,cx,cy,cz);
-      if(tgt !== S_AIR && tgt !== S_ROCK && SM_K[tgt] !== K_STATIC){
-        const vx=GRIT.vx[i], vy=GRIT.vy[i], vz=GRIT.vz[i];
-        const sp = Math.hypot(vx,vy,vz);
-        const imp = (SM_MASS[GRIT.m[i]] || 1e-4) * sp;   // what it is carrying
-        const tm  = SM_MASS[tgt] || 1e-4;
-        const tv  = imp / tm;                            // what that is, over there
-        const e   = 0.5 * imp * tv;
-        if(sp > 0.5 && e >= SM_INTEG[tgt]){
-          cSet(w,cx,cy,cz,S_AIR); w.touch(cx,cy,cz);
-          const keep = Math.max(0, 1 - SM_INTEG[tgt]/Math.max(e,1e-6));
-          if(sp*keep > 1.0 && GRIT.n < GRIT_MAX)
-            gritAdd((cx+0.5)*CELL_M,(cy+0.5)*CELL_M,(cz+0.5)*CELL_M,
-                    vx/sp*tv*0.4, vy/sp*tv*0.4, vz/sp*tv*0.4, tgt);
-          GRIT.vx[i]=vx*keep*0.75; GRIT.vy[i]=vy*keep*0.75; GRIT.vz[i]=vz*keep*0.75;
-          GRIT.x[i]=nx; GRIT.y[i]=ny; GRIT.z[i]=nz;
-          GRIT_HITS++;
-          continue;
-        }
-        if(sp > 2.0 && tv > 1.0 && GRIT.n < GRIT_MAX){
-          /* it held, so it is PROPELLED, and the mover stops where it struck */
-          cSet(w,cx,cy,cz,S_AIR); w.touch(cx,cy,cz);
-          gritAdd((cx+0.5)*CELL_M,(cy+0.5)*CELL_M,(cz+0.5)*CELL_M,
-                  vx/sp*tv, vy/sp*tv, vz/sp*tv, tgt);
-          GRIT_HITS++;
-        }
-      }
-    }
-    gritLand(i); live--; gdone = 1;
-    }
+    gritLand(i); live--;
   }
   GRIT.moving = live;
 }
@@ -7324,7 +7040,7 @@ function rebuildWorld(){
        only while it is near enough for the sand layer to actually be drawing
        it - past SAND_DRAW_R the block reverts to one cube, which looks worse
        at forty metres and never leaves a hole in the world. */
-    if(VOXD.has(i) && VOXHOLLOW.has(i)){
+    if(VOXD.has(i)){
       const dx0=(x+0.5)*BLOCK-P.x, dy0=(y+0.5)*BLOCK-P.y, dz0=(z+0.5)*BLOCK-P.z;
       if(dx0*dx0+dy0*dy0+dz0*dz0 < SAND_DRAW_R*SAND_DRAW_R) continue;
     }
@@ -13675,87 +13391,36 @@ setScreen('menu');
 requestAnimationFrame(frame);
 
 window.requestAnimationFrame = function(){ return 0; };
-/* IS THERE A DUNGEON IN THERE AT ALL?
+/* IS THERE A PLANET NOW?
 
-   Marcelo: "proceed to build world and functioning dungeon (it is being
-   generated with 1 or 4 mines sometimes)."
-
-   One mine is not a minesweeper. The cause is not the generator - it lays out a
-   whole board - it is buildOuterWorld cropping that board to a cylinder whose
-   INTERIOR is what is left after a three-block shell, and on an 18-wide grid
-   that is a tube about seven blocks across. So this counts what actually
-   survives, over several seeds, and says whether it is a game.
-
-   Everything is prefixed du: the game already declares mark, set, landY, idx
-   and a duplicate const is a SyntaxError that runs nothing at all. */
+   The sea was a colour below a line, so from five hundred metres up the world
+   was a square of blocks on a flat wash and nothing ever got smaller. It is a
+   sphere of 600 km now and the ray is intersected with it, so this asks the
+   two questions that follow: does the shader still COMPILE, and does the
+   horizon move when you climb? Prefixed pl. */
 window.__err=[];
 window.addEventListener('error',e=>window.__err.push('ERR '+e.message));
-document.body.dataset.r='STAGE start';
 setTimeout(()=>{ try{
   G.muted=true; try{ snd.setMute(true); }catch(e){}
   const R=[];
-  let duMinT=1e9, duMaxT=0, duMinS=1e9, duBad=0, duCut=0;
-
-  for(const duSeed of [3,7,11,19,23,31]){
-    document.body.dataset.r='STAGE seed '+duSeed;
-    G.mode=MODE_DUNGEON; seed=duSeed; genWorld(0); G.state='play';
-
-    /* ONLY WHAT IS INSIDE THE SHELL IS THE DUNGEON. G.lump is the playable
-       volume the shell encloses; everything outside it is seamount, beach and
-       sea, and counting those was the first thing that made this look fine. */
-    const L=G.lump, duIn=(x,y,z)=>L && y>=L.y0 && y<=L.y1 &&
-      Math.hypot(x-L.cx, z-L.cz) <= L.r;
-    let duMines=0, duSafe=0;
-    const duOpen = new Set();
-    for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
-      if(!duIn(x,y,z)) continue;
-      const i=idx(x,y,z);
-      if(G.hull && G.hull[i]) continue;
-      if(G.mine[i]) duMines++;
-      else if(G.st[i]!==AIR) duSafe++;
-      else duOpen.add(i);
-    }
-    /* CAN YOU GET ANYWHERE FROM WHERE YOU STAND. Flood the open blocks from the
-       player's own block and compare with how many open blocks there are: a
-       dungeon you cannot walk around is not a dungeon however many mines it
-       has. Only the blocks BELOW the beach count - above it is sky and sea. */
-    const duPx=Math.floor(P.x/BLOCK), duPy=Math.floor(P.y/BLOCK), duPz=Math.floor(P.z/BLOCK);
-    let duReach=0;
-    {
-      const st=[idx(duPx,duPy,duPz)], seen=new Set(st);
-      if(!duOpen.has(st[0])) st.length=0;
-      while(st.length){
-        const c=cellXYZ(st.pop()); duReach++;
-        for(let k=0;k<6;k++){
-          const ax=c[0]+NB26X[k], ay=c[1]+NB26Y[k], az=c[2]+NB26Z[k];
-          if(!inside(ax,ay,az)) continue;
-          const j=idx(ax,ay,az);
-          if(!duOpen.has(j) || seen.has(j)) continue;
-          seen.add(j); st.push(j);
-        }
-      }
-    }
-    const duCon = duOpen.size ? duReach/duOpen.size : 0;
-    if(duMines < 20) duBad++;
-    if(duCon < 0.999) duCut++;
-    if(duMines<duMinT) duMinT=duMines;
-    if(duMines>duMaxT) duMaxT=duMines;
-    if(duSafe<duMinS) duMinS=duSafe;
-    R.push(`seed ${duSeed}: grid ${G.nx}x${G.ny}x${G.nz}, ${duMines} mines, ${duSafe} safe, ` +
-           `${duOpen.size} open blocks, you reach ${duReach} (${(duCon*100).toFixed(0)}%), ` +
-           `${G.pockets} pockets, spawn ${duPx},${duPy},${duPz}` +
-           (duMines<20 ? '  <- NOT A GAME' : ''));
+  R.push('sky program links: ' + (pSky ? 'yes' : 'NO') +
+         ' | uR ' + (uS.R ? 'bound' : 'NOT BOUND') +
+         ' | uH ' + (uS.H ? 'bound' : 'NOT BOUND'));
+  R.push('planet radius ' + (PLANET_R/1000) + ' km');
+  /* the horizon distance is sqrt(2*R*h), and it is the number that says
+     whether climbing means anything */
+  for(const h of [2, 50, 500, 5000, 45000]){
+    const d = Math.sqrt(2*PLANET_R*h);
+    R.push('  eye ' + h + ' m up: horizon ' + (d/1000).toFixed(1) + ' km, ' +
+           'the planet fills ' + (Math.asin(PLANET_R/(PLANET_R+h))*2*180/Math.PI).toFixed(1) + ' degrees');
   }
-  R.push(`ACROSS 6 SEEDS: ${duMinT} to ${duMaxT} mines, fewest safe blocks ${duMinS}, ` +
-         `${duBad} of 6 under twenty mines ` +
-         (duBad===0 ? 'ok, every one of them is a minesweeper' : 'FAULT: it is not a game'));
-  R.push(`connectivity: ${duCut} of 6 seeds have somewhere you cannot walk to ` +
-         (duCut===0 ? 'ok, one connected dungeon every time' : 'FAULT'));
-  R.push(`the grid costs ${SAND ? (SAND.bytes()/1048576).toFixed(2) : '?'} MB of beads`);
-  R.push(window.__err.length ? ('FAULT '+window.__err.join(' | ')) : 'no errors');
+  G.mode=MODE_DUNGEON; seed=5; genWorld(0); G.state='play';
+  G.noWin=true; G.gravK=-1; rollReset(); revealIsland(); G.island=true;
+  G.state='pause'; G.dirty=true; rebuildWorld();
+  R.push('world built, sea at y ' + G.seaY + ', a run of frames follows');
+  R.push(window.__err.length ? ('FAULT ' + window.__err.join(' | ')) : 'no errors, and the shader drew');
   document.body.dataset.r=R.join(' ~ ');
-}catch(err){ document.body.dataset.r='THREW at '+(document.body.dataset.r||'?')+
-  ': '+err.message+' @ '+((err.stack||'').split('\n')[1]||''); }}, 300);
+}catch(err){ document.body.dataset.r='THREW: '+err.message; }}, 400);
 
 })();
 </script>

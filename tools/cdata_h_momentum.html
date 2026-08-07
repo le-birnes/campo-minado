@@ -5684,16 +5684,6 @@ function voxMatAt(bi, k){
    record until something breaks it — NEXT.md rule 1, and it is why a dungeon
    of 7,776 blocks costs 7,776 cubes and not 31 million cells of bookkeeping. */
 const VOXD = new Set();
-/* WHICH OPENED BLOCKS ARE ACTUALLY HOLLOW. The block renderer hands a voxelised
-   block to the sand layer and draws no cube for it - which is right once the
-   block has been opened up, and WRONG while it is still nearly solid, because
-   the sand layer has budgets and a block it cannot afford is then drawn by
-   nobody at all. That is the invisible wall: "blocks of different material are
-   not actually being destroyed, they just turn invisible (I can't cross or fall
-   through them)."
-   So only a block that is genuinely OPEN is left to the beads. Everything else
-   keeps its cube until it has lost enough of itself to look opened. */
-const VOXHOLLOW = new Set();
 const SAND_DRAW_R = BLOCK*11;              // chunks past this are not drawn
 /* ==========================================================================
    AND YOU CAN SEE THE RUNGS
@@ -6529,7 +6519,7 @@ function sandBuild(){
     for(let c=0;c<SAND.nc;c++) SAND.reset(c);
     SAND.tick=0; SAND.stats.moves=0; SAND.stats.rx=0;
   }
-  VOXD.clear(); VOXHOLLOW.clear();
+  VOXD.clear();
   ladInit();
   for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++)
     if(G.st[idx(x,y,z)]===AIR) sandFill(x,y,z, S_AIR, false);
@@ -6621,7 +6611,7 @@ function voxCarve(bi, fx0,fy0,fz0, dx,dy,dz, budgetJ, thrower, wide){
      wall you just shot through - is never told that the wall has a hole in it,
      and the sea sits there politely. Reaching one cell out names the
      neighbouring blocks, they come back down to beads, and the water comes in. */
-  if(out){ w.wakeShell(ox-1,oy-1,oz-1, ox+S, oy+S, oz+S); blockCollapse(bi); }
+  if(out) w.wakeShell(ox-1,oy-1,oz-1, ox+S, oy+S, oz+S);
   G.dirty = true;
   return out;
 }
@@ -6629,7 +6619,7 @@ function voxCarve(bi, fx0,fy0,fz0, dx,dy,dz, budgetJ, thrower, wide){
    standing on them finds that out. */
 function sandDig(bx,by,bz){
   if(!SAND) return;
-  VOXD.delete(idx(bx,by,bz)); VOXHOLLOW.delete(idx(bx,by,bz));
+  VOXD.delete(idx(bx,by,bz));
   sandFill(bx,by,bz, S_AIR, true);
 }
 /* And a block came out violently: a sample of what it was made of is thrown
@@ -6757,17 +6747,13 @@ function blockCollapse(bi){
     for(let k=0;k<PGC;k++) if(pg[k]===S_AIR) air++;
   }
   const tot = PGC*LAT_DIV*LAT_DIV*LAT_DIV;
-  /* A QUARTER GONE AND IT READS AS OPENED, so the beads take over the drawing
-     and the cube stops being painted over them. Below that it is a block with a
-     dent in it and it keeps its cube - which is what stops an invisible wall. */
-  if(air > tot*0.25) VOXHOLLOW.add(bi); else VOXHOLLOW.delete(bi);
   if(air <= tot*0.60) return false;
   /* it is gone: the world stops claiming it, and what is left of its beads
      stays exactly where it is */
   G.st[bi] = AIR;
   if(G.scenery) G.scenery[bi] = 0;
   if(G.hull && G.hull[bi]) G.hull[bi] = 0;
-  VOXD.delete(bi); VOXHOLLOW.delete(bi);
+  VOXD.delete(bi);
   const S = SAND_DIV;
   w.wakeShell(bx*S-1, by*S-1, bz*S-1, (bx+1)*S, (by+1)*S, (bz+1)*S);
   G.dirty = true;
@@ -7324,7 +7310,7 @@ function rebuildWorld(){
        only while it is near enough for the sand layer to actually be drawing
        it - past SAND_DRAW_R the block reverts to one cube, which looks worse
        at forty metres and never leaves a hole in the world. */
-    if(VOXD.has(i) && VOXHOLLOW.has(i)){
+    if(VOXD.has(i)){
       const dx0=(x+0.5)*BLOCK-P.x, dy0=(y+0.5)*BLOCK-P.y, dz0=(z+0.5)*BLOCK-P.z;
       if(dx0*dx0+dy0*dy0+dz0*dz0 < SAND_DRAW_R*SAND_DRAW_R) continue;
     }
@@ -13675,83 +13661,143 @@ setScreen('menu');
 requestAnimationFrame(frame);
 
 window.requestAnimationFrame = function(){ return 0; };
-/* IS THERE A DUNGEON IN THERE AT ALL?
+/* MOMENTUM IS A LAW, AND THIS IS WHAT THAT HAS TO MEAN.
 
-   Marcelo: "proceed to build world and functioning dungeon (it is being
-   generated with 1 or 4 mines sometimes)."
+   Marcelo, twice: "shooting a bead should make it fly forward very fast, LIKE
+   A ROCK PELLET SHOT BY A REAL GUN would, IF NOT DESTROYED. If gun surpasses
+   bead integrity, then cool, but if not, item should be PROPELLED (inelastic
+   collision, those rules should apply as I intend to, later, build damn
+   rockets burning fuel and flying to the moon)."
 
-   One mine is not a minesweeper. The cause is not the generator - it lays out a
-   whole board - it is buildOuterWorld cropping that board to a cylinder whose
-   INTERIOR is what is left after a three-block shell, and on an 18-wide grid
-   that is a tube about seven blocks across. So this counts what actually
-   survives, over several seeds, and says whether it is a game.
+   So four questions, and none of them is "did it run":
 
-   Everything is prefixed du: the game already declares mark, set, landY, idx
-   and a duplicate const is a SyntaxError that runs nothing at all. */
+     1. does the SAME impulse do different things to different materials
+     2. does a bead that SURVIVES leave at v = p/m, still itself
+     3. does a bead in flight BREAK OR PROPEL what it hits - the chain
+     4. and is any of it written inside shoot()? It must not be.
+
+   Prefixed mo: the game already declares mark, set, idx and landY. */
 window.__err=[];
 window.addEventListener('error',e=>window.__err.push('ERR '+e.message));
 document.body.dataset.r='STAGE start';
 setTimeout(()=>{ try{
   G.muted=true; try{ snd.setMute(true); }catch(e){}
+  SIM_SPHERE = false;
   const R=[];
-  let duMinT=1e9, duMaxT=0, duMinS=1e9, duBad=0, duCut=0;
 
-  for(const duSeed of [3,7,11,19,23,31]){
-    document.body.dataset.r='STAGE seed '+duSeed;
-    G.mode=MODE_DUNGEON; seed=duSeed; genWorld(0); G.state='play';
-
-    /* ONLY WHAT IS INSIDE THE SHELL IS THE DUNGEON. G.lump is the playable
-       volume the shell encloses; everything outside it is seamount, beach and
-       sea, and counting those was the first thing that made this look fine. */
-    const L=G.lump, duIn=(x,y,z)=>L && y>=L.y0 && y<=L.y1 &&
-      Math.hypot(x-L.cx, z-L.cz) <= L.r;
-    let duMines=0, duSafe=0;
-    const duOpen = new Set();
-    for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
-      if(!duIn(x,y,z)) continue;
-      const i=idx(x,y,z);
-      if(G.hull && G.hull[i]) continue;
-      if(G.mine[i]) duMines++;
-      else if(G.st[i]!==AIR) duSafe++;
-      else duOpen.add(i);
-    }
-    /* CAN YOU GET ANYWHERE FROM WHERE YOU STAND. Flood the open blocks from the
-       player's own block and compare with how many open blocks there are: a
-       dungeon you cannot walk around is not a dungeon however many mines it
-       has. Only the blocks BELOW the beach count - above it is sky and sea. */
-    const duPx=Math.floor(P.x/BLOCK), duPy=Math.floor(P.y/BLOCK), duPz=Math.floor(P.z/BLOCK);
-    let duReach=0;
-    {
-      const st=[idx(duPx,duPy,duPz)], seen=new Set(st);
-      if(!duOpen.has(st[0])) st.length=0;
-      while(st.length){
-        const c=cellXYZ(st.pop()); duReach++;
-        for(let k=0;k<6;k++){
-          const ax=c[0]+NB26X[k], ay=c[1]+NB26Y[k], az=c[2]+NB26Z[k];
-          if(!inside(ax,ay,az)) continue;
-          const j=idx(ax,ay,az);
-          if(!duOpen.has(j) || seen.has(j)) continue;
-          seen.add(j); st.push(j);
-        }
-      }
-    }
-    const duCon = duOpen.size ? duReach/duOpen.size : 0;
-    if(duMines < 20) duBad++;
-    if(duCon < 0.999) duCut++;
-    if(duMines<duMinT) duMinT=duMines;
-    if(duMines>duMaxT) duMaxT=duMines;
-    if(duSafe<duMinS) duMinS=duSafe;
-    R.push(`seed ${duSeed}: grid ${G.nx}x${G.ny}x${G.nz}, ${duMines} mines, ${duSafe} safe, ` +
-           `${duOpen.size} open blocks, you reach ${duReach} (${(duCon*100).toFixed(0)}%), ` +
-           `${G.pockets} pockets, spawn ${duPx},${duPy},${duPz}` +
-           (duMines<20 ? '  <- NOT A GAME' : ''));
+  /* ---- 1. the table itself: one impulse, four materials ----------------- */
+  const moImp = BLAST_P;
+  /* AT THE CENTRE AND AT THE EDGE, because the falloff is half the rule: a
+     shot that shatters what it touches should still only SHOVE what it grazes,
+     and testing one radius would hide that entirely. */
+  const moRow = (m,k) => {
+    const imp = moImp*k, mass = SM_MASS[m], v = imp/mass, e = 0.5*imp*v;
+    return {n:SMAT[m].n, mass, v, e, integ:SM_INTEG[m], breaks: e >= SM_INTEG[m]};
+  };
+  const moMats = [S_SAND, S_RUBBLE, S_WATER, S_WOOD].filter(m=>m!==undefined);
+  R.push('ONE IMPULSE OF ' + moImp + ' kg m/s, four materials:');
+  let moB=0, moS=0;
+  for(const m of moMats){
+    const c = moRow(m,1), g = moRow(m,0.5);
+    if(c.breaks) moB++; else moS++;
+    if(g.breaks) moB++; else moS++;
+    R.push('  ' + c.n.padEnd(8) + (c.mass*1000).toFixed(0) + ' g, integrity ' +
+           c.integ.toFixed(0) + ' J | CENTRE ' + c.v.toFixed(1) + ' m/s ' +
+           c.e.toFixed(0) + ' J ' + (c.breaks?'BREAKS':'PROPELLED') +
+           ' | EDGE ' + g.v.toFixed(1) + ' m/s ' + g.e.toFixed(0) + ' J ' +
+           (g.breaks?'BREAKS':'PROPELLED'));
   }
-  R.push(`ACROSS 6 SEEDS: ${duMinT} to ${duMaxT} mines, fewest safe blocks ${duMinS}, ` +
-         `${duBad} of 6 under twenty mines ` +
-         (duBad===0 ? 'ok, every one of them is a minesweeper' : 'FAULT: it is not a game'));
-  R.push(`connectivity: ${duCut} of 6 seeds have somewhere you cannot walk to ` +
-         (duCut===0 ? 'ok, one connected dungeon every time' : 'FAULT'));
-  R.push(`the grid costs ${SAND ? (SAND.bytes()/1048576).toFixed(2) : '?'} MB of beads`);
+  R.push('  ' + moB + ' break, ' + moS + ' are propelled ' + (moB && moS
+    ? 'ok, the same shot does different things to different things'
+    : 'FAULT: everything does the same thing, so integrity decides nothing'));
+
+  /* ---- 2. and mass is not a tuned number ------------------------------- */
+  R.push('mass is density x bead volume: sand ' + SM_D[S_SAND] + ' kg/m3 x ' +
+         (CELL_M*CELL_M*CELL_M*1e6).toFixed(1) + ' cm3 = ' +
+         (SM_MASS[S_SAND]*1000).toFixed(2) + ' g ' +
+         (Math.abs(SM_MASS[S_SAND] - SM_D[S_SAND]*Math.pow(CELL_M,3)) < 1e-9
+          ? 'ok, it follows the bead size' : 'FAULT'));
+
+  /* ---- 3. THE CHAIN, in a tank, with nothing else in it ----------------- */
+  document.body.dataset.r='STAGE chain';
+  {
+    const moW = new SandWorld(96,96,96);
+    const moNB = 96/PGS;
+    for(let by=0;by<moNB;by++) for(let bz=0;bz<moNB;bz++) for(let bx=0;bx<moNB;bx++)
+      if(by>0) cFreeBlock(moW, bx,by,bz, S_AIR);
+    /* a wall of sand for something to be driven through */
+    let moWall=0;
+    for(let y=40;y<56;y++) for(let z=40;z<56;z++) for(let x=60;x<64;x++){ moW.put(x,y,z,S_SAND); moWall++; }
+    const moBefore = moW.count(S_SAND);
+    /* fire ONE bead of rubble into it at forty metres a second - no gun
+       anywhere, just a bead with momentum */
+    const moSave = SAND; SAND = moW;
+    GRIT.n=0; GRIT.next=0; GRIT.live.fill(0); GRIT_HITS=0;
+    gritAdd(48*CELL_M, 48*CELL_M, 48*CELL_M, 40, 0, 0, S_RUBBLE);
+    for(let t=0;t<120;t++){ gritStep(1/60); sandTick(moW,-1); }
+    const moAfter = moW.count(S_SAND);
+    SAND = moSave;
+    R.push('THE CHAIN: one bead of rubble at 40 m/s into a wall of ' + moWall +
+           ' sand beads -> ' + GRIT_HITS + ' collisions, ' +
+           (moBefore-moAfter) + ' of the wall displaced ' +
+           (GRIT_HITS > 0 ? 'ok, it hit things and passed its momentum on'
+                          : 'FAULT: it went through as if the wall were smoke'));
+  }
+
+  /* ---- 4. and the law is not inside the gun ---------------------------- */
+  {
+    const moSrc = sandBlast.toString() + gritStep.toString();
+    const moGun = /BLAST_P|SM_INTEG|SM_MASS/.test(moSrc);
+    const moShoot = /SM_INTEG|SM_MASS/.test(shoot.toString());
+    R.push('the law lives in the blast and the flight: ' + (moGun ? 'yes' : 'NO') +
+           ' | shoot() knows about integrity or mass: ' + (moShoot ? 'YES - IT IS A GUN FEATURE' : 'no') +
+           ' ' + (moGun && !moShoot ? 'ok, a rocket can use the same rule' : 'FAULT'));
+  }
+
+
+  /* ---- 5. AND A BLOCK THAT HAS BEEN EATEN STOPS BEING A BLOCK ----------- */
+  document.body.dataset.r='STAGE collapse';
+  {
+    G.mode=MODE_DUNGEON; seed=5; genWorld(0); G.state='play';
+    /* find a solid block with air beside it and stand in that air */
+    let moBi=-1, moAir=-1;
+    for(let y=1;y<G.ny-1 && moBi<0;y++) for(let z=1;z<G.nz-1 && moBi<0;z++)
+      for(let x=1;x<G.nx-1 && moBi<0;x++){
+        const a=idx(x,y,z), b=idx(x+1,y,z);
+        if(G.st[a]===AIR && G.st[b]!==AIR && !(G.hull&&G.hull[b])){ moAir=a; moBi=b; }
+      }
+    if(moBi<0) R.push('COLLAPSE: no block with air beside it - nothing to test');
+    else {
+      const c = cellXYZ(moBi);
+      const solidBefore = solidAtWorld((c[0]+0.5)*BLOCK,(c[1]+0.5)*BLOCK,(c[2]+0.5)*BLOCK);
+      voxelise(moBi);
+      /* blast it from its own middle, hard enough to hollow it out */
+      for(let k=0;k<6;k++)
+        sandBlast((c[0]+0.5)*BLOCK,(c[1]+0.5)*BLOCK,(c[2]+0.5)*BLOCK, 1,0,0, 2.2);
+      R.push('  what the blast itself reported: ' +
+             LOG.filter(l=>/blast razed/.test(l)).slice(-2).join(' / ') +
+             ' | candidates cap ' + BLAST_CAND.length + ', throw cap ' + BLAST_MAX);
+      /* how much of it actually went, and what it was made of - because
+         "it did not collapse" has two very different causes */
+      let moAirN=0, moKind={};
+      for(let ly=0;ly<SAND_DIV;ly++) for(let lz=0;lz<SAND_DIV;lz++) for(let lx=0;lx<SAND_DIV;lx++){
+        const m2 = SAND.at(c[0]*SAND_DIV+lx, c[1]*SAND_DIV+ly, c[2]*SAND_DIV+lz);
+        if(m2===S_AIR) moAirN++; else moKind[SMAT[m2].n]=(moKind[SMAT[m2].n]||0)+1;
+      }
+      R.push('  after six blasts the block is ' +
+             (moAirN*100/(SAND_DIV*SAND_DIV*SAND_DIV)).toFixed(0) + '% air; what is left: ' +
+             Object.keys(moKind).map(k=>k+' '+moKind[k]+' (integrity '+
+               SM_INTEG[SMAT.findIndex(mm=>mm&&mm.n===k)].toFixed(0)+' J)').join(', '));
+      const solidAfter = solidAtWorld((c[0]+0.5)*BLOCK,(c[1]+0.5)*BLOCK,(c[2]+0.5)*BLOCK);
+      const stAfter = G.st[moBi]===AIR;
+      R.push('COLLAPSE: block ' + c.join(',') +
+             ' solid before ' + solidBefore + ', after ' + solidAfter +
+             ', G.st says ' + (stAfter?'AIR':'still SOLID') + ' ' +
+             (solidBefore && !solidAfter && stAfter
+              ? 'ok, what you cannot see you can walk through'
+              : 'FAULT: it is invisible and still in your way'));
+    }
+  }
   R.push(window.__err.length ? ('FAULT '+window.__err.join(' | ')) : 'no errors');
   document.body.dataset.r=R.join(' ~ ');
 }catch(err){ document.body.dataset.r='THREW at '+(document.body.dataset.r||'?')+

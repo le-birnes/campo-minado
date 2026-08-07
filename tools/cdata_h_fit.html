@@ -5612,7 +5612,17 @@ const SAND_DRAW_R = BLOCK*11;              // chunks past this are not drawn
 const SAND_BEAD_R = 10.0;             // promoted material past this is a cube
 const LAD_MASS_R  = 42.0;              // and past this the whole body is one box
 const SAND_DRAW_MAX = 22000;               // instances the sand layer may spend
-const SAND_CHUNKS = 26;                    // chunks it may scan for them
+/* HOW MANY CHUNKS IT MAY SCAN, AND IT IS SIZED BY VOLUME RATHER THAN BY HABIT.
+   Twenty-six was chosen when a chunk was 32 cells of 0.175 m - 5.6 m across.
+   A chunk is 16 cells of 0.1875 m now, THREE METRES, so twenty-six of them
+   cover a sixth of the space they used to and the beads only ever appeared in
+   a small pocket round the player's feet. His log: bead_inst peaking at 887
+   against a budget of twenty-two thousand.
+
+   The same volume needs (5.6/3.0)^3 = 6.5 times as many, and it is CHEAPER
+   than it was, because the chunk shrank faster than the count grew: 26 chunks
+   of 32^3 was 851,968 cells to walk and 170 of 16^3 is 696,320. */
+const SAND_CHUNKS = 170;                   // chunks it may scan for them
 /* SIXTY, not thirty, and it is half of why falling was slow: a bead can only
    ever move on a tick, so the tick rate is the floor on how fast anything can
    be. The other half is the acceleration in sStepCell, and the two are tied -
