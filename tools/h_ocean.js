@@ -104,6 +104,26 @@ setTimeout(()=>{ try{
     R.push(surfaced>=0
            ? `surfaced after ${(surfaced/60).toFixed(1)} s of swimming ok, YOU CRAWLED OUT`
            : `FAULT: still at y ${Math.floor(P.y/BLOCK)} after 60 s - there is no way out`);
+    /* WHAT STOPPED YOU. "It did not work" is not a diagnosis: the two
+       candidates are a lid (the column above the hole is not open) and a
+       swimmer who cannot climb (it is open and you are not rising), and they
+       want opposite fixes. So say which. */
+    {
+      const px=Math.floor(P.x/BLOCK), pz=Math.floor(P.z/BLOCK);
+      let col='', firstShut=-1;
+      for(let y=Math.floor(P.y/BLOCK); y>=0; y--){
+        const shut = G.st[idx(px,y,pz)]!==AIR;
+        col += shut ? '#' : '.';
+        if(shut && firstShut<0) firstShut=y;
+      }
+      R.push(`  the column above you at ${px},${pz} (from y ${Math.floor(P.y/BLOCK)} up to 0): ${col}`);
+      R.push(`  the hole was blown at ${G.holeX},${G.holeZ}; you are at ${px},${pz}; ` +
+             `first solid block above you is y ${firstShut} ` +
+             (firstShut<0 ? 'so the way IS open and the swimmer cannot climb it'
+                          : 'so there is a LID and it is the world, not the swimming'));
+      R.push(`  vy ${P.vy.toFixed(2)} imm ${P.imm.toFixed(2)} immD ${P.immD.toFixed(0)} ` +
+             `sub ${P.sub.toFixed(2)} ground ${P.ground} load ${P.load.toFixed(2)}`);
+    }
     /* and the house is somewhere you can see from up here */
     let hw=0;
     for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){

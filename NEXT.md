@@ -133,6 +133,39 @@ drying out.
 
 > "World and physics have top priority, then cosmetics."
 
+### 0b-first. WHAT ACTUALLY STOPS THE EMERGENCE - measured 2026-08-07
+
+h_ocean has said "there is no way out" for as long as it has been asked, and I
+had been reading that as the swimming. It is not. The harness now prints the
+column and the body, and the answer is:
+
+    the column above you at 9,9 (from y 23 up to 0): ........................
+    the hole was blown at 9,9; you are at 9,9; first solid block above you is
+      y -1, so THE WAY IS OPEN and the swimmer cannot climb it
+    vy 0.00  imm 0.01  immD 2150  sub 0.00  ground true  load 0.00
+
+So: the passage is clear for its whole length, the player is standing on dry
+ground at the bottom of it, and there is NOTHING TO SWIM IN. imm is 0.01 and
+sub is 0.00 - the well over the dungeon is not flooded where the player is
+standing, which is the one thing the design said would carry them up.
+
+They rise five blocks on the 24 m/s impulse bossBlows gives them and fall
+straight back. Three candidates, all measurable, none of them the swim solver:
+
+  a. THE WELL IS NOT FLOODED at the bottom, so there is no water to rise
+     through. The sea flood-fill walks down the well from the island surface;
+     find out where it stops and why.
+  b. HOLDING THE JUMP KEY DOES NOT REPEAT - if the jump is an edge, then
+     IN.jumpHeld=true is one jump and the harness's "a player holding the key"
+     is not what a player holding the key does. Check which, and if it is an
+     edge, the harness is wrong and a real player would climb.
+  c. THE DIRECTION. Down is +Y after the boss and the sky is at small y, so
+     leaving means going UP AGAINST GRAVITY for sixteen blocks. If that is
+     right, the emergence needs the flooded well (a) or a current, and no
+     amount of kick will do it.
+
+Do (b) first: it is one grep and it decides whether the other two matter.
+
 ### 0b. SWIMMING - one solver, three consumers
 
 > "I can't swim down! When I enter water I should be able to swim DOWN (or up),
