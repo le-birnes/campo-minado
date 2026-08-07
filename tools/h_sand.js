@@ -117,7 +117,11 @@ setTimeout(()=>{ try{
     return w.count(want);
   }
   R.push(`RX water on fire -> steam: ${rxTest(S_FIRE,S_WATER,S_STEAM)} cells`);
-  R.push(`RX lava on sand -> glass: ${rxTest(S_LAVA,S_SAND,S_GLASS)} cells`);
+  /* AND THEN THE GLASS MELTS, which is why this counts both. Noita's table
+     brought srx(lava, glass -> molten glass) with it, so lava standing on sand
+     fuses it and then keeps going - counting only S_GLASS reported zero and the
+     chain was working perfectly. */
+  R.push(`RX lava on sand -> glass: ${rxTest(S_LAVA,S_SAND,S_GLASS)+rxTest(S_LAVA,S_SAND,S_MGLASS)} cells`);
   R.push(`RX water on sand -> wet sand: ${rxTest(S_WATER,S_SAND,S_WETSND)} cells`);
   R.push(`RX acid on rock -> air: ${rxTest(S_ACID,S_ROCK,S_AIR)>0?'eaten':'FAULT'}`);
 

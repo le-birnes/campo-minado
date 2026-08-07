@@ -4164,21 +4164,10 @@ const SM_HUM  = new Uint8Array(256);    // is it a vapour that returns to air?
    feedback is the whole reason to have the number - without it, humidity would
    be a counter nobody reads. */
 let HUMID = 0;
-const HUMID_PER   = 1/600;              // one bead of vapour, returning
-const HUMID_DECAY = 1/(60*400);         // and it disperses over about seven minutes
-/* A LONE BEAD LASTS ABOUT FOURTEEN SECONDS, and that is measured rather than
-   chosen: a bead lying on rock has seventeen of its twenty-six neighbours in
-   the air, so thin comes out at 0.36 and the mean life is 1/(0.36*EVAP_BASE)
-   ticks. At 1/300 that is 830 ticks, which is 13.8 s at 60 Hz. */
-const EVAP_BASE = 1/300;
-/* AND IT IS ONLY ASKED ONE TICK IN EIGHT. A mortal bead refuses to settle, and
-   refusing to settle keeps its whole chunk in the scan - so the edge of a
-   puddle was costing a quarter of a million cells a tick to work out that it
-   was still evaporating. Rolling eight times less often and eight times harder
-   is the same expected lifetime for an eighth of the price, and the only thing
-   it changes is that a bead's death is quantised to 133 ms, which nothing can
-   see. */
-const EVAP_EVERY = 8;
+const HUMID_PER   = 1/9000;             // one bead of vapour, returning
+const HUMID_DECAY = 1/(60*240);         // and it disperses over four minutes
+/* A lone bead of water lasts about fifteen seconds at 60 Hz. */
+const EVAP_BASE = 1/900;
 
 /* Adding a material is a row, not a code path. The ceiling is 255 because a
    cell is one byte and that is the whole reason the grid is affordable.
@@ -4661,22 +4650,7 @@ function sPassable(mat, tgt){
 function sMove(w, i, x,y,z, j, dx,dy,dz){
   const M=w.m, a=M[i], b=M[j];
   M[i]=b; M[j]=a;
-  /* AN AGE TRAVELS WITH THE THING WHOSE AGE IT IS, and it did not: this
-     zeroed the age of anything with a life every time it moved. A gas moves
-     every single tick, so steam and smoke never reached their lifetime and
-     never became air - measured, twelve beads of steam still sitting there
-     after two thousand ticks of a two-hundred-tick life. Fire got away with it
-     only because fire mostly sits still.
-
-     Swapping two cells swaps what is in them, so it has to swap their ages
-     too. Anything without a life keeps a fall SPEED in the same byte, and that
-     also belongs to the thing rather than to the place - a grain that slides
-     sideways should keep the speed it had. */
-  if(SM_LIFE[b] || SM_LIFE[a]){
-    const T=w.ages(), ai=T[i], bj=T[j];
-    T[j] = SM_LIFE[a] ? ai : 0;
-    T[i] = SM_LIFE[b] ? bj : 0;
-  }
+  if(SM_LIFE[b] || SM_LIFE[a]){ const T=w.ages(); if(SM_LIFE[b]) T[i]=0; if(SM_LIFE[a]) T[j]=0; }
   w.touch(x,y,z); w.touch(x+dx,y+dy,z+dz);
   SMOV++;
 }
@@ -4751,7 +4725,7 @@ function sStepCell(w, i, x,y,z, mat, gdir){
       if(moved){
         const tgt = M[j];
         M[i] = tgt; M[j] = mat;
-        if(alive){ T[j] = T[i]; T[i] = 0; }   // its age goes with it
+        if(alive){ T[j] = 0; }
         else { const v = T[i] || V_UNIT; T[j] = v < V_MAX ? v+1 : V_MAX; T[i] = 0; }
         if(SM_LIFE[tgt]) T[i] = 0;
         for(let s=0;s<=moved;s++) w.touch(x, y + dir*s, z);
@@ -4820,33 +4794,18 @@ function sStepCell(w, i, x,y,z, mat, gdir){
          loop, because air that is already full cannot take any more. */
   if(K === K_LIQUID && SM_VAP[mat]){
     const N = w.N26;
-    let open = 0, hot = 0;
+    let same = 0, hot = 0;
     for(let k=0;k<26;k++){
       const t = M[i+N[k]];
-      if(t === S_AIR) open++;
+      if(t === mat) same++;
       else if(SM_HOT[t]) hot += SM_HOT[t];
     }
-    /* EXPOSURE TO AIR, not the count of its own kind, and the difference is
-       the whole feature. Counting neighbours of the same material called a
-       bead in the CORNER of a sealed tank "thin" - it has rock on two sides
-       and water on the rest, so its own kind was under the threshold - and the
-       corners of a full tank sat awake evaporating for ever. Ninety-seven
-       thousand cells scanned over a hundred and twenty ticks of a body of
-       water that was supposed to cost nothing.
-
-       What actually makes a bead mortal is how much of it is touching AIR.
-       A lone bead on a rock: seventeen of twenty-six. The interior of a puddle
-       one bead deep: nine, all of them above. The corner of a sealed tank:
-       none. So a scattered bead goes, a puddle shrinks from its edges inward,
-       and a body of water is not asked. */
-    if(open >= 13 || hot > 0){
-      if((w.tick & (EVAP_EVERY-1)) === (i & (EVAP_EVERY-1))){
-        const thin = open > 12 ? (open-12)/14 : 0.02;
-        let p = EVAP_BASE * EVAP_EVERY * thin * (1 + hot*30) * (1 - HUMID*0.9);
-        if(M[i-dy] === mat) p *= 0.15;        // something of its own on top of it
-        SRS = (SRS*1664525 + 1013904223) >>> 0;
-        if((SRS >>> 8)/16777216 < p){ w.put(x,y,z, SM_VAP[mat]); return true; }
-      }
+    if(same < 8 || hot > 0){
+      const thin = same < 8 ? 1 - same/8 : 0.02;
+      let p = EVAP_BASE * thin * (1 + hot*30) * (1 - HUMID*0.9);
+      if(M[i-dy] === mat) p *= 0.15;          // something of its own on top of it
+      SRS = (SRS*1664525 + 1013904223) >>> 0;
+      if((SRS >>> 8)/16777216 < p){ w.put(x,y,z, SM_VAP[mat]); return true; }
       /* a mortal bead does not get to settle, or it would never find out */
       w.touch(x,y,z);
     }
@@ -4976,16 +4935,7 @@ function sandTick(w, gdir){
           const L = SM_LIFE[mat];
           if(L){
             const A = T || w.ages();
-            if(++A[i] >= L){
-              const nxt = SM_NEXT[mat];
-              w.put(bx+lx, y, z, nxt);
-              /* AND WHERE THE WATER IN IT WENT. A vapour reaching the end of
-                 its life IS "becoming air itself" - the other path, dispersing
-                 in open air, is the rarer one - so this is where the humidity
-                 has to be raised or the number is a counter nobody writes. */
-              if(nxt === S_AIR && SM_HUM[mat]) HUMID = HUMID < 1 ? HUMID + HUMID_PER : 1;
-              continue;
-            }
+            if(++A[i] >= L){ w.put(bx+lx, y, z, SM_NEXT[mat]); continue; }
             w.touch(bx+lx, y, z);            // burning is never settled
           }
           sStepCell(w, i, bx+lx, y, z, mat, gdir);
@@ -5968,10 +5918,6 @@ function sandStep(dt){
    looking across it. The floor of 0.30 is so that a single bead in the air
    still looks like water rather than like whatever is under it. */
 const WD_MAX = 22;                        // 3.85 m, past which it is all water anyway
-/* How far the medium you are inside is not drawn as beads. An arm's length:
-   near enough that it is what you are looking THROUGH, far enough that the
-   water two metres away is still water you can see. */
-const SUB_NEAR2 = 1.6*1.6;
 const _wd = {a:1, b0:0, b1:0, b2:0};
 function wdepth(M, i, mat, gdy){
   let dn = 0, j = i;
@@ -6021,8 +5967,6 @@ function sandDraw(){
   }
   const M=w.m, SY=w.SY, SZ=w.SZ;
   const gdy = sandDir()*SY;             // one cell further down, as a flat offset
-  const subM = P.sub > 0 ? P.subM : 0;  // what you are immersed in, if anything
-  const camEy = eyeY();
   /* THE FAR FIELD FIRST, and it gets its own budget so a wall of sand three
      metres away cannot spend the whole batch and leave the ocean invisible. */
   let n = ladDraw(d, 0);
@@ -6040,16 +5984,6 @@ function sandDraw(){
           const x=bx+lx; if(x>=w.W) break;
           const i=row+lx, mt=M[i];
           if(!SM_SEE[mt]) continue;         // air, and the world's own stone
-          /* AND YOU DO NOT SEE THE BEADS YOU ARE INSIDE. Standing in water and
-             drawing the water you are standing in puts opaque cubes across
-             your own face, which is what "should be not opaque" was about.
-             What is between your eye and everything else is not scenery, it is
-             the medium - so it is drawn as the tint and the wobble above, and
-             the cells themselves are skipped out to arm's length. */
-          if(subM === mt){
-            const ex=(x+0.5)*CELL_M-P.x, ey=(y+0.5)*CELL_M-camEy, ez=(z+0.5)*CELL_M-P.z;
-            if(ex*ex+ey*ey+ez*ez < SUB_NEAR2) continue;
-          }
           found++;
           /* ONLY WHAT HAS A FACE ON THE OPEN AIR. A cell packed on all six
              sides cannot be seen from anywhere a player can stand, and drawing
@@ -8254,6 +8188,7 @@ function hurtPoints(dmg, cause){
   } else {
     P.hurtT = Math.max(P.hurtT, Math.min(0.5, dmg*0.35));
   }
+  if(P.hp<=0){
   if(P.hp<=0){
     G.state='over'; G.win=false; G.deathBy = cause || 'shot';
     G.slowmo=0.35; G.shake=1;
@@ -11047,17 +10982,8 @@ function frame(now){
   /* DRUNK IS A REAL EFFECT AND IT IS IN THE CAMERA, which is the only place it
      could be: what alcohol does is stop you pointing at things. */
   const dk = (P.fx && P.fx[FX_DRUNK] > 0) ? Math.min(1, P.fx[FX_DRUNK]/6) : 0;
-  /* AND THE WATER MOVES WHAT YOU ARE LOOKING AT. A surface with waves on it is
-     a lens that will not hold still, so the image shifts by a fraction of a
-     degree at a couple of hertz - small enough that it reads as the water
-     moving rather than as your head moving, which is the difference between
-     refraction and a camera fault. Two frequencies that do not divide, so it
-     never repeats and never looks like a loop. */
-  const wob = P.sub > 0 ? P.sub : 0;
-  const yaw = P.yaw + (dk ? Math.sin(tGlobal*1.31)*0.075*dk : 0)
-            + (wob ? (Math.sin(tGlobal*1.7) + Math.sin(tGlobal*2.63)*0.6)*0.0085*wob : 0);
-  const pit = P.pitch + recoil*VIEW_PUNCH + (dk ? Math.sin(tGlobal*0.87)*0.055*dk : 0)
-            + (wob ? (Math.sin(tGlobal*2.11) + Math.sin(tGlobal*3.07)*0.5)*0.0070*wob : 0);
+  const yaw = P.yaw + (dk ? Math.sin(tGlobal*1.31)*0.075*dk : 0);
+  const pit = P.pitch + recoil*VIEW_PUNCH + (dk ? Math.sin(tGlobal*0.87)*0.055*dk : 0);
   const basis = viewFrom(camX, camY, camZ, yaw, pit, viewM, rollNow());
   const aspect = W/H;
   const projMain = m4.persp(70*Math.PI/180, aspect, 0.08, 400);
@@ -11097,25 +11023,6 @@ function frame(now){
      against or the far shore hangs in front of it in cave-tan. */
   const SKY = G.island ? skyNow() : null;
   if(SKY) FOGNOW = [SKY.hor[0]*0.86, SKY.hor[1]*0.86, SKY.hor[2]*0.90];
-  /* UNDER THE SURFACE, EVERYTHING IS SEEN THROUGH IT.
-     Marcelo: "glass and water beads around player when player immerses in
-     water should be not opaque, but rather cause an optical DISTORTION of
-     some kind (light one)."
-
-     Right, and the honest reason the beads were opaque is that this renderer
-     has no transparency at all - no sorted pass, no depth prepass, nothing to
-     blend against. But the effect he is describing does not need one, because
-     what looking through water actually does is two things and neither of them
-     is transparency: it TINTS everything by how much of it is between you and
-     the thing, and it MOVES what you are looking at. The fog is already a
-     distance-weighted tint and the camera basis is already rebuilt every
-     frame, so both are one line each. */
-  if(P.sub > 0 && P.subM){
-    const c = SM_COL, m = P.subM, k = P.sub;
-    FOGNOW = [FOGNOW[0]*(1-k) + c[m*3]*k*1.15,
-              FOGNOW[1]*(1-k) + c[m*3+1]*k*1.15,
-              FOGNOW[2]*(1-k) + c[m*3+2]*k*1.15];
-  }
   gl.clearColor(FOGNOW[0],FOGNOW[1],FOGNOW[2],1);
   gl.enable(gl.DEPTH_TEST); gl.depthMask(true);
   gl.enable(gl.CULL_FACE); gl.cullFace(gl.BACK);
@@ -12000,6 +11907,184 @@ setScreen('menu');
   spin();
 })();
 requestAnimationFrame(frame);
+
+window.requestAnimationFrame = function(){ return 0; };
+/* Does sand.js live in the game, and did 26 neighbours make the pile round?
+   Everything here runs on the grid itself, not on the picture. */
+window.__err=[];
+window.addEventListener('error',e=>window.__err.push('ERR '+e.message));
+setTimeout(()=>{ try{
+  G.muted=true; try{ snd.setMute(true); }catch(e){}
+  const R=[];
+  const f2=v=>v.toFixed(2);
+
+  /* ---- a bare box to pour into, so nothing but the rule is being measured */
+  function box(W,H,D){
+    const w = new SandWorld(W,H,D);
+    for(let y=1;y<H;y++) for(let z=0;z<D;z++) for(let x=0;x<W;x++){
+      const r=(y+1)*w.SY+(z+1)*w.SZ+(x+1); w.m[r]=S_AIR;
+    }
+    return w;                                    // y=0 is the floor, and stays rock
+  }
+  /* Pour from one cell until it stops accepting, then let it settle. */
+  function pour(w, mat, grains, cap){
+    const cx=w.W>>1, cz=w.D>>1, top=w.H-3;
+    let left=grains, t=0;
+    while(t++ < cap){
+      for(let k=0;k<6 && left>0;k++) if(w.at(cx,top,cz)===S_AIR){ w.put(cx,top,cz,mat); left--; }
+      sandTick(w,-1);
+      if(!left && !w.awake.length) break;
+    }
+    for(let k=0;k<200 && w.awake.length;k++) sandTick(w,-1);
+    return t;
+  }
+  /* How far the base of the heap reaches along a direction, in CELLS of real
+     distance, so an axis run and a corner run are comparable. */
+  function reach(w, mat, dx, dz){
+    const cx=w.W>>1, cz=w.D>>1, len=Math.hypot(dx,dz);
+    let r=0;
+    for(let s=1;s<(w.W>>1)-1;s++){
+      let any=0;
+      for(let y=1;y<6 && !any;y++) if(w.at(cx+dx*s,y,cz+dz*s)===mat) any=1;
+      if(any) r=s*len;
+    }
+    return r;
+  }
+  function shape(w, mat){
+    const ax=(reach(w,mat,1,0)+reach(w,mat,-1,0)+reach(w,mat,0,1)+reach(w,mat,0,-1))/4;
+    const dg=(reach(w,mat,1,1)+reach(w,mat,1,-1)+reach(w,mat,-1,1)+reach(w,mat,-1,-1))/4;
+    return {ax, dg, ratio: ax>0 ? dg/ax : 0};
+  }
+
+  /* ================= 1. IS THE PILE ROUND ================= */
+  /* A round heap has the same radius in every direction, so diagonal/axis is
+     1.00. Four lateral directions can only make a DIAMOND - the reachable set
+     is |dx|+|dz| <= n - and a diamond measures 0.71. Eight with equal weight
+     would overshoot to a SQUARE at 1.41, which is why the corner is taken at
+     1/sqrt(2). */
+  const GR = 2600;
+  SAND_LAT = 4;
+  const w4 = box(80,44,80); pour(w4, S_SAND, GR, 900);
+  const s4 = shape(w4, S_SAND);
+  SAND_LAT = 8;
+  const w8 = box(80,44,80); pour(w8, S_SAND, GR, 900);
+  const s8 = shape(w8, S_SAND);
+  R.push(`PILE 4 lateral: axis ${f2(s4.ax)} diag ${f2(s4.dg)} cells, diag/axis ${f2(s4.ratio)} (a diamond is 0.71)`);
+  R.push(`PILE 8 lateral: axis ${f2(s8.ax)} diag ${f2(s8.dg)} cells, diag/axis ${f2(s8.ratio)} (round is 1.00)`);
+  const roundErr4=Math.abs(s4.ratio-1), roundErr8=Math.abs(s8.ratio-1);
+  R.push(`ROUNDNESS: 26 neighbours is off by ${f2(roundErr8)}, 6 by ${f2(roundErr4)} - ` +
+         (roundErr8 < roundErr4 ? 'ROUNDER' : 'NO BETTER'));
+
+  /* ================= 2. LIQUID FINDS ITS LEVEL ================= */
+  SAND_LAT = 8;
+  const wl = box(80,44,80); pour(wl, S_WATER, GR, 900);
+  const sl = shape(wl, S_WATER);
+  /* HEIGHT is the honest test, not width. A powder HEAPS and a liquid does
+     not, and that is the one bit of difference between them; comparing radii
+     compares two different shapes of the same volume and says less. */
+  function peak(w, mat){
+    const cx=w.W>>1, cz=w.D>>1; let top=0;
+    for(let x=cx-2;x<=cx+2;x++) for(let z=cz-2;z<=cz+2;z++)
+      for(let y=1;y<w.H-1;y++) if(w.at(x,y,z)===mat && y>top) top=y;
+    return top;
+  }
+  const hw=peak(wl,S_WATER), hs=peak(w8,S_SAND);
+  R.push(`WATER: ${f2(sl.ax)} cells across, ${hw} tall; SAND: ${f2(s8.ax)} across, ${hs} tall ` +
+         (hw*2 < hs ? 'ok, the liquid does not heap' : 'FAULT: liquid heaps'));
+  R.push(`WATER isotropy: diag/axis ${f2(sl.ratio)} (powder is ${f2(s8.ratio)})`);
+
+  /* ================= 3. SETTLED COSTS NOTHING ================= */
+  const before = w8.stats.scanned;
+  let awake=0; for(let k=0;k<30;k++){ sandTick(w8,-1); awake+=w8.stats.awake; }
+  R.push(`DIRTY RECT: ${GR} beads at rest, ${awake} chunks awake over 30 ticks, ` +
+         `${w8.stats.scanned} cells scanned ` + (awake===0 ? 'ok' : 'FAULT'));
+
+  /* ================= 4. WHAT 26 COSTS =================
+     NOT in nanoseconds: run_harness drives Chrome under a virtual time budget,
+     which freezes performance.now(), so every timing taken in here reads 0.00.
+     The 3.7x (49.4 ns a particle against 13.1) is measured on a real page in
+     voxel/storm.html and stands. What CAN be counted under virtual time is
+     work, so this counts it: cells looked at, and moves got out of them. */
+  function work(lat){
+    SAND_LAT=lat;
+    const w=box(64,64,64);
+    const cx=w.W>>1, cz=w.D>>1;
+    for(let y=20;y<44;y++) for(let z=cz-10;z<cz+10;z++) for(let x=cx-10;x<cx+10;x++) w.put(x,y,z,S_SAND);
+    let cells=0, moves=0;
+    for(let k=0;k<60;k++){ const m0=w.stats.moves; sandTick(w,-1); cells+=w.stats.scanned; moves+=w.stats.moves-m0; }
+    return {cells, moves, settled: w.awake.length===0};
+  }
+  const k4=work(4), k8=work(8);
+  SAND_LAT=8;
+  R.push(`WORK 4 lateral: ${k4.cells} cells scanned, ${k4.moves} moves, settled ${k4.settled}`);
+  R.push(`WORK 8 lateral: ${k8.cells} cells scanned, ${k8.moves} moves, settled ${k8.settled}`);
+
+  /* ================= 5. REACTIONS, WHICH THE GAME NEVER HAD ================= */
+  function rxTest(a,b,want){
+    const w=box(36,36,36);
+    const cx=18,cz=18;
+    for(let x=cx-3;x<=cx+3;x++) for(let z=cz-3;z<=cz+3;z++){ w.put(x,3,z,b); w.put(x,4,z,a); }
+    for(let k=0;k<80;k++) sandTick(w,-1);
+    return w.count(want);
+  }
+  R.push(`RX water on fire -> steam: ${rxTest(S_FIRE,S_WATER,S_STEAM)} cells`);
+  /* AND THEN THE GLASS MELTS, which is why this counts both. Noita's table
+     brought srx(lava, glass -> molten glass) with it, so lava standing on sand
+     fuses it and then keeps going - counting only S_GLASS reported zero and the
+     chain was working perfectly. */
+  R.push(`RX lava on sand -> glass: ${rxTest(S_LAVA,S_SAND,S_GLASS)+rxTest(S_LAVA,S_SAND,S_MGLASS)} cells`);
+  R.push(`RX water on sand -> wet sand: ${rxTest(S_WATER,S_SAND,S_WETSND)} cells`);
+  R.push(`RX acid on rock -> air: ${rxTest(S_ACID,S_ROCK,S_AIR)>0?'eaten':'FAULT'}`);
+
+  /* ================= 6. AND IT IS IN THE GAME ================= */
+  G.mode=MODE_SWEEP; seed=9; genWorld(0); G.state='play';
+  R.push(`GRID: ${SAND.W}x${SAND.H}x${SAND.D} cells, ${(SAND.N/1048576).toFixed(1)} MB, ` +
+         `${SAND.nc} chunks, bead ${f2(CELL_M)} m`);
+  let tgt=-1, air=-1;
+  for(let y=0;y<G.ny&&tgt<0;y++) for(let z=0;z<G.nz&&tgt<0;z++) for(let x=0;x<G.nx&&tgt<0;x++){
+    const i=idx(x,y,z);
+    if(G.st[i]!==SOLID||G.mine[i]) continue;
+    for(const j of nbrsOf(i)) if(G.st[j]===AIR){ tgt=i; air=j; break; }
+  }
+  const tc=cellXYZ(tgt), ac=cellXYZ(air);
+  const loose0 = SAND.count(S_SAND)+SAND.count(S_RUBBLE)+SAND.count(S_WATER);
+  R.push(`a fresh board holds ${loose0} loose cells (should be 0)`);
+  sandBurst(tc[0],tc[1],tc[2], Math.sign(tc[0]-ac[0]),Math.sign(tc[1]-ac[1]),Math.sign(tc[2]-ac[2]), 150);
+  let live=0; for(let i=0;i<GRIT.n;i++) if(GRIT.live[i]) live++;
+  R.push(`one block burst -> ${live} beads in the air`);
+  for(let k=0;k<420;k++) sandStep(1/60);
+  const sd=SAND.count(S_SAND), rb=SAND.count(S_RUBBLE), wt=SAND.count(S_WATER), ws=SAND.count(S_WETSND);
+  R.push(`landed into the grid: ${sd} sand, ${rb} rubble, ${wt} water, ${ws} wet sand`);
+  live=0; for(let i=0;i<GRIT.n;i++) if(GRIT.live[i]) live++;
+  R.push(`still in the air: ${live} ` + (live===0?'ok':'some never landed'));
+  for(let k=0;k<600;k++) sandStep(1/60);
+  const sd2=SAND.count(S_SAND)+SAND.count(S_RUBBLE)+SAND.count(S_WATER)+SAND.count(S_WETSND);
+  R.push(`PERSISTENCE: ${sd2} cells still there after 10 more seconds ` +
+         (sd2>=sd+rb+wt+ws-2 ? 'ok' : 'FADED'));
+
+  /* the picture has a budget and the simulation does not */
+  P.x=(tc[0]+0.5)*BLOCK; P.y=(tc[1]+0.5)*BLOCK; P.z=(tc[2]+0.5)*BLOCK;
+  const drawn = sandDraw();
+  R.push(`DRAWN: ${drawn} of ${SAND_DRAW_MAX} instances, ${sandB.count} in the batch ` +
+         (drawn<=SAND_DRAW_MAX ? 'ok' : 'OVERFLOW'));
+
+  /* opening a block is the mountain becoming beads, and not before */
+  R.push(`OPEN BLOCKS: ${VOXD.size} of ${G.nx*G.ny*G.nz}`);
+
+  /* ================= 7. AND THE BIG ONE ================= */
+  G.mode=MODE_DUNGEON; seed=11; genWorld(2, true); G.state='play';
+  R.push(`DUNGEON GRID: ${SAND.W}x${SAND.H}x${SAND.D}, ${(SAND.N/1048576).toFixed(0)} MB, ` +
+         `${SAND.nc} chunks, ${SAND.awake.length} awake at rest`);
+  let t0=SAND.stats.scanned;
+  for(let k=0;k<60;k++) sandStep(1/60);
+  R.push(`a quiet dungeon: ${SAND.stats.scanned} cells scanned on the last of 60 ticks, ` +
+         `${SAND.awake.length} chunks awake ` + (SAND.awake.length===0?'ok':'FAULT'));
+
+  R.push(window.__err.length ? ('FAULT '+window.__err.join(' | ')) : 'no errors');
+  document.body.dataset.r = R.join(' ~ ');
+}catch(err){
+  document.body.dataset.r='THREW: '+err.message+' @ '+((err.stack||'').split('\n')[1]||'');
+}}, 300);
 
 })();
 </script>
