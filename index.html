@@ -676,6 +676,15 @@ const GRAV    = 20.0;   // m/s^2 (heavy, so jumps do not float)
    speed comes from "down" being a compile-time index offset. This is the half
    of it that costs nothing. */
 function gnow(){ return GRAV * (G.gravK === undefined ? 1 : G.gravK); }
+/* WHICH WAY IS DOWN, as a sign, and everything that has an opinion about down
+   reads it: the physics, the ground test, the jump, and the camera.
+
+   Marcelo: "my POV always is adjusted as my below is always the point of
+   greater gravity of where I am." So when gravity reverses you do not merely
+   float upward with the picture unchanged - your feet find the other surface
+   and the world comes round with them. Without this the ending was a man
+   falling into the sky, which reads as a bug however deliberate it is. */
+function gsign(){ return gnow() >= 0 ? 1 : -1; }
 const JUMP_LO = 6.0;    // jump apex = 3x your height
 const V_LO    = Math.sqrt(2*GRAV*JUMP_LO);
 /* Every jump is the same jump, and you get twenty of them before your feet
@@ -825,11 +834,17 @@ const m4 = {
   },
   ident(){ const o=new Float32Array(16); o[0]=o[5]=o[10]=o[15]=1; return o; }
 };
-function viewFrom(px,py,pz, yaw, pitch, out){
+function viewFrom(px,py,pz, yaw, pitch, out, us){
   const cy=Math.cos(yaw), sy=Math.sin(yaw), cp=Math.cos(pitch), sp=Math.sin(pitch);
   const fx=-sy*cp, fy=sp, fz=-cy*cp;
-  const rx= cy,    ry=0,  rz=-sy;
-  const ux= ry*fz-rz*fy, uy= rz*fx-rx*fz, uz= rx*fy-ry*fx;
+  let rx= cy,    ry=0,  rz=-sy;
+  let ux= ry*fz-rz*fy, uy= rz*fx-rx*fz, uz= rx*fy-ry*fx;
+  /* A HUNDRED AND EIGHTY DEGREES ABOUT THE WAY YOU ARE LOOKING, when gravity
+     has changed its mind. Roll rather than yaw: forward stays forward, so you
+     are still looking at whatever you were looking at, and up and right both
+     invert - which is exactly what standing on the other surface does to you.
+     Negating the two basis vectors IS that rotation, and it costs two signs. */
+  if(us < 0){ rx=-rx; ry=-ry; rz=-rz; ux=-ux; uy=-uy; uz=-uz; }
   out[0]=rx; out[4]=ry; out[8]=rz;  out[12]=-(rx*px+ry*py+rz*pz);
   out[1]=ux; out[5]=uy; out[9]=uz;  out[13]=-(ux*px+uy*py+uz*pz);
   out[2]=-fx;out[6]=-fy;out[10]=-fz;out[14]= (fx*px+fy*py+fz*pz);
@@ -3805,6 +3820,11 @@ const SM_NB   = new Uint8Array(256);   // 6 or 26: how many neighbours it reacts
 const SM_COL  = new Float32Array(256*3);
 const SM_EMIS = new Float32Array(256);
 const SM_SEE  = new Uint8Array(256);   // drawn by the sand layer at all?
+/* HOW BADLY IT CLINGS TO YOU. Marcelo: "each bead has a weight and a stickyness
+   factor, wet sand is sticky in chunks, making you heavy, falling off when you
+   jump or shoot also in chunks." Weight is already there - it is the density -
+   so this is the other half. Dry sand pours off you, wet sand does not. */
+const SM_STICK= new Float32Array(256);
 
 /* Adding a material is a row, not a code path. The ceiling is 255 because a
    cell is one byte and that is the whole reason the grid is affordable.
@@ -3826,6 +3846,7 @@ function addMat(spec){
   const c = spec.c||[0.5,0.5,0.5];
   SM_COL[id*3]=c[0]; SM_COL[id*3+1]=c[1]; SM_COL[id*3+2]=c[2];
   SM_EMIS[id]= spec.emis||0;
+  SM_STICK[id]= spec.stick===undefined ? 0.15 : spec.stick;
   SM_SEE[id] = spec.see===undefined ? 1 : spec.see;
   return id;
 }
@@ -3843,14 +3864,14 @@ const S_ROCK= addMat({n:'rock',k:K_STATIC, d:2700, s:0, c:[0.30,0.27,0.26], see:
    angle would have to be turned into one of these anyway. Dry sand runs (34
    degrees), wet sand stands up and can overhang (45, which is why sandcastles
    exist), rock locks because angular fragments interlock. */
-const S_SAND   = addMat({n:'sand',    k:K_POWDER, d:1600, slip:0.92, c:[0.80,0.68,0.44], emis:0.42});
-const S_RUBBLE = addMat({n:'rubble',  k:K_POWDER, d:2700, slip:0.28, c:[0.30,0.28,0.26], emis:0.42});
-const S_WATER  = addMat({n:'water',   k:K_LIQUID, d:1000, s:5, slip:1.0, c:[0.22,0.44,0.76], emis:0.30});
-const S_GLASS  = addMat({n:'glass',   k:K_POWDER, d:2500, slip:0.45, c:[0.66,0.86,0.88], emis:0.50});
-const S_WETSND = addMat({n:'wetsand', k:K_POWDER, d:2000, slip:0.18, c:[0.44,0.37,0.26], emis:0.34});
+const S_SAND   = addMat({n:'sand', stick:0.22,    k:K_POWDER, d:1600, slip:0.92, c:[0.80,0.68,0.44], emis:0.42});
+const S_RUBBLE = addMat({n:'rubble', stick:0.10,  k:K_POWDER, d:2700, slip:0.28, c:[0.30,0.28,0.26], emis:0.42});
+const S_WATER  = addMat({n:'water', stick:0.05,   k:K_LIQUID, d:1000, s:5, slip:1.0, c:[0.22,0.44,0.76], emis:0.30});
+const S_GLASS  = addMat({n:'glass', stick:0.08,   k:K_POWDER, d:2500, slip:0.45, c:[0.66,0.86,0.88], emis:0.50});
+const S_WETSND = addMat({n:'wetsand', stick:0.85, k:K_POWDER, d:2000, slip:0.18, c:[0.44,0.37,0.26], emis:0.34});
 /* And the ones that arrive with the engine. The game has never had any of
    these, because it had nowhere to put a reaction. */
-const S_SALT   = addMat({n:'brine',   k:K_LIQUID, d:1025, s:6, slip:1.0, c:[0.13,0.34,0.62], emis:0.26});
+const S_SALT   = addMat({n:'brine', stick:0.05,   k:K_LIQUID, d:1025, s:6, slip:1.0, c:[0.13,0.34,0.62], emis:0.26});
 const S_OIL    = addMat({n:'oil',     k:K_LIQUID, d:900,  s:4, slip:1.0, c:[0.22,0.18,0.12], emis:0.20});
 const S_SMOKE  = addMat({n:'smoke',   k:K_GAS,    d:3,  s:2, slip:1.0, life:120, next:0, c:[0.24,0.24,0.26], emis:0.10});
 const S_FIRE   = addMat({n:'fire',    k:K_GAS,    d:5,  s:1, slip:1.0, life:40,  next:S_SMOKE, c:[1.00,0.55,0.12], emis:1.0});
@@ -3859,7 +3880,7 @@ const S_LAVA   = addMat({n:'lava',    k:K_LIQUID, d:2600, s:2, slip:1.0, c:[0.95
 const S_ACID   = addMat({n:'acid',    k:K_LIQUID, d:1050, s:4, slip:1.0, c:[0.55,0.85,0.15], emis:0.75});
 const S_EMBER  = addMat({n:'ember',   k:K_POWDER, d:1500, slip:0.5, life:90, next:S_SMOKE, c:[0.85,0.25,0.05], emis:0.9});
 const S_WOOD   = addMat({n:'wood',    k:K_STATIC, d:700,  c:[0.36,0.24,0.13], emis:0.30});
-const S_LEAF   = addMat({n:'leaf',    k:K_POWDER, d:300, slip:0.98, c:[0.22,0.45,0.16], emis:0.30});
+const S_LEAF   = addMat({n:'leaf', stick:0.45,    k:K_POWDER, d:300, slip:0.98, c:[0.22,0.45,0.16], emis:0.30});
 const S_IRON   = addMat({n:'iron',    k:K_POWDER, d:7800, slip:0.20, c:[0.45,0.42,0.40], emis:0.40});
 /* Gunpowder is saltpeter, charcoal and sulfur — voxel/compose.js prices the
    mix; here it is one powder that catches. */
@@ -4411,6 +4432,77 @@ let sandAcc = 0, sandCells = 0;
 const sandB = makeCubeBatch(SAND_DRAW_MAX + 64);
 
 function sandDir(){ return gnow() >= 0 ? -1 : 1; }
+
+/* --------------------------------------------------------------------------
+   WHAT THE BEADS ARE DOING TO YOU
+   --------------------------------------------------------------------------
+   Standing in wet sand is not standing in air, and until now it was: the player
+   moved through settled material as if it were not there. Two separate things
+   come out of the cells around your body and they behave differently.
+
+     IMMERSION is what you are IN. It is read fresh every frame from the cells
+     your body occupies, it costs you speed while you are in it and nothing the
+     moment you are out, and how much it costs is the DENSITY - wading through
+     water is not wading through wet sand.
+
+     LOAD is what is STUCK TO you, and it is the one that has memory. Sticky
+     material accumulates on you in chunks and stays after you have left it,
+     which is what makes wet sand different in kind from water rather than
+     merely more of it. It comes off in chunks too: jumping sheds a third of it
+     and a shot sheds half, because both are a sharp shock through the body.
+
+   And material falling ON you counts double, because a bead arriving with
+   speed presses down harder than one you walked into. */
+const LOAD_MAX = 1.0;
+function sandLoad(dt){
+  const w=SAND;
+  P.imm = 0; P.immD = 0;
+  if(!w || !P.load) P.load = P.load || 0;
+  if(w){
+    const x0=sandCell(P.x-0.34), x1=sandCell(P.x+0.34);
+    const z0=sandCell(P.z-0.34), z1=sandCell(P.z+0.34);
+    const y0=sandCell(P.y+0.10), y1=sandCell(P.y+P_H);
+    let n=0, hit=0, dens=0, stick=0;
+    for(let y=y0;y<=y1;y++) for(let z=z0;z<=z1;z++) for(let x=x0;x<=x1;x++){
+      n++;
+      if(!w.inBox(x,y,z)) continue;
+      const m=w.m[w.idx(x,y,z)];
+      if(m===S_AIR || m===S_ROCK || SM_K[m]===K_STATIC) continue;
+      hit++; dens += SM_D[m]; stick += SM_STICK[m];
+    }
+    if(hit){
+      P.imm  = hit/Math.max(1,n);
+      P.immD = dens/hit;
+      /* it gathers on you at a rate set by how sticky it is and how much of you
+         is in it, and it saturates - you can only carry so much */
+      P.load = Math.min(LOAD_MAX, P.load + (stick/hit)*P.imm*dt*1.6);
+    }
+    /* AND WHAT FALLS ON YOUR HEAD. A bead arriving under gravity presses harder
+       than one you walked into, so an overhead collapse is the thing that
+       actually pins you. */
+    const hy = sandCell(P.y + P_H + 0.25*(-sandDir()));
+    let over=0, ost=0, on=0;
+    for(let z=z0;z<=z1;z++) for(let x=x0;x<=x1;x++){
+      on++;
+      if(!w.inBox(x,hy,z)) continue;
+      const m=w.m[w.idx(x,hy,z)];
+      if(m===S_AIR || m===S_ROCK || SM_K[m]===K_STATIC) continue;
+      over++; ost += SM_STICK[m];
+    }
+    /* AN AVERAGE, NOT A SUM, and getting that wrong made water as clinging as
+       wet sand: adding a stickiness PER CELL multiplied it by however many
+       cells were overhead - forty-nine of them - so a material with a
+       stickiness of 0.05 pinned you as hard as one with 0.85. What presses on
+       you is how much of your head is covered, and by what, not how finely the
+       covering happens to be divided. */
+    if(over) P.load = Math.min(LOAD_MAX, P.load + (ost/over)*(over/on)*dt*2.2);
+    P.over = over;
+  }
+  /* dry off: it falls away on its own, slowly */
+  P.load = Math.max(0, P.load - dt*0.10);
+}
+/* A CHUNK COMES OFF. Jumping is a third of it, a shot is half. */
+function sandShed(k){ if(P.load) P.load = Math.max(0, P.load*(1-k)); }
 
 /* Wake every chunk that might hold loose material. Expensive on purpose and
    called exactly once, when gravity reverses: settled material is cheap only
@@ -5133,11 +5225,21 @@ function physics(dt){
     target *= STAG_MIN + (1-STAG_MIN)*(1 - P.stagger/STAG_T);
     P.stagger = Math.max(0, P.stagger - dt);
   }
+  const gs = gsign();
+  /* IMMERSION SLOWS YOU WHILE YOU ARE IN IT; LOAD SLOWS YOU AFTER. Density
+     against your own - about a tonne a cubic metre of person - so water barely
+     registers and wet sand is half your speed. */
+  sandLoad(dt);
+  if(P.imm > 0.02) target *= Math.max(0.18, 1 - P.imm*(P.immD/2400));
+  if(P.load > 0.01) target *= Math.max(0.35, 1 - P.load*0.55);
   const accel = P.ground ? 52 : 13;
   P.vx += (wx*target - P.vx) * Math.min(1, accel*dt);
   P.vz += (wz*target - P.vz) * Math.min(1, accel*dt);
   if(ln===0 && P.ground){ const f=Math.min(1,16*dt); P.vx-=P.vx*f; P.vz-=P.vz*f; }
   P.vy -= gnow()*dt;
+  /* and it holds you up as well as holding you back: a body in a fluid falls
+     slower, and a body in wet sand hardly falls at all */
+  if(P.imm > 0.02) P.vy -= P.vy*Math.min(0.9, P.imm*(P.immD/2000))*Math.min(1, dt*9);
   if(P.vy < -60) P.vy = -60;
 
   // substeps so we cannot tunnel through a block
@@ -5149,7 +5251,10 @@ function physics(dt){
     collideAxis(0, (P.vx + P.kx)*sdt);
     collideAxis(2, (P.vz + P.kz)*sdt);
     const h = collideAxis(1, P.vy*sdt);
-    if(h){ if(P.vy<0) grounded=true; P.vy=0; }
+    /* GROUNDED MEANS "STOPPED BY THE THING GRAVITY WAS TAKING ME TO", which is
+       not the same as "moving down". Under reversed gravity the surface that
+       holds you up is above you and you reach it going the other way. */
+    if(h){ if(P.vy*gs < 0) grounded=true; P.vy=0; }
   }
   P.ground = grounded;
   /* Exponential, so the shove is hardest at the instant of the shot and
@@ -5195,6 +5300,7 @@ function shoot(){
      one can simply be added. */
   P.vy += Math.max(0, -r.dy) * SHOT_LIFT;
   P.stagger = STAG_T;
+  sandShed(0.5);                  // and half of it comes off with the recoil
   G.shake = Math.max(G.shake, 0.05);
   /* And the pump moves when the rack is heard, not when the trigger is
      pulled. shotgun() hands back the delay it scheduled the sound for. */
@@ -7283,6 +7389,18 @@ function buildIsland(){
     const t=top(x,z); if(t<0) continue;
     for(let y=0;y<=t;y++) set(x,y,z, y < SEA+1 ? M_WETSAND : M_DRYSAND);
   }
+  /* THE HOUSE, THE RACK AND THE VIALS.
+     Marcelo: "an island with a wooden house and a sample - a vial, occupies a
+     lattice slot, contains 50 to 1000 grams of dust/liquid - containing each
+     1000 grams of all registered materials, and a plaque with their name above."
+
+     A vial IS a lattice slot, which is the neat part: it needs no new kind of
+     thing, only a block whose material is one of the grid's. The rack is
+     therefore a census of the engine - every material that exists, standing in
+     a row, in its own colour. Add a material anywhere and a vial for it appears
+     here without anyone writing one. */
+  buildVials(set, cx, cz, top);
+
   /* THE HOLE IN THE GROUND — the way you came up */
   const hx=Math.round(cx+R*0.30), hz=Math.round(cz-R*0.15), hr=Math.max(2,Math.round(R*0.22));
   const htop=top(hx,hz);
@@ -7342,6 +7460,74 @@ function buildIsland(){
   sandBuild();
 }
 
+/* Block materials for the vials, one per grid material, made once and kept:
+   MATS is what the block renderer reads a colour out of, so a vial is a block
+   whose colour came from SMAT. */
+let VIAL_BASE = -1;
+const VIALS = [];                 // {i, name, grams}
+function buildVials(set, cx, cz, top){
+  if(VIAL_BASE < 0){
+    VIAL_BASE = MATS.length;
+    for(let m=0;m<SMAT.length;m++)
+      MATS.push({c:[SM_COL[m*3], SM_COL[m*3+1], SM_COL[m*3+2]]});
+    MATS.push({c:[0.86,0.82,0.72]});          // the plaque: pale, and readable
+  }
+  const PLAQUE = VIAL_BASE + SMAT.length;
+  VIALS.length = 0;
+  /* stand it on the high ground, away from the shore */
+  const hx = Math.round(cx - 3), hz = Math.round(cz + 2);
+  const gy = Math.max(1, top(hx,hz));
+  if(gy < 1) return;
+  /* BIG ENOUGH FOR ALL OF THEM. Seven by three held ten vials and there are
+     eighteen materials, so the census was silently short - and a census that
+     drops the last eight is worse than no census. Sized off SMAT so adding a
+     material widens the house rather than falling off the end of it. */
+  const NEED = SMAT.length - 1;
+  const H = Math.max(3, Math.min(6, Math.ceil(Math.sqrt(NEED*2))+1));
+  const W = Math.max(7, Math.ceil(NEED/Math.max(1,(H-1))) + 2);
+  const D = 5;
+  /* a wooden box with a doorway, which is all a house has to be to be one */
+  for(let dz=0;dz<D;dz++) for(let dx=0;dx<W;dx++) for(let dy=0;dy<=H;dy++){
+    const edge = dx===0||dx===W-1||dz===0||dz===D-1;
+    const roof = dy===H;
+    if(!edge && !roof) continue;
+    if(dz===D-1 && dx===((W/2)|0) && dy<2) continue;      // the door
+    set(hx+dx, gy+dy, hz+dz, M_WOOD);
+  }
+  /* THE RACK. One vial a material, along the back wall and up the shelves, and
+     a plaque directly above each one. */
+  let k = 0;
+  for(let m=0;m<SMAT.length;m++){
+    if(m===S_AIR) continue;
+    const shelf = (k/(W-2))|0, col = k%(W-2);
+    if(shelf >= H-1) break;
+    const vx = hx+1+col, vy = gy+shelf*2, vz = hz+1;
+    set(vx, vy,   vz, VIAL_BASE+m);
+    set(vx, vy+1, vz, PLAQUE);
+    VIALS.push({i:idx(vx,vy,vz), x:vx, y:vy, z:vz, name:SMAT[m].n, grams:1000});
+    k++;
+  }
+}
+/* Walk up to one and it tells you what it holds. A block cannot carry text -
+   the glyph batch draws digits and arrows and nothing else - so the name
+   arrives as a line rather than as paint on the plaque, which is a smaller
+   thing than building a font and says the same words. */
+let vialNear = -1;
+function tickVials(){
+  if(!G.island || !VIALS.length) return;
+  let best=-1, bd=2.6*2.6;
+  for(let k=0;k<VIALS.length;k++){
+    const v=VIALS[k];
+    const dx=(v.x+0.5)*BLOCK-P.x, dy=(v.y+0.5)*BLOCK-(P.y+EYE), dz=(v.z+0.5)*BLOCK-P.z;
+    const d=dx*dx+dy*dy+dz*dz;
+    if(d<bd){ bd=d; best=k; }
+  }
+  if(best!==vialNear){
+    vialNear = best;
+    if(best>=0) toast(VIALS[best].name.toUpperCase()+' — '+VIALS[best].grams+' g', 2600);
+  }
+}
+
 function bossBlows(x,y,z){
   /* no ending screen after this, ever. The island IS the ending. */
   G.noWin = true;
@@ -7369,6 +7555,41 @@ function bossBlows(x,y,z){
      ever wakes the whole grid — which is why it can afford to. */
   sandWakeLoose();
   for(let i=0;i<GRIT.n;i++) if(GRIT.live[i]) GRIT.vy[i] = 2+rnd()*6;
+  bossHole(x, z);
+}
+
+/* THE HOLE, and it is one hole with two sides.
+   Marcelo: "the boss hole should always be at the floor of the dungeon that
+   will become the ceiling."
+
+   It is punched through the BOTTOM of the dungeon, straight down through every
+   remaining block under the boss. A second later gravity reverses and your up
+   and down trade places - so the floor you were standing on becomes the ceiling
+   overhead, and the hole in it is the way out. From the island the same hole is
+   something that burst open from underneath, which is what it did.
+
+   The rock is opened rather than removed as scenery: G.st goes to AIR and the
+   grid is carved with it, so the shaft is real to the sand, to the shot and to
+   your body all at once. */
+function bossHole(wx, wz){
+  const bx = Math.max(1, Math.min(G.nx-2, Math.floor(wx/BLOCK)));
+  const bz = Math.max(1, Math.min(G.nz-2, Math.floor(wz/BLOCK)));
+  const r = 2;
+  G.holeX = bx; G.holeZ = bz; G.holeR = r;
+  for(let y=0;y<G.ny;y++) for(let dz=-r;dz<=r;dz++) for(let dx=-r;dx<=r;dx++){
+    if(dx*dx+dz*dz > r*r+1) continue;
+    const x=bx+dx, z=bz+dz;
+    if(!inside(x,y,z)) continue;
+    const i=idx(x,y,z);
+    if(G.st[i]!==AIR){ G.st[i]=AIR; G.revealed++; }
+    sandDig(x,y,z);
+    /* and what was in it goes with it, thrown down the shaft */
+    if((dx*dx+dz*dz)<=1 && (y&1)===0)
+      for(let k=0;k<3;k++)
+        gritAdd((x+0.5)*BLOCK+(rnd()-.5)*BLOCK, (y+0.5)*BLOCK, (z+0.5)*BLOCK+(rnd()-.5)*BLOCK,
+                (rnd()-.5)*9, -4-rnd()*8, (rnd()-.5)*9, rnd()<0.4?S_RUBBLE:S_SAND);
+  }
+  G.dirty = true;
 }
 
 function checkWin(){
@@ -8006,7 +8227,9 @@ function canJump(){ return P.coyote > 0 || P.jumps < MAX_JUMPS; }
 function startJump(){
   const air = !(P.coyote > 0);
   P.jumps++;
-  P.vy = V_LO; P.ground=false; P.coyote=0;
+  /* you jump AWAY from whatever you are standing on, whichever way that is */
+  P.vy = V_LO*gsign(); P.ground=false; P.coyote=0;
+  sandShed(0.34);                 // a third of what is on you goes with it
   IN.jumpFired=true; IN.jumpBuf=0;
   if(air){
     /* A jump off nothing needs to look like it came from somewhere, or it
@@ -9216,6 +9439,7 @@ function frame(now){
   G.shake = Math.max(0, G.shake - dt*0.55);
 
   sandStep(sim);
+  tickVials();
   // ------- particles -------
   for(let i=particles.length-1;i>=0;i--){
     const p=particles[i]; p.l-=sim;
@@ -9247,8 +9471,10 @@ function frame(now){
   const camX = P.x + (Math.random()-0.5)*shk*0.42;
   const camY = P.y + EYE + Math.sin(P.bob*2)*0.035 + (Math.random()-0.5)*shk*0.42;
   const camZ = P.z + (Math.random()-0.5)*shk*0.42;
-  const yaw = P.yaw, pit = P.pitch + recoil*VIEW_PUNCH;
-  const basis = viewFrom(camX, camY, camZ, yaw, pit, viewM);
+  const yaw = P.yaw, us = gsign();
+  /* and the pitch inverts with the roll, or looking up would look down */
+  const pit = (P.pitch + recoil*VIEW_PUNCH) * us;
+  const basis = viewFrom(camX, camY, camZ, yaw, pit, viewM, us);
   const aspect = W/H;
   const projMain = m4.persp(70*Math.PI/180, aspect, 0.08, 400);
   const projView = m4.persp(55*Math.PI/180, aspect, 0.01, 20);
