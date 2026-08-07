@@ -158,6 +158,48 @@ And the same solver is what the rocket in item 0 needs - thrust is a force with
 a direction, drag opposes, gravity pulls. ONE SOLVER, THREE CONSUMERS: the
 swimmer, the bead, and the rocket.
 
+### 0a. WHY A 100 m x 1000 m CYLINDER IS HARD, AND WHAT ACTUALLY BLOCKS IT
+
+> "Why is it so hard to build a cylinder like 100m wide and 1000m tall with the
+> dungeon inside? We won't be able to have an open interactive world if we can't
+> have ULTRA LARGE STRUCTURES to enter and explore. I told you it shouldn't even
+> be a perfect cylinder but rather A SHELL AROUND THE FUNCTIONING DUNGEON."
+
+THE CYLINDER IS NOT THE PROBLEM. The block world is cheap: 100 m is 36 blocks,
+1000 m is 357, so 36x357x36 is 463,000 blocks and about 1.4 MB of Uint8Array.
+That is nothing and it could be built today.
+
+THE BEAD GRID IS THE PROBLEM, and it is one line of arithmetic. SandWorld
+allocates ONE FLAT Uint8Array over the whole world at BLOCK/16:
+
+    36 x 357 x 36 blocks  ->  576 x 5712 x 576 cells  =  1.9 BILLION  =  1.9 GB
+
+That is the wall, and it is not near - it is a factor of sixty past what a
+browser will give you. Today's 18x24x18 is 31 MB and it is already the biggest
+single thing in the program.
+
+THE FIX IS THE LADDER AT CHUNK GRANULARITY. The grid should not be dense over
+the world; a chunk should be a POINTER that is usually null:
+
+  a. `chunks[c]` is either null - meaning "this chunk is uniformly material M",
+     one byte - or an allocated 32^3 block of cells
+  b. it is allocated when something disturbs it, and FREED when it goes quiet
+     and uniform again
+  c. that is exactly what a promoted block already means, one rung up, and the
+     awake-chunk list and the dirty rects already track precisely the chunks
+     that would need to exist
+  d. a few hundred live chunks is a few MB, and the world can then be any size
+     at all - which is also the answer to the unbounded ocean in 0c. They are
+     the same piece of work.
+
+AND THE SHELL SHOULD WRAP THE DUNGEON, NOT CROP IT. This is the other half of
+what he said and it is the more immediately useful half: a geometric primitive
+laid over a finished dungeon CUTS it, which is what destroyed connectivity and
+made the pocket repair necessary at all. A shell that is a SHRINK-WRAP of the
+dug volume - dilate the dungeon's air by three blocks, make that stone -
+touches nothing inside, needs no repair, and is a better shape besides. The
+repair can then be deleted rather than improved.
+
 ### 0d. DUNGEON MODE HAS NO WIN CONDITION - it is the way in to a world
 
 > "Dungeon mode actually has NO WINNING CONDITIONS. When the dungeon is
