@@ -1442,6 +1442,18 @@ uniform vec3 uWorldUp;                // which way is up in the world, right now
 uniform vec3 uSunDir, uMoonDir;
 uniform vec3 uZenith, uHoriz, uSea, uSunCol, uMoonCol;
 uniform float uNight;                 // 0 day, 1 night - how many stars
+/* THE PLANET. From five hundred metres up he said: "the whole drawing is still
+   contained inside a giant visible box." It was, and this is why. The sea was a
+   COLOUR below a horizon LINE - h = dot(dir, uWorldUp) was the entire geometry
+   of it. No surface, no distance, no curvature, so the world was a square of
+   stored blocks with a flat wash behind it and no altitude could ever make
+   anything shrink.
+   It is a sphere of radius uR now, with the eye uH above it, and the ray is
+   INTERSECTED with it. Everything follows and nothing is drawn: the horizon
+   sits at sqrt(2*R*h) - 2.8 km from an eye 2 m up, 78 km from five hundred -
+   and it curves, and as you climb it closes into a disc and then a ball. */
+uniform float uR;                     // planet radius, metres
+uniform float uH;                     // how far the eye is above sea level
 uniform float uPhase;                 // cos of the sun-moon angle: the moon's phase
 out vec4 frag;
 
@@ -1461,16 +1473,36 @@ void main(){
      horizon colour for the bottom fifth and nearly all zenith for the rest. */
   vec3 col = mix(uHoriz, uZenith, pow(clamp(h,0.0,1.0), 0.42));
   /* and below the line it is the sea, going darker as it goes under you */
-  vec3 down = mix(uSea, uSea*0.35, clamp(-h*2.2, 0.0, 1.0));
-  col = h > 0.0 ? col : down;
+  /* THE OCEAN IS A SPHERE YOU HIT, not a colour you are handed. Its centre is
+     straight down from the eye at R + H; a ray that hits it is water at that
+     distance and one that misses is sky, and the horizon is simply where the
+     hits stop - which is what a horizon is. */
+  vec3  Cp = -uWorldUp * (uR + uH);
+  float bq = dot(dir, Cp);
+  float cq = dot(Cp, Cp) - uR*uR;
+  float dq = bq*bq - cq;
+  float seaT = -1.0;
+  if(dq > 0.0){ float t = bq - sqrt(dq); if(t > 0.0) seaT = t; }
+  if(seaT > 0.0){
+    /* AND IT FADES INTO ITS OWN HORIZON: fifteen kilometres of air turns any
+       sea the colour of the sky, which is why a far coast is a smudge. So the
+       far edge needs no line drawn on it. */
+    vec3 water = mix(uSea, uSea*0.35, clamp(-h*2.2, 0.0, 1.0));
+    col = mix(water, uHoriz, clamp(1.0 - exp(-seaT/15000.0), 0.0, 1.0));
+  } else if(h <= 0.0){
+    col = mix(uHoriz, uZenith*0.30, clamp(uH/60000.0, 0.0, 1.0));
+  }
   /* THE HORIZON ITSELF is a line, not a fade. Standing on an island, the edge
      of the world is the sharpest thing in the picture. */
-  col = mix(col, uHoriz*1.25, exp(-abs(h)*180.0));
+  /* AND SPACE IS BLACK. The air thins with height the way it really does, so
+     leaving the atmosphere is something that happens to the picture rather
+     than something announced. */
+  col *= mix(1.0, 0.06, clamp(uH/45000.0, 0.0, 1.0));
 
   /* STARS, and only where the sky is dark enough to have any. Quantised
      direction so they hold still while you turn, which is the whole point of
      them: they are the fixed thing. */
-  if(uNight > 0.02 && h > -0.02){
+  if((uNight > 0.02 || uH > 20000.0) && seaT < 0.0){
     vec3 q = floor(dir*420.0);
     float r = h31(q);
     float st = smoothstep(0.9975, 0.99930, r);
@@ -1517,7 +1549,8 @@ const uS = {
   zenith:gl.getUniformLocation(pSky,'uZenith'), horiz:gl.getUniformLocation(pSky,'uHoriz'),
   sea:gl.getUniformLocation(pSky,'uSea'), sunCol:gl.getUniformLocation(pSky,'uSunCol'),
   moonCol:gl.getUniformLocation(pSky,'uMoonCol'),
-  night:gl.getUniformLocation(pSky,'uNight'), phase:gl.getUniformLocation(pSky,'uPhase')
+  night:gl.getUniformLocation(pSky,'uNight'), phase:gl.getUniformLocation(pSky,'uPhase'),
+  R:gl.getUniformLocation(pSky,'uR'), H:gl.getUniformLocation(pSky,'uH')
 };
 const skyVAO = gl.createVertexArray();
 
@@ -1533,6 +1566,11 @@ const skyVAO = gl.createVertexArray();
    gives the moon its phases, and the same ratio at this scale gives them here.
    Nothing about the phase is chosen - it falls out of where the two of them
    are, and the shader reads it off their dot product. */
+/* HOW BIG THE WORLD IS, and it is his number: six hundred kilometres of
+   radius. Everything else about the horizon follows from it - sqrt(2*R*h) is
+   2.8 km from an eye two metres up and 78 km from five hundred - so this is
+   the only place the size of the planet is written down. */
+const PLANET_R = 600000;
 const SKY_DAY = 600;                     // seconds in a day
 const SKY_LUN = SKY_DAY*29.53/28.53;     // the moon's own day, slightly longer
 const SKY_TILT = 0.38;                   // how far north the arc leans, radians
@@ -12393,6 +12431,10 @@ function frame(now){
     gl.uniform3f(uS.upv,   basis.ux, basis.uy, basis.uz);
     gl.uniform2f(uS.tan,   tv*aspect, tv);
     gl.uniform3f(uS.worldUp, 0, SKY.up, 0);
+    /* HIS NUMBER, six hundred kilometres. Height above sea level is measured
+       through gravity's sign, because down is +Y once the boss is dead. */
+    gl.uniform1f(uS.R, PLANET_R);
+    gl.uniform1f(uS.H, Math.max(0.5, (G.seaY*BLOCK - eyeY()) * -gsign()));
     gl.uniform3fv(uS.sunDir, _sun);
     gl.uniform3fv(uS.moonDir, _moon);
     gl.uniform3fv(uS.zenith, SKY.zen);
