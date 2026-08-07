@@ -69,82 +69,113 @@ and accumulated thickness for transparency.
 ### 5. THE SPIT - liquids as a weapon
 
 
-## THE LIST - say "do list", or "do list except 4 7"
+## THE LIST - done 2026-08-07
 
-Numbered so they can be skipped by number, each with its suggested steps.
-Ordered by what unblocks what: 1 is a controls bug you feel every second, 2-3
-are what the ending was for, 4 unblocks 5, and 6-10 are the material engine.
+Run in the order Marcelo gave: 4, 5, 1, 2, 3, then 6 to 10. Two more (11, 12)
+came out of him playing it while the list was running.
 
-### 1. Spin the PLAYER, not the camera
-The flip inverts left and right relative to your body, because it rotates the
-picture about the view axis while your own frame never changes.
-  a. give P a real up vector (P.up), default (0,1,0)
-  b. build the aim basis from it: forward from yaw/pitch IN that frame
-  c. map mouse dx/dy into the frame so the controls stop fighting the picture
-  d. viewFrom takes the basis directly - delete the `us` roll hack
-  e. the flip becomes P.up = -P.up, animated over about 0.6 s
-  f. harness: turn right under both signs, assert the world goes the same way
+| | | proof |
+|---|---|---|
+| 1 | Spin the PLAYER, not the camera | h_spin.js |
+| 2 | Sun, moon, sky, horizon | h_skyshot.js |
+| 3 | The island you actually land in | h_ocean.js |
+| 4 | The promotion ladder: bead, block, mass | h_ladder.js |
+| 5 | The ocean as fluid, the dungeon breachable | h_ocean.js |
+| 6 | Water to vapour to air, with humidity | h_mortal.js |
+| 7 | The Noita material table (80 materials) | h_sand.js |
+| 8 | HP as a number, Noita's damage | in h_spit.js |
+| 9 | The spit | h_spit.js |
+| 10 | The slow pour, and the house | h_spit.js |
+| 11 | Water opacity that grows with thickness | by eye |
+| 12 | Swimming and shooting IN the water | by eye |
 
-### 2. Sun, moon, sky, horizon, in their place in the universe
-  a. a sky pass before the world: gradient by sun elevation, a horizon line
-  b. sun and moon as billboards at real angular size (0.53 degrees, both)
-  c. a clock: elevation and azimuth from time of day, moon on its own period
-  d. they are RECORDS, not objects - rule 1 at the largest scale
-  e. the cave sees none of it; only the island and the shaft mouth do
-  f. photograph it, and have agy say whether it reads as sky
+### The four things that were actually wrong, and what they cost
 
-### 3. The island the player actually lands in
-Reported as "a box of wall/lava/stone with a tree", not the island.
-  a. PHOTOGRAPH IT FIRST - it has never been looked at, only counted
-  b. clear G.lava when the island is built, or the shell is hellstone
-  c. fix the mirror mixing: top() is in mirrored space and the landing
-     arithmetic mixes the two
-  d. put the player on the beach with the house in view, not beside the shaft
-     facing a wall
-  e. agy reviews: does this read as an island with a house on it
+1. **THE WORLD WAS UPSIDE DOWN.** Gravity is reversed and stays reversed, so
+   down is +Y - and buildIsland built everything MIRRORED, which put the chunk
+   of rock you had just climbed out of directly overhead like a lid, with the
+   tree underneath it. "A box of wall/lava/stone" was a box because it was a
+   box. Two sessions of counters said the island was fine.
+2. **THE FLIP WAS A CAMERA ROLL.** A real rotation, and still wrong: it turned
+   the picture about the view axis while the body never changed, so the mouse
+   yawed in the old frame. The fix is one multiply and where it goes is the
+   entire fix - on the INPUT.
+3. **AN AGE DID NOT TRAVEL WITH THE THING WHOSE AGE IT WAS.** sMove zeroed the
+   age of anything with a life every time it moved, and a gas moves every tick,
+   so steam and smoke were immortal. Years old. Found by asking where the water
+   went.
+4. **THE SEA WAS SCENERY.** Blocks you stood on. Nothing to breach, no water to
+   come in.
 
-### 4. The promotion ladder: beads to block to mass
-Marcelo's design, and what makes an ocean affordable.
-  a. per-block census of grid material - count by material, cheaply
-  b. a full block of one fluid collapses to ONE block record
-  c. adjacent blocks collapse to a mass, with parameters instead of cells
-  d. any disturbance at a face promotes it back down to beads, locally
-  e. bench: an ocean at rest must cost what a mountain costs, near zero
+### What the ladder bought, in one line
 
-### 5. The ocean as fluid, and the dungeon breachable
-Blocked on 4.
-  a. the sea becomes S_SALT in the grid rather than scenery blocks
-  b. the rock wall becomes something a shot opens - it already can, once the
-     wall is grid material and the sea is a fluid behind it
-  c. water pours in, finds its level, floods the shaft
-  d. the player swims, drowns, is pushed by it
-  e. harness: breach it, and assert the dungeon floods
+A settled ocean of 2,168 blocks and 8.9 million cells scans **zero** cells over
+ninety ticks, and evaporation cannot touch it - because a promoted block's
+chunk is never scanned, so only loose material is ever asked whether it is
+drying out.
 
-### 6. Water to vapour to air, with humidity
-Asked twice, still missing. Shares a lifetime column with 7, so build together.
-  a. MORTAL as a real flag with a baseline t per material
-  b. t shifts with pressure and heat
-  c. thin or hot water becomes vapour; vapour surrounded by air becomes air
-  d. air carries a humidity percent that vapour raises
+### Still open
 
-### 7. The full Noita material table
-  a. read https://noita.wiki.gg/wiki/Materials
-  b. every material as a row, every interaction as a row in the reaction table
-  c. keep the 255 ceiling in mind - a cell is one byte
+- **Three-way reactions.** SRXP is a*256+b, so Noita's alchemy recipes
+  (silver + copper + blood) have nowhere to put the third reagent. A CATALYST
+  column - the pair reacts only when a third material is in the
+  26-neighbourhood - is cheaper than an intermediate and truer to what Noita
+  does.
+- **Glass is a powder** and should be a solid that shatters.
+- **Fire needs fuel and oxygen**; it is a material with a lifetime.
+- **Steam does not condense back** on a cold surface. The loop is one-way.
+- **TRIPPING and INVISIBLE are still labels** - no colour shift, and enemies do
+  not read invisibility.
+- Liquid isotropy is 0.88 against the powders' 0.97. Quantisation at spread 5.
+- The **dungeon bot ceiling** at 41% is still unexplained.
 
-### 8. HP as a number, and Noita's damage
-  a. 50 to start, a heart is 25
-  b. damage from the material table
-  c. touching and ingesting do what they do there
+## WHAT MARCELO ASKED FOR NEXT, 2026-08-07, in his priority order
 
-### 9. The spit
-  a. beads on a gravity arc from screen centre, strength on hold
-  b. the only way to throw a liquid, so it always doses you mildly
+Full detail in the vault: "The emergence, the vial, and teaching agy the Forge".
 
-### 10. The slow pour, and the house reading as a house
-  a. one block of water spills slowly until only scattered beads remain
-  b. the house needs windows, a light inside, and a plaque that carries text -
-     the glyph batch draws digits and arrows only, so this one needs a font
+> "Spit mechanics is not even secondary, it's TERTIARY. Most important thing is
+> to fix world/dungeon/scenery, then physics."
+
+### 1. THE EMERGENCE - no teleport, you CRAWL OUT
+
+> "After gravity inverts I fall on the ceiling and then I get TELEPORTED
+> outside the 'tree/house/sand' monstro, instead of crawling out of the dungeon
+> where I can finally see the scenery."
+
+The reveal is a JOURNEY, not a reveal screen. Gravity inverts, you fall onto
+what was the ceiling, the hole the boss blew is above you, and you go UP it -
+through the seamount, out at the top, and the world is there. Every step of
+that already exists as geometry; nothing carried the player along it, so the
+code moved them instead. Delete the placement and let the physics do it.
+
+And the island is an AMALGAM of tree, house and sand: only the tree's TRUNK is
+checked against the house footprint, so its branches and canopy grow through
+the roof.
+
+### 2. THE PHYSICS - the open items above
+
+### 3. THE VIAL AND THE SPIT - a redesign, and it is tertiary
+
+The mouth becomes a COUNT OF BEADS rather than a flag. Two ways to fill it: a
+vial you have EQUIPPED (10 beads a drink, and the drink is animated - vial to
+mouth, put it down, THEN you may spit) or EATING beads around you. About two
+seconds to spit afterwards, and you cannot spit more than you took.
+
+Touching and ingesting stay the same thing for DAMAGE and STATUS. The mouth as
+a reservoir you can spit from is what now needs a deliberate drink. Two
+mechanisms, both right.
+
+### AND A SEPARATE TRACK: teach agy the Forge, then the DOOM bosses
+
+Teach agy the Creature Forge - the voxel data format is a far better interface
+than driving a paint UI. Review every creation with THREE shots at different
+angles and different axis selections, against a reference if supplied or blind
+against what agy thinks it is. First build a cottage; then redraw the bosses as
+classic DOOM: volume (mass, thick limbs, a one-frame silhouette) and colours (a
+small saturated high-contrast palette, no gradients).
+
+agybridge stays a contractor: every entry point returns a Reply, never raises,
+and the game works unchanged when it says no.
 
 ## THE QUEUE, as asked for and not yet built
 
