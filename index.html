@@ -6610,13 +6610,35 @@ function sandBlast(wx,wy,wz, dx,dy,dz, scale){
     const b = a + ((rnd()*(nc-a))|0);
     const tmp=BLAST_CAND[a]; BLAST_CAND[a]=BLAST_CAND[b]; BLAST_CAND[b]=tmp;
   }
-  let thrown=0, woken=0;
+  let thrown=0, woken=0, razed=0;
   for(let c=0;c<nc;c++){
     const v=BLAST_CAND[c], ex=(v&1023)-512, ey=((v>>10)&1023)-512, ez=((v>>20)&1023)-512;
     const x=cx+ex, y=cy+ey, z=cz+ez, m=cGet(w,x,y,z);
     const d=Math.sqrt(ex*ex+ey*ey+ez*ez);
     const k = d<=rF ? 1 : 1 - (d-rF)/(rH-rF)*0.5;
-    if(c>=take){ w.touch(x,y,z); woken++; continue; }
+    /* PAST THE BUDGET IT IS STILL DESTROYED, and this is the fix for "some
+       beads appear but it is not dismounting as before".
+
+       BLAST_MAX is 420 and it was doing two jobs. Removing a cell from the grid
+       is one byte and is free; making a cell FLY is a GRIT entry, a ballistic
+       step every frame and an instance in the batch, and that is what costs.
+       They were tied together because they happen in the same loop, so the
+       CHEAP one inherited the EXPENSIVE one's cap - and the block kept 94% of
+       itself while a handful of cubes drifted off it.
+
+       NEXT.md rule 3 says visible debris is a budget, not a consequence. It
+       does not say the DAMAGE is a budget. So: everything inside the full-power
+       radius is taken out of the grid, whatever that comes to, and a sample of
+       it keeps the 420 cap and flies. A shot into a heap leaves a crater you
+       can stand in.
+
+       The bead got finer since that cap was chosen - 0.1875 m where it was
+       0.175, and eight times as many of them in a block - so the fraction was
+       getting worse on its own. */
+    if(c>=take){
+      if(d <= rF){ cSet(w,x,y,z,S_AIR); razed++; }
+      w.touch(x,y,z); woken++; continue;
+    }
     /* radial where there is a radius, along the shot where there is not */
     let ux,uy,uz;
     if(d>0.001){ ux=ex/d; uy=ey/d; uz=ez/d; } else { ux=dx; uy=dy; uz=dz; }
@@ -6629,7 +6651,8 @@ function sandBlast(wx,wy,wz, dx,dy,dz, scale){
             px/pl*sp, py/pl*sp + sp*0.25, pz/pl*sp, m);
     thrown++;
   }
-  if(thrown||woken) G.dirty=true;
+  if(thrown||woken||razed) G.dirty=true;
+  if(razed) logEvent('blast razed '+razed+' cells, threw '+thrown);
   return thrown;
 }
 
@@ -12095,8 +12118,20 @@ function logLine(s){
    world changes under the player rather than the moments it is merely busy. */
 function logEvent(s){ logLine('EVENT  ' + s); }
 
+/* ACCUMULATED, NOT SNAPSHOT. A snapshot once a second of a counter that is
+   reset every tick reads ZERO for anything that happens and finishes between
+   two samples: his last log said scan=0 on every line for ninety-nine seconds
+   while he was shooting blocks apart, and that was a fact about when I looked
+   rather than about the engine. Sum every frame; keep the worst tick. */
+let LOG_SCAN=0, LOG_MOVE=0, LOG_PEAK=0, LOG_FR=0;
 function logSample(dt){
   if(!LOG_T0) { LOG_T0 = performance.now(); logHeader(); }
+  if(SAND){
+    LOG_SCAN += SAND.stats.scanned;
+    LOG_MOVE += SAND.stats.moves;
+    if(SAND.stats.scanned > LOG_PEAK) LOG_PEAK = SAND.stats.scanned;
+  }
+  LOG_FR++;
   LOG_T += dt;
   if(LOG_T < 1.0) return;
   LOG_T = 0;
@@ -12116,9 +12151,11 @@ function logSample(dt){
   ];
   if(w) parts.push(
     'awake=' + w.stats.awake,
-    'scan=' + w.stats.scanned,
+    'scan/s=' + LOG_SCAN,
+    'peak=' + LOG_PEAK,
     'defer=' + (w.stats.deferred||0),
-    'moves=' + w.stats.moves,
+    'moves/s=' + LOG_MOVE,
+    'frames=' + LOG_FR,
     'pages=' + w.pgn,
     'MB=' + (w.bytes()/1048576).toFixed(1));
   parts.push(
@@ -12129,6 +12166,7 @@ function logSample(dt){
     'world_inst=' + worldB.count,
     'bead_inst=' + sandB.count);
   logLine(parts.join(' '));
+  LOG_SCAN=0; LOG_MOVE=0; LOG_PEAK=0; LOG_FR=0;
 }
 function logHeader(){
   LOG.push('# Minesweeper Three Planes - black box');
@@ -12140,7 +12178,7 @@ function logHeader(){
          + ' safe ' + G.safeTotal + (G.lump ? ' | dungeon y ' + G.lump.y0 + '..' + G.lump.y1
            + ' r ' + G.lump.r.toFixed(1) : ''));
   LOG.push('# columns: t state fps at=cell y_m grav island hp air imm sub'
-         + ' awake scan defer moves pages MB lad_blocks masses queue grit'
+         + ' awake scan/s peak defer moves/s frames pages MB lad_blocks masses queue grit'
          + ' world_inst bead_inst');
 }
 function logDump(why){

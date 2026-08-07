@@ -6282,6 +6282,12 @@ function ladSweep(){
    beads and past it the ocean is water. */
 const LAD_DRAW_MAX = 5000;
 const LAD_DRAW_R = 224.0;
+/* How far the sea is drawn as BLOCKS before the sky shader's own ocean takes
+   over. Forty-five metres is about as far as the water reads as water rather
+   than as colour, and a disc of surface that size is a couple of thousand
+   blocks - inside the budget, where five thousand blocks of array order was
+   a straight edge across the sea. */
+const LIQ_FAR = 45.0, LIQ_FAR2 = LIQ_FAR*LIQ_FAR;
 function ladDraw(d, n){
   if(!LADM || !SAND) return n;
   const R2 = SAND_BEAD_R*SAND_BEAD_R, F2 = LAD_DRAW_R*LAD_DRAW_R;
@@ -6299,6 +6305,16 @@ function ladDraw(d, n){
   const boxed = new Set();
   for(const m of MASSES){
     if(!m || m.dead || m.n < LAD_MASS_MIN) continue;
+    /* AND A LIQUID IS NEVER ONE BOX. The ocean is a single mass of 665,280
+       lattice blocks whose bounding box is 180 m x 121 m x 180 m and 57% full,
+       so it passed the "solid enough to be one cube" test and was drawn as ONE
+       ENORMOUS TRANSLUCENT CUBE. That is every photograph he has sent: the
+       slab with an edge from above, the column from the waterline, the dark
+       pyramid against the stars from below.
+       The sea is a RECORD, and the record that draws it is the sky shader -
+       uSea below the horizon, out to a horizon that has no edge. Geometry is
+       only for the part you can reach. */
+    if(SM_K[m.mat] === K_LIQUID) continue;
     const bw=m.x1-m.x0+1, bh=m.y1-m.y0+1, bd=m.z1-m.z0+1;
     if(m.n < bw*bh*bd*0.55) continue;                    // too ragged to be one box
     const cxm=(m.x0+bw*0.5)*LAT_M, cym=(m.y0+bh*0.5)*LAT_M, czm=(m.z0+bd*0.5)*LAT_M;
@@ -6325,7 +6341,13 @@ function ladDraw(d, n){
     const px=(x+0.5)*LAT_M, py=(y+0.5)*LAT_M, pz=(z+0.5)*LAT_M;
     const ex=px-P.x, ey=py-P.y, ez=pz-P.z;
     const dd = ex*ex+ey*ey+ez*ez;
-    if(dd < R2 || dd > F2) continue;
+    /* AND A LIQUID IS ONLY DRAWN AS FAR AS YOU COULD SWIM TO. Past that the
+       shader's sea takes over, and Beer-Lambert has already turned these to
+       the shader's own colour by then, so the join is a fade rather than a
+       seam. Without the tighter limit the pass spent its whole budget on the
+       first five thousand blocks IN ARRAY ORDER - a rectangular patch of sea
+       with a straight edge across the middle of the ocean. */
+    if(dd < R2 || dd > (SM_K[mat] === K_LIQUID ? LIQ_FAR2 : F2)) continue;
     /* THE EDGE OF THE ARRAY IS NOT A FACE OF THE WORLD, and believing it was is
        THE BOX. A block whose neighbour is off the end of the array was counted
        as having a face on open air, so the ocean was drawn with four vertical
@@ -6588,13 +6610,35 @@ function sandBlast(wx,wy,wz, dx,dy,dz, scale){
     const b = a + ((rnd()*(nc-a))|0);
     const tmp=BLAST_CAND[a]; BLAST_CAND[a]=BLAST_CAND[b]; BLAST_CAND[b]=tmp;
   }
-  let thrown=0, woken=0;
+  let thrown=0, woken=0, razed=0;
   for(let c=0;c<nc;c++){
     const v=BLAST_CAND[c], ex=(v&1023)-512, ey=((v>>10)&1023)-512, ez=((v>>20)&1023)-512;
     const x=cx+ex, y=cy+ey, z=cz+ez, m=cGet(w,x,y,z);
     const d=Math.sqrt(ex*ex+ey*ey+ez*ez);
     const k = d<=rF ? 1 : 1 - (d-rF)/(rH-rF)*0.5;
-    if(c>=take){ w.touch(x,y,z); woken++; continue; }
+    /* PAST THE BUDGET IT IS STILL DESTROYED, and this is the fix for "some
+       beads appear but it is not dismounting as before".
+
+       BLAST_MAX is 420 and it was doing two jobs. Removing a cell from the grid
+       is one byte and is free; making a cell FLY is a GRIT entry, a ballistic
+       step every frame and an instance in the batch, and that is what costs.
+       They were tied together because they happen in the same loop, so the
+       CHEAP one inherited the EXPENSIVE one's cap - and the block kept 94% of
+       itself while a handful of cubes drifted off it.
+
+       NEXT.md rule 3 says visible debris is a budget, not a consequence. It
+       does not say the DAMAGE is a budget. So: everything inside the full-power
+       radius is taken out of the grid, whatever that comes to, and a sample of
+       it keeps the 420 cap and flies. A shot into a heap leaves a crater you
+       can stand in.
+
+       The bead got finer since that cap was chosen - 0.1875 m where it was
+       0.175, and eight times as many of them in a block - so the fraction was
+       getting worse on its own. */
+    if(c>=take){
+      if(d <= rF){ cSet(w,x,y,z,S_AIR); razed++; }
+      w.touch(x,y,z); woken++; continue;
+    }
     /* radial where there is a radius, along the shot where there is not */
     let ux,uy,uz;
     if(d>0.001){ ux=ex/d; uy=ey/d; uz=ez/d; } else { ux=dx; uy=dy; uz=dz; }
@@ -6607,7 +6651,8 @@ function sandBlast(wx,wy,wz, dx,dy,dz, scale){
             px/pl*sp, py/pl*sp + sp*0.25, pz/pl*sp, m);
     thrown++;
   }
-  if(thrown||woken) G.dirty=true;
+  if(thrown||woken||razed) G.dirty=true;
+  if(razed) logEvent('blast razed '+razed+' cells, threw '+thrown);
   return thrown;
 }
 
@@ -6814,8 +6859,20 @@ function sandDraw(){
       if(bulk >= 0 && !SM_SEE[bulk]) continue;         // a block of nothing at all
       /* AND IF THE BLOCK IS ON A HIGHER RUNG, THE HIGHER RUNG DRAWS IT. Past
          ten metres a promoted block stops being four thousand beads and becomes
-         the one cube it has been all along in the bookkeeping. */
-      if(bulkFar && LADM[(bby*LNZ + bbz)*LNX + bbx]) continue;
+         the one cube it has been all along in the bookkeeping.
+
+         BUT IT STILL COUNTS AS SOMETHING BEING HERE, and forgetting that is why
+         THE BEADS DISAPPEARED. cl is the flag that says "this chunk might hold
+         something worth drawing", and a pass that finds nothing clears it - a
+         chunk that only ever saw air passing through should stop being looked
+         at. Skipping a promoted block because it is FAR AWAY was reaching that
+         same clause: found stayed nought, cl was cleared, and the chunk was
+         never examined again. So the ocean was struck off the drawable list on
+         the first frame it was distant, and walking up to it afterwards showed
+         nothing, for ever. His log said bead_inst=5000 for four hundred seconds
+         straight - exactly LAD_DRAW_MAX, the mass pass alone, and not one bead
+         behind it. */
+      if(bulkFar && LADM[(bby*LNZ + bbz)*LNX + bbx]){ found++; continue; }
       for(let ly=0; ly<PGS && n<SAND_DRAW_MAX; ly++){
         const y=oy+ly; if(y>=w.H) break;
         for(let lz=0; lz<PGS && n<SAND_DRAW_MAX; lz++){
@@ -12090,10 +12147,22 @@ function logEvent(s){ logLine('EVENT  ' + s); }
 
 
 
+/* ACCUMULATED, NOT SNAPSHOT. A snapshot once a second of a counter that is
+   reset every tick reads ZERO for anything that happens and finishes between
+   two samples: his last log said scan=0 on every line for ninety-nine seconds
+   while he was shooting blocks apart, and that was a fact about when I looked
+   rather than about the engine. Sum every frame; keep the worst tick. */
+let LOG_SCAN=0, LOG_MOVE=0, LOG_PEAK=0, LOG_FR=0;
 function logSample(dt){
 
   if(!LOG_T0) { LOG_T0 = performance.now(); logHeader(); }
 
+  if(SAND){
+    LOG_SCAN += SAND.stats.scanned;
+    LOG_MOVE += SAND.stats.moves;
+    if(SAND.stats.scanned > LOG_PEAK) LOG_PEAK = SAND.stats.scanned;
+  }
+  LOG_FR++;
   LOG_T += dt;
 
   if(LOG_T < 1.0) return;
@@ -12132,11 +12201,13 @@ function logSample(dt){
 
     'awake=' + w.stats.awake,
 
-    'scan=' + w.stats.scanned,
+    'scan/s=' + LOG_SCAN,
+    'peak=' + LOG_PEAK,
 
     'defer=' + (w.stats.deferred||0),
 
-    'moves=' + w.stats.moves,
+    'moves/s=' + LOG_MOVE,
+    'frames=' + LOG_FR,
 
     'pages=' + w.pgn,
 
@@ -12158,6 +12229,7 @@ function logSample(dt){
 
   logLine(parts.join(' '));
 
+  LOG_SCAN=0; LOG_MOVE=0; LOG_PEAK=0; LOG_FR=0;
 }
 
 function logHeader(){
@@ -12180,7 +12252,7 @@ function logHeader(){
 
   LOG.push('# columns: t state fps at=cell y_m grav island hp air imm sub'
 
-         + ' awake scan defer moves pages MB lad_blocks masses queue grit'
+         + ' awake scan/s peak defer moves/s frames pages MB lad_blocks masses queue grit'
 
          + ' world_inst bead_inst');
 
