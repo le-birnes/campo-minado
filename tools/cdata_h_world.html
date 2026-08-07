@@ -2870,8 +2870,23 @@ function genWorld(d){
         const i=idx(x,y,z);
         if(!inLump(x,y,z)) continue;
         if(G.st[i]!==AIR || (G.scenery&&G.scenery[i])) continue;
-        if(G.st[idx(x,y-1,z)]!==AIR) continue;          // room to stand up in
-        if(G.st[idx(x,y+1,z)]===AIR) continue;          // something under you
+        /* WHICH WAY IS UNDER. The dungeon is played with gravity pointing at
+           -Y, so the block under your feet is y-1 and the room over your head
+           is y+1. Written the other way round, this put the spawn hard against
+           the roof of the lump - two blocks from open sea. */
+        if(G.st[idx(x,y+1,z)]!==AIR) continue;          // room to stand up in
+        if(G.st[idx(x,y-1,z)]===AIR) continue;          // something under you
+        if(G.hull && G.hull[i]) continue;
+        /* AND NOT AGAINST THE HULL. Four blocks of rock between you and the
+           sea, so the first thing you do cannot be to shoot through it. */
+        let near=false;
+        for(let d=1;d<=4 && !near;d++){
+          for(let k=0;k<6;k++){
+            const ax=x+NB26X[k]*d, ay=y+NB26Y[k]*d, az=z+NB26Z[k]*d;
+            if(!inside(ax,ay,az) || (G.hull && G.hull[idx(ax,ay,az)])){ near=true; break; }
+          }
+        }
+        if(near) continue;
         best=i; break outer;
       }
       if(best>=0){
@@ -8927,6 +8942,8 @@ function buildOuterWorld(){
      anything the water can reach through the rock is a hole, and a hole gets
      filled with stone. What it cannot reach is the inside of the dungeon and
      is left exactly as the level generator built it. */
+  if(!G.hull || G.hull.length !== G.nx*G.ny*G.nz) G.hull = new Uint8Array(G.nx*G.ny*G.nz);
+  G.hull.fill(0);
   {
     /* A SHELL, not a flood fill. Two goes at asking "what can the water
        reach" both left the dungeon open, and connectivity is the wrong tool
@@ -8954,13 +8971,28 @@ function buildOuterWorld(){
         for(let k=0;k<6 && !edge;k++){
           const ax=x+NB26X[k], ay=y+NB26Y[k], az=z+NB26Z[k];
           if(!inLump(ax,ay,az)) edge = true;
-          else if(pass>0 && G.scenery[idx(ax,ay,az)] && G.mat[idx(ax,ay,az)]===M_STONE
-                  && G.st[idx(ax,ay,az)]===ROCK) edge = true;
+          /* the second layer grows off the FIRST, and it has to ask the hull
+             rather than asking scenery - the hull is not scenery any more, so
+             asking scenery found nothing and the wall came out one thick */
+          else if(pass>0 && G.hull[idx(ax,ay,az)]) edge = true;
         }
         if(edge) todo.push(i);
       }
       for(const i of todo){
-        G.st[i]=ROCK; G.mat[i]=M_STONE; G.scenery[i]=1; G.mine[i]=0; sealed++;
+        /* NOT SCENERY, and this is the whole point of it. Scenery is
+           BREACHABLE - that is what item 5 made it - so a two-block wall of it
+           between the player and the sea is two shots and a hole, and Marcelo
+           breached it from the spawn and saw the sky before he had walked
+           anywhere. The reveal cannot be something you can shoot your way to
+           in the first ten seconds.
+
+           So while the dungeon is being played this shell is THE EDGE OF THE
+           WORLD - the same black bedrock as the outer shell, the same promise:
+           this does not open, do not waste a shot on it. revealIsland() is
+           what turns it into breachable rock, afterwards, when finding out
+           what is on the other side is the point rather than the spoiler. */
+        G.st[i]=ROCK; G.mat[i]=M_STONE; G.scenery[i]=0; G.mine[i]=0;
+        G.hull[i]=1; sealed++;
       }
     }
     G.sealed = sealed;
@@ -9169,6 +9201,10 @@ function buildOuterWorld(){
    else. That is the whole difference between a reveal and a teleport. */
 function revealIsland(){
   G.island = true; G.dungeon = false; G.dirty = true;
+  /* AND THE HULL BECOMES ROCK YOU CAN OPEN. It was the edge of the world for
+     as long as the dungeon was a dungeon; now that you know what is outside
+     it, getting through it is the game rather than the spoiler. */
+  if(G.hull) for(let i=0;i<G.hull.length;i++) if(G.hull[i]) G.scenery[i]=1;
   toast('The sand lets you go. Something above you has opened.', 5200);
 }
 
@@ -9263,6 +9299,12 @@ function buildVials(set, cx, cz, landY, rock0){
         if(t>hi) hi=t;
       }
       if(!ok || hi < H+1) continue;
+      /* AND CLEAR OF THE SHAFT. It sat on top of it, so climbing out of the
+         sea put you inside the house through the floor - Marcelo came up "at
+         what appeared to be the house shelf". */
+      if(G.holeX !== undefined &&
+         hx - 2 <= G.holeX && G.holeX <= hx + W + 2 &&
+         hz - 2 <= G.holeZ && G.holeZ <= hz + D + 2) continue;
       /* flat wins, and among flat ones the one that is not right at the water */
       const sc = (hi-lo)*10 + Math.abs(hi-(H+2));
       if(!best || sc < best.sc) best={hx,hz,gy:hi,sc};
