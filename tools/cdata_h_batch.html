@@ -495,6 +495,14 @@ body.touch.portrait #rotate{display:grid;}
           number to light up what it counts — and if its mines are all flagged,<br>
           the number turns your shot loose on everything else it touches</div>
         <div><kbd>H</kbd>hint · lights the reasoning and plays the move</div>
+        <div><kbd>F3</kbd><b>the black box.</b> Writes <b>last_run.txt</b> into your
+          Downloads folder: a second-by-second record of what the engine was
+          actually doing — chunks awake, cells scanned, cells deferred by the
+          seven-metre sphere, pages live and their weight, the ladder's size,
+          and a line at each of the moments the world changes under you. It
+          also writes itself when a run ends, so a death needs no key pressed.
+          <br>It is a tool for whoever is debugging this, not for you: leave the
+          file where it lands and it will be read.</div>
         <div><kbd>Chests</kbd>buried in the safe blocks of a minefield. Shoot one<br>
           and it gives up a single thing — almost always <b>the eye</b>, which<br>
           makes one unfinished number simply tell you where its mines are</div>
@@ -939,7 +947,14 @@ const CUSTOM = 3;
    footprint still allocates a page only where something has actually moved.
    The block arrays grow with it and they are bytes - about 1.3 MB for all of
    them together. */
-const DUNGEON = {nx:26, nz:26, ny:38, dungeon:true};
+/* WIDE ENOUGH TO HAVE A SEA IN IT. RISL - how far the island's sand reaches -
+   came out at 14 on a 26-wide grid whose half-width is 13, so THE ISLAND WAS
+   WIDER THAN THE WORLD. There was no ocean anywhere in the array: the island
+   ran to the edge in every direction, and that is why every photograph from
+   outside is a cube. The sky shader has drawn an endless sea below the horizon
+   the whole time and nothing could ever be seen of it, because a slab of rock
+   was standing in front of it. */
+const DUNGEON = {nx:40, nz:40, ny:38, dungeon:true};
 /* HOW WIDE THE PLAYABLE DUNGEON IS, in blocks - the old whole board, which is
    what a difficulty used to mean. The WORLD around it is sized from this
    rather than the other way round. */
@@ -959,7 +974,16 @@ function dungeonGeom(nx, ny, nz){
   const RCYL = RIN + HULLT;
   const RISL = RCYL + 4;                             // the sand slopes away from it
   const cx = nx/2, cz = nz/2;
-  const y0 = ISLY + HULLT, y1 = ny - HULLT - 1;
+  /* AND ITS ROOF IS WELL UNDER THE WATERLINE. y0 was ISLY + HULLT, and ISLY is
+     three above SEAY, so the dungeon's ceiling came out EXACTLY AT SEA LEVEL -
+     which is why shooting a wall fifteen seconds into the first run showed him
+     the sky and the moon. What should be on the other side of that wall is the
+     ocean, and the ocean starts below the waterline.
+
+     Four cells of water over the roof: 18 m, well past the seven-metre bubble,
+     so breaking through shows you the sea rather than the horizon. */
+  const DEEP = 4;
+  const y0 = Math.max(ISLY + HULLT, SEAY + DEEP), y1 = ny - HULLT - 1;
   return {SEAY, ISLY, HULLT, RIN, RCYL, RISL, cx, cz, y0, y1};
 }
 /* THE BOX THE DUNGEON IS DUG INTO: the largest one that fits in the interior,
@@ -5364,15 +5388,28 @@ function sandTick(w, gdir){
 
      Only the game's own world gets the sphere. A harness that builds a tank and
      ticks it has no player in it and must simulate all of what it built. */
-  const sphere = (w === SAND && SIM_SPHERE) ? SIM_R + SCS*CELL_M*0.87 : 0;
-  const sph2 = sphere*sphere;
+  /* TO THE CHUNK'S BOX, NOT ITS MIDDLE. Measuring to the centre and adding a
+     half-diagonal admits a ball of 9.6 m instead of 7 - and measured, that is
+     663,552 cells in a tick against a ceiling of 217,961, three times over.
+     The distance to the nearest point of the chunk is the honest test and it
+     costs three subtractions. */
+  const sphere = (w === SAND && SIM_SPHERE) ? SIM_R : 0;
+  const sph2 = sphere*sphere, CHM = SCS*CELL_M;
+  /* and the BOX around the ball, in cells, so a chunk that only clips its
+     corner is scanned only where it clips - otherwise the bound is "chunks
+     that touch it", which is a sixth again bigger than the thing it bounds */
+  const spx0 = Math.floor((P.x-SIM_R)/CELL_M), spx1 = Math.ceil((P.x+SIM_R)/CELL_M);
+  const spy0 = Math.floor((P.y-SIM_R)/CELL_M), spy1 = Math.ceil((P.y+SIM_R)/CELL_M);
+  const spz0 = Math.floor((P.z-SIM_R)/CELL_M), spz1 = Math.ceil((P.z+SIM_R)/CELL_M);
 
   for(let r=0; r<rect.length; r+=7){
     const c = rect[r];
     const cx = c % CW, q = (c/CW)|0, cz = q % CD, cy = (q/CD)|0;
     const bx = cx*SCS, by = cy*SCS, bz = cz*SCS;
     if(sph2){
-      const ex=(cx+0.5)*SCS*CELL_M-P.x, ey=(cy+0.5)*SCS*CELL_M-P.y, ez=(cz+0.5)*SCS*CELL_M-P.z;
+      const ex=Math.max(cx*CHM-P.x, 0, P.x-(cx+1)*CHM);
+      const ey=Math.max(cy*CHM-P.y, 0, P.y-(cy+1)*CHM);
+      const ez=Math.max(cz*CHM-P.z, 0, P.z-(cz+1)*CHM);
       if(ex*ex+ey*ey+ez*ez > sph2){
         /* put it back exactly as it was and spend nothing on it */
         const o=c*6, b=w.cb;
@@ -5383,8 +5420,14 @@ function sandTick(w, gdir){
         continue;
       }
     }
-    const x0=rect[r+1], y0=rect[r+2], z0=rect[r+3];
-    const x1=rect[r+4], y1=rect[r+5], z1=rect[r+6];
+    let x0=rect[r+1], y0=rect[r+2], z0=rect[r+3];
+    let x1=rect[r+4], y1=rect[r+5], z1=rect[r+6];
+    if(sph2){
+      if(spx0-bx > x0) x0 = spx0-bx;   if(spx1-bx < x1) x1 = spx1-bx;
+      if(spy0-by > y0) y0 = spy0-by;   if(spy1-by < y1) y1 = spy1-by;
+      if(spz0-bz > z0) z0 = spz0-bz;   if(spz1-bz < z1) z1 = spz1-bz;
+      if(x1<x0 || y1<y0 || z1<z0) continue;
+    }
     const span = x1-x0;
     for(let ny=y0; ny<=y1; ny++){
       /* Bottom-up when things fall, top-down when they do not: the ending
@@ -6204,10 +6247,21 @@ function ladDraw(d, n){
     const ex=px-P.x, ey=py-P.y, ez=pz-P.z;
     const dd = ex*ex+ey*ey+ez*ez;
     if(dd < R2 || dd > F2) continue;
+    /* THE EDGE OF THE ARRAY IS NOT A FACE OF THE WORLD, and believing it was is
+       THE BOX. A block whose neighbour is off the end of the array was counted
+       as having a face on open air, so the ocean was drawn with four vertical
+       walls and a floor exactly where the array stops - a tank, with the island
+       standing in it and the player inside it looking at the glass.
+
+       Every photograph of "a box around the tree" is this. The sea does not end
+       at the array; the array is only as far as it is STORED, and past that the
+       sky shader has been drawing the same ocean out to the horizon all along.
+       So a neighbour that is off the end is not air - it is more sea, and the
+       face is not drawn. */
     let open = 0;
     for(let k=0;k<6;k++){
       const ax=x+NB26X[k], ay=y+NB26Y[k], az=z+NB26Z[k];
-      if(ax<0||ay<0||az<0||ax>=nx||ay>=ny||az>=nz){ open=1; break; }
+      if(ax<0||ay<0||az<0||ax>=nx||ay>=ny||az>=nz) continue;   // more world, not air
       if(LADM[(ay*nz + az)*nx + ax] !== mat){ open=1; break; }
     }
     if(!open) continue;
@@ -9535,10 +9589,17 @@ function buildOuterWorld(){
     const rough = Math.sin(x*0.9)*Math.cos(z*0.7)*0.7 + Math.sin(z*1.7)*0.5;
     return Math.round(ISLY + t*t*(SEAY+4-ISLY) + rough*t);
   };
+  /* AND IT STANDS ON A SEA FLOOR RATHER THAN FILLING THE WORLD TO ITS BOTTOM.
+     Running the fill to y < G.ny made the island a SLAB - surface on top,
+     solid rock all the way down to the last row of the array - so from outside
+     it read as a block of stone rather than as a mountain with water round it.
+     A seamount narrows as it goes up and its foot is on the seabed; below the
+     seabed there is nothing to draw and nothing to store. */
+  const SEAB = G.ny - 2;                        // the ocean floor
   for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
     if(dist(x,z) <= RCYL) continue;             // the cylinder is not sand
     const t = landY(x,z); if(t<0) continue;
-    for(let y=Math.max(0,t); y<G.ny; y++)
+    for(let y=Math.max(0,t); y<=SEAB; y++)
       set(x,y,z, y > t+2 ? M_STONE : (y >= SEAY-1 ? M_WETSAND : M_DRYSAND));
   }
 
@@ -9773,6 +9834,7 @@ function enterWorldHud(){
 }
 
 function revealIsland(){
+  logEvent('revealIsland: pages='+(SAND?SAND.pgn:0)+' lad='+ladStats.blocks+' awake='+(SAND?SAND.awake.length:0));
   G.island = true; G.dungeon = false; G.dirty = true;
   enterWorldHud();
   /* AND THE HULL BECOMES ROCK YOU CAN OPEN. It was the edge of the world for
@@ -9995,6 +10057,7 @@ function bossBlows(x,y,z){
      time and the boss dying is when you find that out, so from here on down is
      +Y and it never goes back. */
   G.gravK = -1;
+  logEvent('GRAVITY FLIPPED: down is now +Y. pages='+(SAND?SAND.pgn:0)+' lad_blocks='+ladStats.blocks+' masses='+ladStats.masses);
   /* AND YOU GO THE WAY THAT IS NOW UP. A positive vy under reversed gravity is
      DOWNWARD - it drove you into the floor at the moment the floor became the
      ceiling. Up is the direction gravity is not pulling, and that is one sign. */
@@ -10031,6 +10094,7 @@ function bossBlows(x,y,z){
    grid is carved with it, so the shaft is real to the sand, to the shot and to
    your body all at once. */
 function bossHole(wx, wz){
+  logEvent('bossHole opened at '+wx.toFixed(1)+','+wz.toFixed(1));
   const bx = Math.max(1, Math.min(G.nx-2, Math.floor(wx/BLOCK)));
   const bz = Math.max(1, Math.min(G.nz-2, Math.floor(wz/BLOCK)));
   const r = 2;
@@ -10625,6 +10689,7 @@ window.addEventListener('keydown', e=>{
   /* The Forge has its own keyboard. Falling through to the game's would toggle
      plane arrows, ask for a hint and, on R, throw the model away and start a
      new cave. */
+  if(e.code==='F3'){ e.preventDefault(); logDump('F3'); return; }
   if(G.state==='forge'){ fzKey(e); return; }
   switch(e.code){
     case 'KeyW': case 'ArrowUp':    IN.f=1; break;
@@ -11888,6 +11953,185 @@ $('fzTest').onclick = ()=>{
 $('btnForge').addEventListener('click', ()=>fzOpen());
 if(/[?&]forge/.test(location.search)) setTimeout(()=>fzOpen(), 60);
 
+/* ==========================================================================
+
+   THE BLACK BOX
+
+   --------------------------------------------------------------------------
+
+   Marcelo: "can't you make like a debugger to check what is being processed
+
+   and watch the bot and me play more objectively? ... just a way you can read.
+
+   Perhaps a last_run.txt log or something you can access."
+
+
+
+   Right, and a screen overlay would be the wrong answer: it tells HIM what is
+
+   happening while he is busy playing, and I cannot see it at all. A file can be
+
+   left behind and read afterwards by either of us, which is the whole point.
+
+
+
+   The page is opened from file:// and cannot write to disk, so it keeps a ring
+
+   in memory and DOWNLOADS it - which lands in Downloads/last_run.txt, a path I
+
+   can open. It writes a sample once a second and a line for anything that
+
+   happens, and it dumps itself automatically when the run ends, so a death or a
+
+   win needs no key pressed at the moment it matters least.
+
+
+
+   F3 dumps it whenever you like, mid-run. */
+
+const LOG_MAX = 4000;
+
+const LOG = [];
+
+let LOG_T = 0, LOG_DUMPED = false, LOG_T0 = 0;
+
+function logLine(s){
+
+  LOG.push(((performance.now()-LOG_T0)/1000).toFixed(2) + '  ' + s);
+
+  if(LOG.length > LOG_MAX) LOG.shift();
+
+}
+
+/* AN EVENT, and these are the ones worth a line each: they are the moments the
+
+   world changes under the player rather than the moments it is merely busy. */
+
+function logEvent(s){ logLine('EVENT  ' + s); }
+
+
+
+function logSample(dt){
+
+  if(!LOG_T0) { LOG_T0 = performance.now(); logHeader(); }
+
+  LOG_T += dt;
+
+  if(LOG_T < 1.0) return;
+
+  LOG_T = 0;
+
+  const w = SAND;
+
+  const bx = Math.floor(P.x/BLOCK), by = Math.floor(P.y/BLOCK), bz = Math.floor(P.z/BLOCK);
+
+  const parts = [
+
+    'state=' + G.state,
+
+    'fps=' + (dt>0 ? (1/dt).toFixed(0) : '?'),
+
+    'at=' + bx + ',' + by + ',' + bz,
+
+    'y_m=' + P.y.toFixed(1),
+
+    'grav=' + (gsign()>0 ? '+Y_down' : '-Y_down'),
+
+    'island=' + (G.island?1:0),
+
+    'hp=' + (P.hp!==undefined ? P.hp.toFixed(0) : '?'),
+
+    'air=' + (P.air!==undefined ? P.air.toFixed(0) : '?'),
+
+    'imm=' + (P.imm||0).toFixed(2),
+
+    'sub=' + (P.sub||0).toFixed(2)
+
+  ];
+
+  if(w) parts.push(
+
+    'awake=' + w.stats.awake,
+
+    'scan=' + w.stats.scanned,
+
+    'defer=' + (w.stats.deferred||0),
+
+    'moves=' + w.stats.moves,
+
+    'pages=' + w.pgn,
+
+    'MB=' + (w.bytes()/1048576).toFixed(1));
+
+  parts.push(
+
+    'lad_blocks=' + ladStats.blocks,
+
+    'masses=' + ladStats.masses,
+
+    'queue=' + LADQ.length,
+
+    'grit=' + (GRIT.moving||0),
+
+    'world_inst=' + worldB.count,
+
+    'bead_inst=' + sandB.count);
+
+  logLine(parts.join(' '));
+
+}
+
+function logHeader(){
+
+  LOG.push('# Minesweeper Three Planes - black box');
+
+  LOG.push('# ' + new Date().toISOString());
+
+  LOG.push('# world ' + G.nx + 'x' + G.ny + 'x' + G.nz + ' cells of ' + BLOCK + ' m'
+
+         + ' | lattice ' + LAT_M + ' m | bead ' + CELL_M.toFixed(4) + ' m'
+
+         + ' | mode ' + (G.mode===MODE_DUNGEON?'DUNGEON':'SWEEP') + ' diff ' + G.diff);
+
+  LOG.push('# seaY ' + G.seaY + ' rock0 ' + G.rock0 + ' mines ' + G.mines
+
+         + ' safe ' + G.safeTotal + (G.lump ? ' | dungeon y ' + G.lump.y0 + '..' + G.lump.y1
+
+           + ' r ' + G.lump.r.toFixed(1) : ''));
+
+  LOG.push('# columns: t state fps at=cell y_m grav island hp air imm sub'
+
+         + ' awake scan defer moves pages MB lad_blocks masses queue grit'
+
+         + ' world_inst bead_inst');
+
+}
+
+function logDump(why){
+
+  try{
+
+    logLine('DUMP  ' + (why||'asked'));
+
+    const NLC = String.fromCharCode(10);
+    const blob = new Blob([LOG.join(NLC) + NLC], {type:'text/plain'});
+
+    const a = document.createElement('a');
+
+    a.href = URL.createObjectURL(blob);
+
+    a.download = 'last_run.txt';
+
+    document.body.appendChild(a); a.click(); a.remove();
+
+    setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+
+    toast('last_run.txt written to Downloads.', 1600);
+
+  }catch(e){}
+
+}
+
 function frame(now){
   requestAnimationFrame(frame);
   let dt = Math.min(0.05, (now-last)/1000); last=now;
@@ -11898,6 +12142,10 @@ function frame(now){
      no physics, no enemies, no board. It returns before any of that runs. */
   if(G.state==='forge'){ fzFrame(dt); return; }
 
+  logSample(dt);
+  /* AND IT DUMPS ITSELF WHEN THE RUN ENDS, because the moment you most want the
+     log is the moment you are least likely to press a key for it. */
+  if((G.state==='over' || G.state==='won') && !LOG_DUMPED){ LOG_DUMPED = true; logDump(G.state); }
   const sim = dt * (G.state==='over' ? G.slowmo : 1);
   if(G.state==='over' && G.slowmo<1) G.slowmo = Math.min(1, G.slowmo + dt*0.35);
 
