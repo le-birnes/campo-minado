@@ -58,7 +58,11 @@
     G.holeX = (G.nx/2)|0; G.holeZ = (G.nz/2)|0;
     G.noWin = true;
     G.gravK = -1; rollReset();
-    buildIsland();
+    /* THE WORLD IS BUILT BY genWorld NOW. All the boss does is let gravity go
+     and open the last blocks of a well that has been full of sea the whole
+     time - which is the fix for "the whole scenario is changing". */
+  revealIsland();
+  bossHole((G.holeX+0.5)*BLOCK, (G.holeZ+0.5)*BLOCK);
 
     var hr = parseFloat((location.search.match(/hour=([\d.]+)/) || [])[1]);
     if(isFinite(hr)) SKY_T0 = tGlobal - (hr - 0.16)*SKY_DAY;

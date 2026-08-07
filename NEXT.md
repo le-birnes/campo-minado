@@ -129,6 +129,35 @@ drying out.
 - Liquid isotropy is 0.88 against the powders' 0.97. Quantisation at spread 5.
 - The **dungeon bot ceiling** at 41% is still unexplained.
 
+## PRIORITY, RESTATED BY HIM 2026-08-07
+
+> "World and physics have top priority, then cosmetics."
+
+### 0. MOMENTUM - and it is a law, not a shot feature
+
+> "Shooting a bead should make it fly forward very fast, LIKE A ROCK PELLET
+> SHOT BY A REAL GUN would, if not destroyed. If gun surpasses bead integrity,
+> then cool, but if not, item should be propelled (INELASTIC COLLISION, those
+> rules should apply as I intend to, later, build damn rockets burning fuel and
+> flying to the moon)."
+
+It has to be written as a law because he is going to build on it. Momentum is
+conserved: the shot carries p = m*v and delivers it. Two outcomes, one test
+between them:
+
+  * energy per cell EXCEEDS the material's INTEGRITY - a new column, how much
+    it takes to break a bead of that material - and the bead is destroyed and
+    becomes debris
+  * it does NOT, and the bead survives and takes the momentum, leaving at
+    v = p/m. Dense beads move slowly and hit hard; light ones are flung.
+
+And a propelled bead must be able to break or propel what IT hits, because the
+chain is the whole point. GRIT already carries per-bead velocity, so the flight
+exists; what is missing is the collision that hands momentum on.
+
+The same conservation is what a rocket needs - mass thrown one way, the vehicle
+the other - so DO NOT SPECIAL-CASE THE GUN.
+
 ## WHAT MARCELO ASKED FOR NEXT, 2026-08-07, in his priority order
 
 Full detail in the vault: "The emergence, the vial, and teaching agy the Forge".

@@ -24,7 +24,11 @@ setTimeout(()=>{ try{
   const bx=(G.nx/2)|0, bz=(G.nz/2)|0;
   G.holeX=bx; G.holeZ=bz;
   G.gravK=-1; sandWakeLoose();
-  buildIsland();
+  /* THE WORLD IS BUILT BY genWorld NOW. All the boss does is let gravity go
+     and open the last blocks of a well that has been full of sea the whole
+     time - which is the fix for "the whole scenario is changing". */
+  revealIsland();
+  bossHole((G.holeX+0.5)*BLOCK, (G.holeZ+0.5)*BLOCK);
   const w=SAND;
   R.push(`gravity ${G.gravK} gsign ${gsign()} sandDir ${sandDir()} ` + (gsign()<0 ? 'ok, down is +Y' : 'FAULT'));
 

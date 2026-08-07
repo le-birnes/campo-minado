@@ -6,7 +6,11 @@ setTimeout(()=>{ try{
      and headless Chrome sat out its whole budget doing it — the harness calls
      that an endless loop and it is right to. The sequence itself is tested in
      h_ending.js where nothing draws; this only needs the destination. */
-  buildIsland();
+  /* THE WORLD IS BUILT BY genWorld NOW. All the boss does is let gravity go
+     and open the last blocks of a well that has been full of sea the whole
+     time - which is the fix for "the whole scenario is changing". */
+  revealIsland();
+  bossHole((G.holeX+0.5)*BLOCK, (G.holeZ+0.5)*BLOCK);
   /* stand back and look across the bank at the water */
   const cx=(G.nx/2)*BLOCK, cz=(G.nz/2)*BLOCK;
   P.x=cx - G.nx*BLOCK*0.42; P.y=G.ny*BLOCK*0.52; P.z=cz - G.nz*BLOCK*0.42;

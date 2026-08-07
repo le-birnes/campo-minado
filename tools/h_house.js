@@ -7,7 +7,11 @@ setTimeout(()=>{ try{
      without a word, so a six-block house on it is a floor and some litter. */
   G.mode=MODE_DUNGEON; seed=5; genWorld(0, true); G.state='play';
   G.noWin=true; G.island=false; G.gravK=1;
-  buildIsland();
+  /* THE WORLD IS BUILT BY genWorld NOW. All the boss does is let gravity go
+     and open the last blocks of a well that has been full of sea the whole
+     time - which is the fix for "the whole scenario is changing". */
+  revealIsland();
+  bossHole((G.holeX+0.5)*BLOCK, (G.holeZ+0.5)*BLOCK);
   const V=(location.search.match(/hv=(\w+)/)||[])[1] || 'out';
   const v0=VIALS[0]||{x:G.nx/2,y:2,z:G.nz/2};
   let hx=0,hy=0,hz=0,n=0;

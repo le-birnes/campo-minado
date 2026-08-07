@@ -8840,7 +8840,9 @@ const EMERGE_T = 2.6;                   // seconds of falling upward
      y = ROCK0      the top of the chunk, and the dungeon is still inside it
      y = ny-1       the sea floor
    ========================================================================== */
+let OUTER_N = 0;
 function buildOuterWorld(){
+  OUTER_N++;
   const N = G.nx*G.ny*G.nz;
   if(!G.scenery || G.scenery.length !== N) G.scenery = new Uint8Array(N);
   G.scenery.fill(0);
@@ -8933,8 +8935,6 @@ function buildOuterWorld(){
   const hx=(G.holeX!==undefined?G.holeX:Math.round(cx+R*0.30));
   const hz=(G.holeZ!==undefined?G.holeZ:Math.round(cz-R*0.15));
   const hr=Math.max(2,Math.round(R*0.22));
-  /* AND IT IS REMEMBERED. The well is dug now and the boss opens its last few
-     blocks later, so both ends have to agree about where it is. */
   G.holeX = hx; G.holeZ = hz; G.holeR = hr;
   {
     let tx=Math.round(cx-R*0.55), tz=Math.round(cz+R*0.35);
@@ -9333,11 +9333,7 @@ function bossHole(wx, wz){
   const bz = Math.max(1, Math.min(G.nz-2, Math.floor(wz/BLOCK)));
   const r = 2;
   G.holeX = bx; G.holeZ = bz; G.holeR = r;
-  /* ONLY THE SEALED LENGTH. Everything above the roof of the rock is already
-     a flooded well, and clearing it would empty the sea out of the one thing
-     that is supposed to come down after you. */
-  const y0 = (G.rock0 !== undefined) ? G.rock0 : 0;
-  for(let y=y0;y<G.ny;y++) for(let dz=-r;dz<=r;dz++) for(let dx=-r;dx<=r;dx++){
+  for(let y=0;y<G.ny;y++) for(let dz=-r;dz<=r;dz++) for(let dx=-r;dx<=r;dx++){
     if(dx*dx+dz*dz > r*r+1) continue;
     const x=bx+dx, z=bz+dz;
     if(!inside(x,y,z)) continue;

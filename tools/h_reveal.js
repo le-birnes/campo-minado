@@ -10,7 +10,11 @@ setTimeout(()=>{ try{
   let rock0=0; for(let i=0;i<N;i++) if(G.st[i]!==AIR) rock0++;
   bossBlows(9*BLOCK, 4*BLOCK, 9*BLOCK);
   R.push(`boss: gravK ${f2(G.gravK)} gsign ${gsign()} ` + (gsign()<0?'ok, inverted':'FAULT'));
-  buildIsland();
+  /* THE WORLD IS BUILT BY genWorld NOW. All the boss does is let gravity go
+     and open the last blocks of a well that has been full of sea the whole
+     time - which is the fix for "the whole scenario is changing". */
+  revealIsland();
+  bossHole((G.holeX+0.5)*BLOCK, (G.holeZ+0.5)*BLOCK);
   R.push(`after the island: gravK ${f2(G.gravK)} ` + (G.gravK<0 ? 'ok, it STAYED' : 'FAULT: put back'));
   let rock=0, sea=0, sand=0, wood=0, air=0;
   for(let i=0;i<N;i++){
