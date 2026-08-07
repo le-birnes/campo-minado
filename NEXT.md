@@ -158,43 +158,44 @@ And the same solver is what the rocket in item 0 needs - thrust is a force with
 a direction, drag opposes, gravity pulls. ONE SOLVER, THREE CONSUMERS: the
 swimmer, the bead, and the rocket.
 
-### 0c. THE WORLD IS NOT THE BOARD
+### 0c. TWO MODES, TWO KINDS OF THING
 
-> "Why is the world small? It shouldn't be 18 blocks wide, it should be
-> infinite."
+> "Minesweeper 3D shouldn't be touched anymore (except the game mechanics, I
+> mean the world). The dungeon mode, on the other hand, is actually an OPEN
+> WORLD."
 
-**The cause.** `G.st` / `G.mat` / `G.mine` are the MINESWEEPER BOARD. It is
-finite by necessity - winning means revealing every safe block, so it has to be
-countable - and it is sized by difficulty. buildOuterWorld wrote the island and
-the sea into that same array, so the world inherited the puzzle's bounds. Two
-different things sharing one array, and only one of them has any business being
-finite.
+This is the correction that makes the rest tractable, and I had it wrong.
 
-**What is already infinite.** The sky, the sun, the moon and the sea below the
-horizon line are RECORDS, evaluated per pixel on whatever ray misses the
-geometry. They cost one triangle and have no extent at all. The world already
-LOOKS endless; what is small is the part you can swim in and disturb.
+**MODE_SWEEP is a BOARD.** Finite by necessity - winning means revealing every
+safe block, so it has to be countable - and it is finished. Its world is not to
+be touched. buildOuterWorld already only runs for dungeon mode, so sweep has no
+sky, no sea and no island, and that is correct and stays.
 
-**Why it cannot just be made bigger.** The bead grid is BLOCK/16 over the whole
-board: 288x384x288 cells and 31 MB at 18x24x18. Ten times wider is a HUNDRED
-times the memory. Growing the array is not the answer at any size.
+**MODE_DUNGEON is an OPEN WORLD.** The cylinder is a PLACE IN a world, not the
+world. So the difficulty's dimensions size the PUZZLE INSIDE THE CYLINDER and
+have no business sizing the ocean, the island or the sky. I built the world into
+the board's array and then explained why the board has to be finite - which is
+true, and irrelevant, because the ocean is not the board.
 
-**The answer is the ladder, taken to the top.** A MASS is already a record with
-parameters and no cells - material, extent, surface level. An unbounded ocean is
-ONE MASS RECORD. Cells are materialised only where something is happening: near
-the player, near a disturbance, near a breach; and dematerialised again when
-they settle and go quiet. That is exactly "each rung adding parameters and
-qualities and DISCARDING FINE-PROCESSING EVENTS" at the largest scale there is,
-and it is the same sentence that produced the bead-block-mass ladder.
+What follows from it:
 
-  a. let a mass exist with no blocks behind it - an extent and a level, not a set
-  b. materialise from it on demand within a radius, dematerialise when quiet
-  c. let it extend past the board's bounds, so the sea has no edge
-  d. the island and seabed either become generated-on-demand outside the board,
-     or stay board-bound while only the SEA is unbounded - much cheaper, and
-     probably enough
+  a. the CYLINDER INTERIOR is the countable part: mines, safe blocks, the win
+     condition. Sized by difficulty. Unchanged.
+  b. everything OUTSIDE it is world and belongs to nobody's count
+  c. the sky, sun and moon are already records with no extent - done
+  d. the OCEAN becomes one MASS RECORD, unbounded, with cells materialised only
+     where something is happening and dematerialised when it goes quiet. A
+     record has no extent problem, which is the whole reason this works
+  e. the seabed is a record too - a plane at a depth - and the island is a
+     generated surface rather than a region of the board array
+  f. and ask whether dungeon mode's win condition is "reveal every safe block"
+     at all. If the goal is the BOSS, the world is freed from countability
+     entirely and (a) is the only finite thing left in it
 
-The "500 m sphere - the cost ceiling" item further down is this same problem.
+The bead grid is the other half of the ceiling: BLOCK/16 over the whole board is
+31 MB at 18x24x18, and ten times wider is a hundred times the memory. Which is
+why (d) is the answer rather than a bigger array - cells exist where something
+is happening, and nowhere else.
 
 ### 0. MOMENTUM - and it is a law, not a shot feature
 
