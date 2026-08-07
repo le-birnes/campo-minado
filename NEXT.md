@@ -158,6 +158,44 @@ And the same solver is what the rocket in item 0 needs - thrust is a force with
 a direction, drag opposes, gravity pulls. ONE SOLVER, THREE CONSUMERS: the
 swimmer, the bead, and the rocket.
 
+### 0c. THE WORLD IS NOT THE BOARD
+
+> "Why is the world small? It shouldn't be 18 blocks wide, it should be
+> infinite."
+
+**The cause.** `G.st` / `G.mat` / `G.mine` are the MINESWEEPER BOARD. It is
+finite by necessity - winning means revealing every safe block, so it has to be
+countable - and it is sized by difficulty. buildOuterWorld wrote the island and
+the sea into that same array, so the world inherited the puzzle's bounds. Two
+different things sharing one array, and only one of them has any business being
+finite.
+
+**What is already infinite.** The sky, the sun, the moon and the sea below the
+horizon line are RECORDS, evaluated per pixel on whatever ray misses the
+geometry. They cost one triangle and have no extent at all. The world already
+LOOKS endless; what is small is the part you can swim in and disturb.
+
+**Why it cannot just be made bigger.** The bead grid is BLOCK/16 over the whole
+board: 288x384x288 cells and 31 MB at 18x24x18. Ten times wider is a HUNDRED
+times the memory. Growing the array is not the answer at any size.
+
+**The answer is the ladder, taken to the top.** A MASS is already a record with
+parameters and no cells - material, extent, surface level. An unbounded ocean is
+ONE MASS RECORD. Cells are materialised only where something is happening: near
+the player, near a disturbance, near a breach; and dematerialised again when
+they settle and go quiet. That is exactly "each rung adding parameters and
+qualities and DISCARDING FINE-PROCESSING EVENTS" at the largest scale there is,
+and it is the same sentence that produced the bead-block-mass ladder.
+
+  a. let a mass exist with no blocks behind it - an extent and a level, not a set
+  b. materialise from it on demand within a radius, dematerialise when quiet
+  c. let it extend past the board's bounds, so the sea has no edge
+  d. the island and seabed either become generated-on-demand outside the board,
+     or stay board-bound while only the SEA is unbounded - much cheaper, and
+     probably enough
+
+The "500 m sphere - the cost ceiling" item further down is this same problem.
+
 ### 0. MOMENTUM - and it is a law, not a shot feature
 
 > "Shooting a bead should make it fly forward very fast, LIKE A ROCK PELLET
