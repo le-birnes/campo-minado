@@ -167,6 +167,51 @@ straight back. Three candidates, all measurable, none of them the swim solver:
 
 Do (b) first: it is one grep and it decides whether the other two matter.
 
+### 0e. THE WORLD IS BIGGER THAN THE DUNGEON - DONE 2026-08-07
+
+> "Proceed to build world and functioning dungeon (it is being generated with
+> 1 or 4 mines sometimes)."
+
+Measured over six seeds it was worse: 0, 1, 4, 7, 10, 12 mines. One seed had
+NO MINE AT ALL.
+
+The generator was never at fault. It laid out a whole board across the whole
+grid, and buildOuterWorld then kept only what fitted inside a cylinder sized as
+a FRACTION OF THE BOARD - 0.36 of 18 blocks, minus a three-block shell, is a
+tube about seven blocks across. Most of the dungeon was made and then thrown
+away, and its mines went with it.
+
+So the inversion: THE INTERIOR IS SIZED BY THE DUNGEON AND THE WORLD IS WHAT IS
+LEFT OVER. dungeonGeom() decides the geometry once and both callers read it;
+dungeonBox() is the largest box that fits inside the shell; shapeDungeon() digs
+in that box's own coordinates through dgi(), so nothing it makes is ever
+cropped. DUNGEON is 46x40x46 blocks and DUN_W - the playable width, the old
+whole board - is 18.
+
+    before   0 to 12 mines, 6 of 6 not a game, connectivity broken on all six
+    after    51 to 68 mines, 6 of 6 a minesweeper, 100% connected on all six
+
+AND IT IS AFFORDABLE ONLY BECAUSE OF 0a: the sea is 39,660 blocks and 162
+MILLION cells of brine, held as ONE mass, and the whole bead grid is 1.11 MB.
+
+AND ONE THING THE SIZE BROKE, which is the kind that does not announce itself:
+worldB held 20*26*20+64 = 10,464 instances and the new world asks for 15,280.
+A cube batch DROPS WHAT DOES NOT FIT IN SILENCE, so a third of the world simply
+was not drawn and nothing said so. tools/h_batch.js measures it now, on three
+seeds, in the dungeon and again on the island.
+
+STILL OWED HERE: the shell is still a CYLINDER and the repair BFS is still
+needed, because a box inscribed in a cylinder wastes the corners. A true
+shrink-wrap of the dug volume would need neither. It is no longer urgent - the
+dungeon is a dungeon and it is connected - so it is a shape question now rather
+than a playability one.
+
+NOT PHOTOGRAPHED. h_islandshot times out at 240 s on the bigger world: the
+draw path itself returns in milliseconds (h_batch calls sandDraw and gets 5,000
+instances back), so it is the headless virtual-time interaction rather than a
+loop, but THE ISLAND HAS STILL NEVER BEEN SEEN FROM OUTSIDE and this made that
+harder rather than easier.
+
 ### 0f. THE SEVEN-METRE SPHERE, AND WHAT WATER IS - his words, 2026-08-07, DONE
 
 > "Scaling should prevent a large amount of beads, making MAX COMPUTED BEADS
