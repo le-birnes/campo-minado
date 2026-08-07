@@ -8987,6 +8987,96 @@ function buildOuterWorld(){
   G.sealed = sealed;
   G.lump = {cx, cz, r:RCYL-HULLT, y0:ISLY+HULLT, y1:G.ny-HULLT-1, hull:HULLT};
 
+  /* 2b. AND THE DUNGEON MUST STILL BE ONE DUNGEON.
+         Marcelo: "dungeon now spawns inside a room with no exit (dungeon no
+         longer a connected dungeon?)."
+
+         Yes, and it follows straight from cropping. The level generator lays
+         out a CONNECTED dungeon across the whole grid; cutting a narrow tube
+         out of the middle of it keeps whichever corridors happened to cross
+         the tube and throws away the ones that joined them up. What is left is
+         fragments, and standing in one of them is a room with no exit.
+
+         Connectivity is a property of the whole and cannot be cropped. So it
+         is restored: label the pockets, keep the biggest as the dungeon, and
+         drive a corridor from every other pocket to it. Straight lines,
+         because a dungeon that was carved and then repaired should look like
+         it - and a corridor you can tell was cut later is better than a room
+         you cannot leave. */
+  {
+    const NN=G.nx*G.ny*G.nz;
+    const lab = new Int32Array(NN).fill(-1);
+    const interior=(x,y,z)=>{
+      if(!inside(x,y,z)) return false;
+      const i=idx(x,y,z);
+      return !G.hull[i] && y>=ISLY && dist(x,z)<=RCYL-HULLT;
+    };
+    const pockets=[];
+    for(let y=ISLY;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
+      if(!interior(x,y,z)) continue;
+      const i0=idx(x,y,z);
+      if(G.st[i0]!==AIR || lab[i0]>=0) continue;
+      const id=pockets.length, cells=[i0]; lab[i0]=id;
+      for(let h=0;h<cells.length;h++){
+        const c=cellXYZ(cells[h]);
+        for(let k=0;k<6;k++){
+          const ax=c[0]+NB26X[k], ay=c[1]+NB26Y[k], az=c[2]+NB26Z[k];
+          if(!interior(ax,ay,az)) continue;
+          const j=idx(ax,ay,az);
+          if(G.st[j]!==AIR || lab[j]>=0) continue;
+          lab[j]=id; cells.push(j);
+        }
+      }
+      pockets.push(cells);
+    }
+    if(pockets.length > 1){
+      let main=0;
+      for(let k=1;k<pockets.length;k++) if(pockets[k].length > pockets[main].length) main=k;
+      const M=pockets[main];
+      for(let k=0;k<pockets.length;k++){
+        if(k===main) continue;
+        /* A ROUTE THROUGH THE ROCK, not a straight line between two points.
+           The line was severed wherever it crossed the hull or left the
+           radius - those cells are skipped, so the corridor arrived with a
+           hole in it and the pocket stayed shut. Seven blocks walled off,
+           twice, identically, which is exactly what a repair that never
+           reaches them looks like.
+
+           So it is a breadth-first search over the INTERIOR, through solid
+           rock as readily as through air, from the small pocket to the big
+           one. Whatever it finds is a route that exists, and carving its
+           parents back is a corridor that cannot have a gap in it. */
+        const prev = new Int32Array(NN).fill(-2);
+        const fr = [];
+        for(const p of pockets[k]){ prev[p] = -1; fr.push(p); }
+        let hit = -1;
+        for(let h=0; h<fr.length && hit<0; h++){
+          const c = cellXYZ(fr[h]);
+          for(let q=0;q<6;q++){
+            const ax=c[0]+NB26X[q], ay=c[1]+NB26Y[q], az=c[2]+NB26Z[q];
+            if(!interior(ax,ay,az)) continue;
+            const j = idx(ax,ay,az);
+            if(prev[j] !== -2) continue;
+            prev[j] = fr[h];
+            if(lab[j] === main){ hit = j; break; }
+            fr.push(j);
+          }
+        }
+        if(hit >= 0){
+          for(let j=hit; j >= 0 && prev[j] !== -1; j = prev[j]){
+            const c = cellXYZ(j);
+            for(let dy=0; dy<=1; dy++){
+              if(!interior(c[0], c[1]+dy, c[2])) continue;
+              const i = idx(c[0], c[1]+dy, c[2]);
+              if(G.st[i] !== AIR){ G.st[i]=AIR; G.mine[i]=0; G.scenery[i]=0; }
+            }
+          }
+        }
+      }
+    }
+    G.pockets = pockets.length;
+  }
+
   /* 3. THE ISLAND, and it is a body of sand the cylinder is buried in rather
         than a cap floating on the sea. It meets the top face at its own level -
         "levelled with the island sand" - and slopes away under the water,

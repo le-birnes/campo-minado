@@ -381,6 +381,15 @@ body.touch.portrait #rotate{display:grid;}
     <div id="tr">
       <div class="stat"><span class="k">Time</span><span class="v time" id="sTime">0:00</span></div>
     </div>
+    <!-- THE BELT. Nothing here until the dungeon is behind you: a puzzle needs
+         mines and safe blocks and a clock, and a world needs to know what is
+         in your hands. Two empty slots because there is going to be something
+         to put in them. -->
+    <div id="belt">
+      <div class="slot held"><canvas id="wpn" width="20" height="20"></canvas></div>
+      <div class="slot"></div>
+      <div class="slot"></div>
+    </div>
   </div>
 
   <!-- ========== TOUCH ========== -->
@@ -649,6 +658,20 @@ body.touch.portrait #rotate{display:grid;}
   <div id="nogl"><div>Your browser could not start WebGL 2.<br>Try an up-to-date Chrome, Edge or Firefox with hardware acceleration enabled.</div></div>
 </div>
 
+<style>
+#belt{ position:absolute; left:50%; bottom:14px; transform:translateX(-50%);
+       display:none; gap:8px; }
+body.world #belt{ display:flex; }
+/* and the puzzle's readouts go with the puzzle */
+body.world #sMines, body.world #sLeft, body.world #tr{ display:none; }
+body.world #tl .stat:first-child, body.world #tl .stat:nth-child(2){ display:none; }
+body.world .stat.foe-only{ display:flex !important; }
+#belt .slot{ width:46px; height:46px; border:2px solid #4a4a52; border-radius:4px;
+             background:rgba(12,12,16,0.62); display:grid; place-items:center;
+             box-shadow:inset 0 0 0 1px rgba(0,0,0,0.6); }
+#belt .slot.held{ border-color:#c8a24a; box-shadow:inset 0 0 0 1px #000, 0 0 8px rgba(200,162,74,0.35); }
+#belt canvas{ width:40px; height:40px; image-rendering:pixelated; }
+</style>
 <script>
 "use strict";
 (function(){
@@ -2648,6 +2671,7 @@ function genWorld(d){
   G.rockHit=new Uint8Array(N);      // shots taken by each cinderstone wall
   G.lamp=0;                         // lanterns found: each adds to the ambient
   G.noWin=false; G.island=false; G.emerge=0; G.gravK=1; rollReset();
+  document.body.classList.remove('world');
   /* A NEW BOARD STARTS WITH NO RUBBLE ON IT. Without this the grains and, far
      worse, their occupancy claims survive into the next game — so the second
      run of a session has invisible solid cells scattered through its air. */
@@ -8963,6 +8987,96 @@ function buildOuterWorld(){
   G.sealed = sealed;
   G.lump = {cx, cz, r:RCYL-HULLT, y0:ISLY+HULLT, y1:G.ny-HULLT-1, hull:HULLT};
 
+  /* 2b. AND THE DUNGEON MUST STILL BE ONE DUNGEON.
+         Marcelo: "dungeon now spawns inside a room with no exit (dungeon no
+         longer a connected dungeon?)."
+
+         Yes, and it follows straight from cropping. The level generator lays
+         out a CONNECTED dungeon across the whole grid; cutting a narrow tube
+         out of the middle of it keeps whichever corridors happened to cross
+         the tube and throws away the ones that joined them up. What is left is
+         fragments, and standing in one of them is a room with no exit.
+
+         Connectivity is a property of the whole and cannot be cropped. So it
+         is restored: label the pockets, keep the biggest as the dungeon, and
+         drive a corridor from every other pocket to it. Straight lines,
+         because a dungeon that was carved and then repaired should look like
+         it - and a corridor you can tell was cut later is better than a room
+         you cannot leave. */
+  {
+    const NN=G.nx*G.ny*G.nz;
+    const lab = new Int32Array(NN).fill(-1);
+    const interior=(x,y,z)=>{
+      if(!inside(x,y,z)) return false;
+      const i=idx(x,y,z);
+      return !G.hull[i] && y>=ISLY && dist(x,z)<=RCYL-HULLT;
+    };
+    const pockets=[];
+    for(let y=ISLY;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
+      if(!interior(x,y,z)) continue;
+      const i0=idx(x,y,z);
+      if(G.st[i0]!==AIR || lab[i0]>=0) continue;
+      const id=pockets.length, cells=[i0]; lab[i0]=id;
+      for(let h=0;h<cells.length;h++){
+        const c=cellXYZ(cells[h]);
+        for(let k=0;k<6;k++){
+          const ax=c[0]+NB26X[k], ay=c[1]+NB26Y[k], az=c[2]+NB26Z[k];
+          if(!interior(ax,ay,az)) continue;
+          const j=idx(ax,ay,az);
+          if(G.st[j]!==AIR || lab[j]>=0) continue;
+          lab[j]=id; cells.push(j);
+        }
+      }
+      pockets.push(cells);
+    }
+    if(pockets.length > 1){
+      let main=0;
+      for(let k=1;k<pockets.length;k++) if(pockets[k].length > pockets[main].length) main=k;
+      const M=pockets[main];
+      for(let k=0;k<pockets.length;k++){
+        if(k===main) continue;
+        /* A ROUTE THROUGH THE ROCK, not a straight line between two points.
+           The line was severed wherever it crossed the hull or left the
+           radius - those cells are skipped, so the corridor arrived with a
+           hole in it and the pocket stayed shut. Seven blocks walled off,
+           twice, identically, which is exactly what a repair that never
+           reaches them looks like.
+
+           So it is a breadth-first search over the INTERIOR, through solid
+           rock as readily as through air, from the small pocket to the big
+           one. Whatever it finds is a route that exists, and carving its
+           parents back is a corridor that cannot have a gap in it. */
+        const prev = new Int32Array(NN).fill(-2);
+        const fr = [];
+        for(const p of pockets[k]){ prev[p] = -1; fr.push(p); }
+        let hit = -1;
+        for(let h=0; h<fr.length && hit<0; h++){
+          const c = cellXYZ(fr[h]);
+          for(let q=0;q<6;q++){
+            const ax=c[0]+NB26X[q], ay=c[1]+NB26Y[q], az=c[2]+NB26Z[q];
+            if(!interior(ax,ay,az)) continue;
+            const j = idx(ax,ay,az);
+            if(prev[j] !== -2) continue;
+            prev[j] = fr[h];
+            if(lab[j] === main){ hit = j; break; }
+            fr.push(j);
+          }
+        }
+        if(hit >= 0){
+          for(let j=hit; j >= 0 && prev[j] !== -1; j = prev[j]){
+            const c = cellXYZ(j);
+            for(let dy=0; dy<=1; dy++){
+              if(!interior(c[0], c[1]+dy, c[2])) continue;
+              const i = idx(c[0], c[1]+dy, c[2]);
+              if(G.st[i] !== AIR){ G.st[i]=AIR; G.mine[i]=0; G.scenery[i]=0; }
+            }
+          }
+        }
+      }
+    }
+    G.pockets = pockets.length;
+  }
+
   /* 3. THE ISLAND, and it is a body of sand the cylinder is buried in rather
         than a cap floating on the sea. It meets the top face at its own level -
         "levelled with the island sand" - and slopes away under the water,
@@ -9165,8 +9279,64 @@ function buildOuterWorld(){
    Gravity lets go, the passage opens, and the light changes - nothing is
    built, nothing is moved, and nothing under your feet turns into anything
    else. That is the whole difference between a reveal and a teleport. */
+/* THE SHOTGUN, twenty pixels of it, drawn once.
+   A thumbnail of a weapon is a picture of a thing you are holding, and the
+   game already draws everything else it owns out of data rather than out of a
+   file - so this is a string, one character a pixel, and the palette is five
+   colours because a pixel-art shotgun does not need six.
+     . nothing   b barrel   g grip/stock   w wood   m metal   d dark */
+const WPN_ART = [
+  '....................',
+  '....................',
+  '..mmmmmmmmmmmm......',
+  '..mbbbbbbbbbbm......',
+  '..mmmmmmmmmmmm..d...',
+  '...dddddddddd..dwd..',
+  '....mmmmmmmm..dwwd..',
+  '....mbbbbbbm.dwwwd..',
+  '....mmmmmmmm.dwwwd..',
+  '.......dmmd..dwwwd..',
+  '.......dmmd.dwwwwd..',
+  '........dd..dwwwd...',
+  '............dwwwd...',
+  '...........dwwwwd...',
+  '...........dwwwd....',
+  '..........dwwwwd....',
+  '..........dwwwd.....',
+  '.........dwwwd......',
+  '.........ddddd......',
+  '....................'];
+const WPN_PAL = {b:'#1b1b20', m:'#6d7076', d:'#232329', w:'#6b4526', g:'#3a2415'};
+function drawWeaponThumb(){
+  const c = document.getElementById('wpn'); if(!c) return;
+  const x = c.getContext('2d');
+  x.clearRect(0,0,20,20);
+  for(let r=0;r<WPN_ART.length;r++) for(let q=0;q<WPN_ART[r].length;q++){
+    const ch = WPN_ART[r][q];
+    if(ch === '.') continue;
+    x.fillStyle = WPN_PAL[ch] || '#888';
+    x.fillRect(q, r, 1, 1);
+  }
+}
+
+/* THE HUD THAT SURVIVES THE DUNGEON.
+   Marcelo: "Dungeon mode actually has NO WINNING CONDITIONS. When the dungeon
+   is completed and the boss is killed, the HUD should change - only health
+   should remain, and add a thumb with a pixelated shotgun to indicate equipped
+   weapon and two empty slots for belt equipment."
+
+   Mines left, safe blocks and a clock are what a PUZZLE needs to be told. A
+   world needs to be told what is in your hands and what is on your belt, and
+   nothing else - so the readouts do not get hidden one by one, the body gets a
+   class and the stylesheet decides what a world looks like. */
+function enterWorldHud(){
+  document.body.classList.add('world');
+  drawWeaponThumb();
+}
+
 function revealIsland(){
   G.island = true; G.dungeon = false; G.dirty = true;
+  enterWorldHud();
   /* AND THE HULL BECOMES ROCK YOU CAN OPEN. It was the edge of the world for
      as long as the dungeon was a dungeon; now that you know what is outside
      it, getting through it is the game rather than the spoiler. */

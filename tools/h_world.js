@@ -56,5 +56,42 @@ setTimeout(()=>{ try{
     hmark(`sealed ${G.sealed} blocks; ${inside_} air blocks the sea cannot reach; ` +
           `where you stand is ${seen[si] ? 'REACHABLE - FAULT, the dungeon is open water' : 'DRY ok, you are locked in'}`);
   }
+  /* CAN YOU GET OUT OF THE ROOM YOU START IN? Flood the dungeon's air from
+     where the player stands and compare it with all the air inside the
+     cylinder. Anything unreachable is a room with no exit, and it does not
+     matter whether the player happens to be in it - somebody will be. */
+  {
+    const N=G.nx*G.ny*G.nz, seen=new Uint8Array(N), q=[];
+    const L=G.lump;
+    const interior=(x,y,z)=>{
+      if(x<0||y<0||z<0||x>=G.nx||y>=G.ny||z>=G.nz) return false;
+      if(G.hull && G.hull[idx(x,y,z)]) return false;
+      return y>=L.y0-L.hull && Math.hypot(x-L.cx, z-L.cz) <= L.r;
+    };
+    const push=(x,y,z)=>{
+      if(!interior(x,y,z)) return;
+      const i=idx(x,y,z);
+      if(seen[i] || G.st[i]!==AIR) return;
+      seen[i]=1; q.push(i);
+    };
+    push(Math.floor(P.x/BLOCK), Math.floor(P.y/BLOCK), Math.floor(P.z/BLOCK));
+    for(let h=0;h<q.length;h++){
+      const c=cellXYZ(q[h]);
+      push(c[0]+1,c[1],c[2]); push(c[0]-1,c[1],c[2]);
+      push(c[0],c[1]+1,c[2]); push(c[0],c[1]-1,c[2]);
+      push(c[0],c[1],c[2]+1); push(c[0],c[1],c[2]-1);
+    }
+    let tot=0, got=0;
+    for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
+      if(!interior(x,y,z)) continue;
+      const i=idx(x,y,z);
+      if(G.st[i]!==AIR) continue;
+      tot++; if(seen[i]) got++;
+    }
+    hmark(`pockets before repair ${G.pockets}; from where you stand you can reach ` +
+          `${got} of ${tot} air blocks ` +
+          (tot>0 && got===tot ? 'ok, ONE CONNECTED DUNGEON'
+           : `FAULT: ${tot-got} blocks walled off - rooms with no exit`));
+  }
   hmark(window.__err.length ? ('FAULT '+window.__err.join(' | ')) : 'no errors');
 }catch(err){ hmark('THREW: '+err.message+' @ '+((err.stack||'').split('\n')[1]||'')); }}, 200);
