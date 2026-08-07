@@ -848,3 +848,54 @@ few hundred where it has a budget of 22,000, so 'the beads are not showing'
 is still half true even though they are no longer struck off the list. The
 chunk candidate loop only considers chunks with cl set and within
 SAND_DRAW_R, and something in that path is still rejecting most of them.
+
+
+## WHAT AGY SAW, AND WHAT THE NUMBERS SAY - 2026-08-07
+
+He sent a video and a log and asked agy to watch it. agy, blind, without being
+told what to look for:
+
+  "The sky and upper environment are clearly rendered on THE INNER SURFACES OF
+   A LARGE CUBE surrounding the player, with visible straight lines and sharp
+   corner seams overhead. Light blue with white square cloud patterns on the
+   sides and orange-tinted square patterns on the flat ceiling plane above."
+  "There is NO WATER visible anywhere in the clip."
+  "No sun, moon, or stars visible."
+  "Remaining blocks hang completely unsupported in mid-air after adjacent
+   blocks are shot away."
+  "Glowing yellow mine numbers float disconnected in space when their host
+   blocks are destroyed."
+
+THAT IS NOT THE SKY SHADER. The shader is a seamless gradient with a sun in it.
+A cube with faces and seams, light blue with square patterns, is BLOCKS - and
+blue with pink squares is the sea's own colour. The ocean was being drawn as a
+shell around and above him, hiding the real sky completely, which is also why
+no planet ever appeared however high he flew.
+
+AND THE LOG NAMED THE SHOT IN ONE LINE:
+
+    EVENT  blast: 2 caught, 2 broke, 0 shoved, 2 thrown, 0 left, 0 collapsed
+
+Two cells, where the same blast in a tank caught 8,813 - because the tank had
+been voxelised first and a wall has not. FIXED: the blast opens every block it
+covers before it gathers. 2,748 caught now, and the block collapses and becomes
+passable.
+
+BUT THE VIDEO PREDATES THE LAST THREE COMMITS, and the box has to be re-checked
+rather than assumed. tools/h_updown.js measures it now: standing on the island
+in the CURRENT build, over his head is "nothing but air", and there are ZERO
+lattice blocks of sea within forty-five metres of him in any direction. So the
+shell agy described is gone from that spot at least - liquids stopped being
+drawn as one mass box, and stop being drawn as blocks past forty-five metres.
+
+NEXT, AND IN THIS ORDER:
+  1. a fresh video and log on the current build - if the box is still there it
+     is something else and h_updown will find it, because it asks WHERE the
+     geometry is rather than whether it exists
+  2. FLOATING BLOCKS. agy: blocks hang unsupported when their neighbours go.
+     The block world has no gravity - only the bead grid does. A block whose
+     support is gone should fall, or should come apart into beads that do.
+  3. ORPHANED NUMBERS. The glyphs are drawn from G.cnt at a block's position
+     and nothing removes them when the block collapses.
+  4. and the two still open from before: swimming down (0b) and shooting
+     underwater (sandRayHit returns the cell at your own face).
