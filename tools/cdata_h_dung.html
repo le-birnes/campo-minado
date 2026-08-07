@@ -966,7 +966,16 @@ function dungeonGeom(nx, ny, nz){
   const RCYL = RIN + HULLT;
   const RISL = RCYL + 4;                             // the sand slopes away from it
   const cx = nx/2, cz = nz/2;
-  const y0 = ISLY + HULLT, y1 = ny - HULLT - 1;
+  /* AND ITS ROOF IS WELL UNDER THE WATERLINE. y0 was ISLY + HULLT, and ISLY is
+     three above SEAY, so the dungeon's ceiling came out EXACTLY AT SEA LEVEL -
+     which is why shooting a wall fifteen seconds into the first run showed him
+     the sky and the moon. What should be on the other side of that wall is the
+     ocean, and the ocean starts below the waterline.
+
+     Four cells of water over the roof: 18 m, well past the seven-metre bubble,
+     so breaking through shows you the sea rather than the horizon. */
+  const DEEP = 4;
+  const y0 = Math.max(ISLY + HULLT, SEAY + DEEP), y1 = ny - HULLT - 1;
   return {SEAY, ISLY, HULLT, RIN, RCYL, RISL, cx, cz, y0, y1};
 }
 /* THE BOX THE DUNGEON IS DUG INTO: the largest one that fits in the interior,
@@ -9806,6 +9815,7 @@ function enterWorldHud(){
 }
 
 function revealIsland(){
+  logEvent('revealIsland: pages='+(SAND?SAND.pgn:0)+' lad='+ladStats.blocks+' awake='+(SAND?SAND.awake.length:0));
   G.island = true; G.dungeon = false; G.dirty = true;
   enterWorldHud();
   /* AND THE HULL BECOMES ROCK YOU CAN OPEN. It was the edge of the world for
@@ -10028,6 +10038,7 @@ function bossBlows(x,y,z){
      time and the boss dying is when you find that out, so from here on down is
      +Y and it never goes back. */
   G.gravK = -1;
+  logEvent('GRAVITY FLIPPED: down is now +Y. pages='+(SAND?SAND.pgn:0)+' lad_blocks='+ladStats.blocks+' masses='+ladStats.masses);
   /* AND YOU GO THE WAY THAT IS NOW UP. A positive vy under reversed gravity is
      DOWNWARD - it drove you into the floor at the moment the floor became the
      ceiling. Up is the direction gravity is not pulling, and that is one sign. */
@@ -10064,6 +10075,7 @@ function bossBlows(x,y,z){
    grid is carved with it, so the shaft is real to the sand, to the shot and to
    your body all at once. */
 function bossHole(wx, wz){
+  logEvent('bossHole opened at '+wx.toFixed(1)+','+wz.toFixed(1));
   const bx = Math.max(1, Math.min(G.nx-2, Math.floor(wx/BLOCK)));
   const bz = Math.max(1, Math.min(G.nz-2, Math.floor(wz/BLOCK)));
   const r = 2;
@@ -10658,6 +10670,7 @@ window.addEventListener('keydown', e=>{
   /* The Forge has its own keyboard. Falling through to the game's would toggle
      plane arrows, ask for a hint and, on R, throw the model away and start a
      new cave. */
+  if(e.code==='F3'){ e.preventDefault(); logDump('F3'); return; }
   if(G.state==='forge'){ fzKey(e); return; }
   switch(e.code){
     case 'KeyW': case 'ArrowUp':    IN.f=1; break;
@@ -11921,6 +11934,185 @@ $('fzTest').onclick = ()=>{
 $('btnForge').addEventListener('click', ()=>fzOpen());
 if(/[?&]forge/.test(location.search)) setTimeout(()=>fzOpen(), 60);
 
+/* ==========================================================================
+
+   THE BLACK BOX
+
+   --------------------------------------------------------------------------
+
+   Marcelo: "can't you make like a debugger to check what is being processed
+
+   and watch the bot and me play more objectively? ... just a way you can read.
+
+   Perhaps a last_run.txt log or something you can access."
+
+
+
+   Right, and a screen overlay would be the wrong answer: it tells HIM what is
+
+   happening while he is busy playing, and I cannot see it at all. A file can be
+
+   left behind and read afterwards by either of us, which is the whole point.
+
+
+
+   The page is opened from file:// and cannot write to disk, so it keeps a ring
+
+   in memory and DOWNLOADS it - which lands in Downloads/last_run.txt, a path I
+
+   can open. It writes a sample once a second and a line for anything that
+
+   happens, and it dumps itself automatically when the run ends, so a death or a
+
+   win needs no key pressed at the moment it matters least.
+
+
+
+   F3 dumps it whenever you like, mid-run. */
+
+const LOG_MAX = 4000;
+
+const LOG = [];
+
+let LOG_T = 0, LOG_DUMPED = false, LOG_T0 = 0;
+
+function logLine(s){
+
+  LOG.push(((performance.now()-LOG_T0)/1000).toFixed(2) + '  ' + s);
+
+  if(LOG.length > LOG_MAX) LOG.shift();
+
+}
+
+/* AN EVENT, and these are the ones worth a line each: they are the moments the
+
+   world changes under the player rather than the moments it is merely busy. */
+
+function logEvent(s){ logLine('EVENT  ' + s); }
+
+
+
+function logSample(dt){
+
+  if(!LOG_T0) { LOG_T0 = performance.now(); logHeader(); }
+
+  LOG_T += dt;
+
+  if(LOG_T < 1.0) return;
+
+  LOG_T = 0;
+
+  const w = SAND;
+
+  const bx = Math.floor(P.x/BLOCK), by = Math.floor(P.y/BLOCK), bz = Math.floor(P.z/BLOCK);
+
+  const parts = [
+
+    'state=' + G.state,
+
+    'fps=' + (dt>0 ? (1/dt).toFixed(0) : '?'),
+
+    'at=' + bx + ',' + by + ',' + bz,
+
+    'y_m=' + P.y.toFixed(1),
+
+    'grav=' + (gsign()>0 ? '+Y_down' : '-Y_down'),
+
+    'island=' + (G.island?1:0),
+
+    'hp=' + (P.hp!==undefined ? P.hp.toFixed(0) : '?'),
+
+    'air=' + (P.air!==undefined ? P.air.toFixed(0) : '?'),
+
+    'imm=' + (P.imm||0).toFixed(2),
+
+    'sub=' + (P.sub||0).toFixed(2)
+
+  ];
+
+  if(w) parts.push(
+
+    'awake=' + w.stats.awake,
+
+    'scan=' + w.stats.scanned,
+
+    'defer=' + (w.stats.deferred||0),
+
+    'moves=' + w.stats.moves,
+
+    'pages=' + w.pgn,
+
+    'MB=' + (w.bytes()/1048576).toFixed(1));
+
+  parts.push(
+
+    'lad_blocks=' + ladStats.blocks,
+
+    'masses=' + ladStats.masses,
+
+    'queue=' + LADQ.length,
+
+    'grit=' + (GRIT.moving||0),
+
+    'world_inst=' + worldB.count,
+
+    'bead_inst=' + sandB.count);
+
+  logLine(parts.join(' '));
+
+}
+
+function logHeader(){
+
+  LOG.push('# Minesweeper Three Planes - black box');
+
+  LOG.push('# ' + new Date().toISOString());
+
+  LOG.push('# world ' + G.nx + 'x' + G.ny + 'x' + G.nz + ' cells of ' + BLOCK + ' m'
+
+         + ' | lattice ' + LAT_M + ' m | bead ' + CELL_M.toFixed(4) + ' m'
+
+         + ' | mode ' + (G.mode===MODE_DUNGEON?'DUNGEON':'SWEEP') + ' diff ' + G.diff);
+
+  LOG.push('# seaY ' + G.seaY + ' rock0 ' + G.rock0 + ' mines ' + G.mines
+
+         + ' safe ' + G.safeTotal + (G.lump ? ' | dungeon y ' + G.lump.y0 + '..' + G.lump.y1
+
+           + ' r ' + G.lump.r.toFixed(1) : ''));
+
+  LOG.push('# columns: t state fps at=cell y_m grav island hp air imm sub'
+
+         + ' awake scan defer moves pages MB lad_blocks masses queue grit'
+
+         + ' world_inst bead_inst');
+
+}
+
+function logDump(why){
+
+  try{
+
+    logLine('DUMP  ' + (why||'asked'));
+
+    const NLC = String.fromCharCode(10);
+    const blob = new Blob([LOG.join(NLC) + NLC], {type:'text/plain'});
+
+    const a = document.createElement('a');
+
+    a.href = URL.createObjectURL(blob);
+
+    a.download = 'last_run.txt';
+
+    document.body.appendChild(a); a.click(); a.remove();
+
+    setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+
+    toast('last_run.txt written to Downloads.', 1600);
+
+  }catch(e){}
+
+}
+
 function frame(now){
   requestAnimationFrame(frame);
   let dt = Math.min(0.05, (now-last)/1000); last=now;
@@ -11931,6 +12123,10 @@ function frame(now){
      no physics, no enemies, no board. It returns before any of that runs. */
   if(G.state==='forge'){ fzFrame(dt); return; }
 
+  logSample(dt);
+  /* AND IT DUMPS ITSELF WHEN THE RUN ENDS, because the moment you most want the
+     log is the moment you are least likely to press a key for it. */
+  if((G.state==='over' || G.state==='won') && !LOG_DUMPED){ LOG_DUMPED = true; logDump(G.state); }
   const sim = dt * (G.state==='over' ? G.slowmo : 1);
   if(G.state==='over' && G.slowmo<1) G.slowmo = Math.min(1, G.slowmo + dt*0.35);
 
