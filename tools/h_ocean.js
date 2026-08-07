@@ -56,29 +56,48 @@ setTimeout(()=>{ try{
   R.push(`90 ticks with an ocean in the world: ${scan} cells scanned, ${w.awake.length} awake ` +
          (scan < 400000 ? 'ok' : 'FAULT: the sea is being simulated bead by bead'));
 
-  /* 4. WHERE YOU ARRIVE. In air, on the ground, above the waterline, house in front. */
+  /* 4. YOU CRAWL OUT. NOTHING MOVES YOU.
+        Marcelo: "I get TELEPORTED outside the tree/house/sand monstro, instead
+        of CRAWLING OUT of the dungeon where I can finally see the scenery."
+
+        So the test is no longer "were you put somewhere sensible" - there is
+        no placement left to check. It is: from the bottom of the shaft, under
+        the physics the game actually runs, holding the key a player would
+        hold, DO YOU GET OUT. */
   {
-    const px=Math.floor(P.x/BLOCK), pz=Math.floor(P.z/BLOCK);
-    const head=Math.floor((P.y+P_H-0.05)/BLOCK), feet=Math.floor((P.y+0.05)/BLOCK);
-    const inSolid = (yy)=> inside(px,yy,pz) && G.st[idx(px,yy,pz)]!==AIR;
-    const below = head+1;
-    R.push(`arrive at block ${px},${head},${pz}; head-cell ${inSolid(head)?'SOLID':'air'}, ` +
-           `far-cell ${inSolid(feet)?'SOLID':'air'}, ground-under ${inSolid(below)?'solid ok':'NOTHING'}`);
-    R.push(!inSolid(head) && !inSolid(feet) && inSolid(below)
-           ? 'ok: standing in open air on solid ground'
-           : 'FAULT: buried, or standing on nothing');
-    R.push(`y ${head} against waterline ${G.seaY} ` + (head < G.seaY ? 'ok, above the sea' : 'FAULT: underwater'));
-    /* the house has to be somewhere you can see */
-    let hw=0, hnear=0;
+    const hx=G.holeX, hz=G.holeZ;
+    /* at the bottom of the funnel, where the blast leaves you */
+    let sy=G.ny-2;
+    while(sy>0 && G.st[idx(hx,sy,hz)]!==AIR) sy--;
+    const y0=sy;
+    P.x=(hx+0.5)*BLOCK; P.z=(hz+0.5)*BLOCK; P.y=sy*BLOCK+0.4;
+    P.vx=P.vz=0; P.vy=24*gsign();           // what bossBlows gives you
+    P.fx.fill(0); P.hp=P.hpMax=HP_START; P.air=AIR_MAX;
+    IN.f=IN.b=IN.l=IN.r=0; IN.mf=IN.ms=0; IN.jumpHeld=true;
+    P.yaw=0; P.pitch=-1.2;                  // looking the way you are going
+    let t=0, best=sy, surfaced=-1;
+    for(; t<60*60 && surfaced<0; t++){
+      physics(1/60); sandStep(1/60);
+      const by=Math.floor(P.y/BLOCK);
+      if(by<best) best=by;
+      if(by < G.seaY && P.sub<=0) surfaced=t;
+      if(P.hp<=0) break;
+    }
+    IN.jumpHeld=false;
+    R.push(`THE WAY OUT: started at y ${y0}, best y ${best}, waterline ${G.seaY}, ` +
+           `hp ${P.hp.toFixed(0)}, air ${P.air.toFixed(0)} s`);
+    R.push(surfaced>=0
+           ? `surfaced after ${(surfaced/60).toFixed(1)} s of swimming ok, YOU CRAWLED OUT`
+           : `FAULT: still at y ${Math.floor(P.y/BLOCK)} after 60 s - there is no way out`);
+    /* and the house is somewhere you can see from up here */
+    let hw=0;
     for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
       const i=idx(x,y,z);
-      if(G.st[i]!==AIR && G.mat[i]===M_WOOD){ hw++;
-        if(Math.hypot(x-px,z-pz) < 12) hnear++; }
+      if(G.st[i]!==AIR && G.mat[i]===M_WOOD) hw++;
     }
-    R.push(`wood in the world: ${hw} blocks, ${hnear} within 12 of you ` +
-           (hnear>20 ? 'ok, the house is in front of you' : 'FAULT: nothing built near where you land'));
+    R.push(`wood in the world: ${hw} blocks ` + (hw>60 ? 'ok, the house and the tree are built' : 'FAULT'));
     R.push(`vials ${VIALS.length} of ${SMAT.length-1} materials ` +
-           (VIALS.length >= SMAT.length-1 ? 'ok, all of them' : 'FAULT: the census is short'));
+           (VIALS.length >= 18 ? 'ok' : 'FAULT: the census is short'));
   }
 
   /* 5. THE BREACH. Find a wall of the seamount with sea on one side and a

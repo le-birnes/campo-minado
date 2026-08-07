@@ -12104,131 +12104,182 @@ setScreen('menu');
 requestAnimationFrame(frame);
 
 window.requestAnimationFrame = function(){ return 0; };
-/* THE SPIT, and THE SLOW POUR.
-
-   Marcelo: "add the spit mechanism", and "one block poured at a time will
-   spill slowly until only beads remain scattered".
-
-   The spit is the only way to place a liquid at a distance - everything else
-   moves material by breaking something - and it always doses you, because you
-   had it in your mouth.
-
-   What has to be true:
-     1. wading through a liquid gives you a mouthful of THAT liquid
-     2. holding longer throws more of it, further
-     3. it lands as real material in the grid, not as decoration
-     4. it doses you: spitting poison poisons the one who spat it
-     5. a block of water poured out spreads, thins, and ends as scattered beads
-        that are mortal - which is the pour Marcelo described, and it is not
-        scripted anywhere: it is the spread rule and the exposure rule meeting */
+/* Does sand.js live in the game, and did 26 neighbours make the pile round?
+   Everything here runs on the grid itself, not on the picture. */
 window.__err=[];
 window.addEventListener('error',e=>window.__err.push('ERR '+e.message));
 setTimeout(()=>{ try{
   G.muted=true; try{ snd.setMute(true); }catch(e){}
-  const R=[], f2=v=>(+v).toFixed(2);
-  G.mode=MODE_SWEEP; seed=6; genWorld(0); G.state='play';
-  const w=SAND;
-  /* a long clear room to spit down */
-  for(let y=1;y<G.ny;y++) for(let z=1;z<G.nz-1;z++) for(let x=1;x<G.nx-1;x++){
-    const i=idx(x,y,z); if(G.st[i]!==AIR){ G.st[i]=AIR; G.revealed++; }
-    sandDig(x,y,z);
+  const R=[];
+  const f2=v=>v.toFixed(2);
+
+  /* ---- a bare box to pour into, so nothing but the rule is being measured */
+  function box(W,H,D){
+    const w = new SandWorld(W,H,D);
+    for(let y=1;y<H;y++) for(let z=0;z<D;z++) for(let x=0;x<W;x++){
+      const r=(y+1)*w.SY+(z+1)*w.SZ+(x+1); w.m[r]=S_AIR;
+    }
+    return w;                                    // y=0 is the floor, and stays rock
   }
-  P.x=3*BLOCK; P.z=(G.nz/2|0)*BLOCK; P.y=1*BLOCK+0.1;
-  P.yaw=-Math.PI/2; P.pitch=0.10; P.vx=P.vy=P.vz=0;
-  P.fx.fill(0); P.hp=P.hpMax=HP_START;
-
-  /* 1. A MOUTHFUL. Stand in poison and it is what you are carrying. */
-  const px=sandCell(P.x), pz=sandCell(P.z);
-  for(let y=sandCell(P.y); y<=sandCell(P.y+P_H); y++)
-    for(let dz=-2;dz<=2;dz++) for(let dx=-2;dx<=2;dx++) w.put(px+dx,y,pz+dz,S_POISON);
-  sandLoad(1/60);
-  R.push(`stood in poison: mouth = ${P.mouth ? SMAT[P.mouth].n : 'nothing'} ` +
-         (P.mouth===S_POISON ? 'ok' : 'FAULT: being in a thing is not taking it'));
-
-  /* clear it away again so the throw is measured in open air */
-  for(let y=0;y<w.H;y++) for(let z=0;z<w.D;z++) for(let x=0;x<w.W;x++)
-    if(w.at(x,y,z)===S_POISON) w.m[w.idx(x,y,z)]=S_AIR;
-  for(let c=0;c<w.nc;c++){ w.cl[c]=0; }
-  P.mouth=S_POISON; P.mouthN=1;
-
-  /* 2. HOLD LONGER, THROW FURTHER. */
-  const throwIt=(hold)=>{
-    GRIT.n=0; GRIT.next=0; GRIT.live.fill(0);
-    P.mouth=S_POISON; P.mouthN=1;
-    P.spitT=hold; doSpit();
-    let n=0, far=0;
-    for(let i=0;i<GRIT.n;i++){ if(!GRIT.live[i]) continue; n++;
-      const v=Math.hypot(GRIT.vx[i],GRIT.vy[i],GRIT.vz[i]); if(v>far) far=v; }
-    return {n, far};
-  };
-  const soft = throwIt(0.15), hard = throwIt(SPIT_MAX);
-  R.push(`spit: short hold ${soft.n} beads at ${f2(soft.far)} m/s, ` +
-         `full hold ${hard.n} beads at ${f2(hard.far)} m/s ` +
-         (hard.n > soft.n && hard.far > soft.far ? 'ok, the hold is the control' : 'FAULT: the hold does nothing'));
-
-  /* 3. AND IT LANDS AS THE MATERIAL. */
-  const before = w.count(S_POISON);
-  P.mouth=S_POISON; P.mouthN=1; P.spitT=SPIT_MAX; doSpit();
-  for(let k=0;k<240;k++) sandStep(1/60);
-  const after = w.count(S_POISON);
-  R.push(`landed: ${after-before} cells of poison now in the grid ` +
-         ((after-before) > 5 ? 'ok, it is real material' : 'FAULT: it evaporated in flight or never landed'));
-
-  /* 4. IT DOSES YOU. */
-  P.fx.fill(0); P.hp=P.hpMax=HP_START;
-  P.mouth=S_POISON; P.mouthN=1; P.spitT=SPIT_MAX;
-  doSpit();
-  R.push(`the one who spat it: POISONED for ${f2(P.fx[FX_POISON])} s, hp ${f2(P.hp)} ` +
-         (P.fx[FX_POISON] > 0 && P.hp < HP_START ? 'ok, you had it in your mouth' : 'FAULT: free to use'));
-
-  /* 5. THE SLOW POUR. One block of water, on a floor, left alone. */
-  seed=6; genWorld(0); G.state='play';
-  const w5=SAND;
-  for(let y=1;y<G.ny;y++) for(let z=1;z<G.nz-1;z++) for(let x=1;x<G.nx-1;x++){
-    const i=idx(x,y,z); if(G.st[i]!==AIR){ G.st[i]=AIR; G.revealed++; }
-    sandDig(x,y,z);
+  /* Pour from one cell until it stops accepting, then let it settle. */
+  function pour(w, mat, grains, cap){
+    const cx=w.W>>1, cz=w.D>>1, top=w.H-3;
+    let left=grains, t=0;
+    while(t++ < cap){
+      for(let k=0;k<6 && left>0;k++) if(w.at(cx,top,cz)===S_AIR){ w.put(cx,top,cz,mat); left--; }
+      sandTick(w,-1);
+      if(!left && !w.awake.length) break;
+    }
+    for(let k=0;k<200 && w.awake.length;k++) sandTick(w,-1);
+    return t;
   }
-  const bx=(G.nx/2)|0, bz=(G.nz/2)|0;
-  sandFill(bx, 1, bz, S_WATER, true);
-  const pour0 = w5.count(S_WATER);
-  const shape=()=>{
-    let n=0, x0=1e9,x1=-1,z0=1e9,z1=-1, maxh=0;
-    const col={};
-    for(let y=0;y<w5.H;y++) for(let z=0;z<w5.D;z++) for(let x=0;x<w5.W;x++)
-      if(w5.at(x,y,z)===S_WATER){ n++;
-        if(x<x0)x0=x; if(x>x1)x1=x; if(z<z0)z0=z; if(z>z1)z1=z;
-        const k=x+','+z; col[k]=(col[k]||0)+1; if(col[k]>maxh) maxh=col[k]; }
-    const cols=Object.keys(col).length;
-    return {n, w:(x1-x0+1), d:(z1-z0+1), maxh, avg: cols? n/cols : 0};
-  };
-  const s0=shape();
-  const marks=[];
-  for(let k=0;k<14;k++){
-    for(let t=0;t<900;t++){ sandTick(w5, -1); ladTick(); }
-    const sh=shape();
-    marks.push(`${(k+1)*15}s ${sh.n}c ${sh.w}x${sh.d} avg${sh.avg.toFixed(1)}`);
-    if(sh.n===0) break;
+  /* How far the base of the heap reaches along a direction, in CELLS of real
+     distance, so an axis run and a corner run are comparable. */
+  function reach(w, mat, dx, dz){
+    const cx=w.W>>1, cz=w.D>>1, len=Math.hypot(dx,dz);
+    let r=0;
+    for(let s=1;s<(w.W>>1)-1;s++){
+      let any=0;
+      for(let y=1;y<6 && !any;y++) if(w.at(cx+dx*s,y,cz+dz*s)===mat) any=1;
+      if(any) r=s*len;
+    }
+    return r;
   }
-  R.push(`ONE BLOCK POURED: ${pour0} cells, ${s0.w}x${s0.d} and ${s0.avg.toFixed(1)} deep`);
-  R.push('the pour: ' + marks.join(' | '));
-  const end=shape();
-  /* SLOWLY IS THE WORD IN THE ASK. A block of water does not vanish in three
-     minutes and should not: what has to be true is that it SPREADS, that it
-     THINS to about a bead deep, and that it is going away the whole time
-     rather than settling into a permanent pond. Asking for it to be gone by
-     210 s was asking for something Marcelo did not describe. */
-  let falling = true;
-  for(let k=1;k<marks.length;k++)
-    if(+marks[k].split(' ')[1].replace('c','') > +marks[k-1].split(' ')[1].replace('c','')) falling = false;
-  R.push(`after ${marks.length*15}s: ${end.n} cells left, spread ${end.w}x${end.d}, ` +
-         `${end.avg.toFixed(1)} beads deep on average ` +
-         (end.w > s0.w*2 && end.avg < 2.2 && falling && end.n < pour0*0.95
-          ? 'ok: it spilled slowly, thinned to about a bead deep, and is still going'
-          : 'FAULT: it did not spread, or it did not thin, or it stopped going away'));
+  function shape(w, mat){
+    const ax=(reach(w,mat,1,0)+reach(w,mat,-1,0)+reach(w,mat,0,1)+reach(w,mat,0,-1))/4;
+    const dg=(reach(w,mat,1,1)+reach(w,mat,1,-1)+reach(w,mat,-1,1)+reach(w,mat,-1,-1))/4;
+    return {ax, dg, ratio: ax>0 ? dg/ax : 0};
+  }
+
+  /* ================= 1. IS THE PILE ROUND ================= */
+  /* A round heap has the same radius in every direction, so diagonal/axis is
+     1.00. Four lateral directions can only make a DIAMOND - the reachable set
+     is |dx|+|dz| <= n - and a diamond measures 0.71. Eight with equal weight
+     would overshoot to a SQUARE at 1.41, which is why the corner is taken at
+     1/sqrt(2). */
+  const GR = 2600;
+  SAND_LAT = 4;
+  const w4 = box(80,44,80); pour(w4, S_SAND, GR, 900);
+  const s4 = shape(w4, S_SAND);
+  SAND_LAT = 8;
+  const w8 = box(80,44,80); pour(w8, S_SAND, GR, 900);
+  const s8 = shape(w8, S_SAND);
+  R.push(`PILE 4 lateral: axis ${f2(s4.ax)} diag ${f2(s4.dg)} cells, diag/axis ${f2(s4.ratio)} (a diamond is 0.71)`);
+  R.push(`PILE 8 lateral: axis ${f2(s8.ax)} diag ${f2(s8.dg)} cells, diag/axis ${f2(s8.ratio)} (round is 1.00)`);
+  const roundErr4=Math.abs(s4.ratio-1), roundErr8=Math.abs(s8.ratio-1);
+  R.push(`ROUNDNESS: 26 neighbours is off by ${f2(roundErr8)}, 6 by ${f2(roundErr4)} - ` +
+         (roundErr8 < roundErr4 ? 'ROUNDER' : 'NO BETTER'));
+
+  /* ================= 2. LIQUID FINDS ITS LEVEL ================= */
+  SAND_LAT = 8;
+  const wl = box(80,44,80); pour(wl, S_WATER, GR, 900);
+  const sl = shape(wl, S_WATER);
+  /* HEIGHT is the honest test, not width. A powder HEAPS and a liquid does
+     not, and that is the one bit of difference between them; comparing radii
+     compares two different shapes of the same volume and says less. */
+  function peak(w, mat){
+    const cx=w.W>>1, cz=w.D>>1; let top=0;
+    for(let x=cx-2;x<=cx+2;x++) for(let z=cz-2;z<=cz+2;z++)
+      for(let y=1;y<w.H-1;y++) if(w.at(x,y,z)===mat && y>top) top=y;
+    return top;
+  }
+  const hw=peak(wl,S_WATER), hs=peak(w8,S_SAND);
+  R.push(`WATER: ${f2(sl.ax)} cells across, ${hw} tall; SAND: ${f2(s8.ax)} across, ${hs} tall ` +
+         (hw*2 < hs ? 'ok, the liquid does not heap' : 'FAULT: liquid heaps'));
+  R.push(`WATER isotropy: diag/axis ${f2(sl.ratio)} (powder is ${f2(s8.ratio)})`);
+
+  /* ================= 3. SETTLED COSTS NOTHING ================= */
+  const before = w8.stats.scanned;
+  let awake=0; for(let k=0;k<30;k++){ sandTick(w8,-1); awake+=w8.stats.awake; }
+  R.push(`DIRTY RECT: ${GR} beads at rest, ${awake} chunks awake over 30 ticks, ` +
+         `${w8.stats.scanned} cells scanned ` + (awake===0 ? 'ok' : 'FAULT'));
+
+  /* ================= 4. WHAT 26 COSTS =================
+     NOT in nanoseconds: run_harness drives Chrome under a virtual time budget,
+     which freezes performance.now(), so every timing taken in here reads 0.00.
+     The 3.7x (49.4 ns a particle against 13.1) is measured on a real page in
+     voxel/storm.html and stands. What CAN be counted under virtual time is
+     work, so this counts it: cells looked at, and moves got out of them. */
+  function work(lat){
+    SAND_LAT=lat;
+    const w=box(64,64,64);
+    const cx=w.W>>1, cz=w.D>>1;
+    for(let y=20;y<44;y++) for(let z=cz-10;z<cz+10;z++) for(let x=cx-10;x<cx+10;x++) w.put(x,y,z,S_SAND);
+    let cells=0, moves=0;
+    for(let k=0;k<60;k++){ const m0=w.stats.moves; sandTick(w,-1); cells+=w.stats.scanned; moves+=w.stats.moves-m0; }
+    return {cells, moves, settled: w.awake.length===0};
+  }
+  const k4=work(4), k8=work(8);
+  SAND_LAT=8;
+  R.push(`WORK 4 lateral: ${k4.cells} cells scanned, ${k4.moves} moves, settled ${k4.settled}`);
+  R.push(`WORK 8 lateral: ${k8.cells} cells scanned, ${k8.moves} moves, settled ${k8.settled}`);
+
+  /* ================= 5. REACTIONS, WHICH THE GAME NEVER HAD ================= */
+  function rxTest(a,b,want){
+    const w=box(36,36,36);
+    const cx=18,cz=18;
+    for(let x=cx-3;x<=cx+3;x++) for(let z=cz-3;z<=cz+3;z++){ w.put(x,3,z,b); w.put(x,4,z,a); }
+    for(let k=0;k<80;k++) sandTick(w,-1);
+    return w.count(want);
+  }
+  R.push(`RX water on fire -> steam: ${rxTest(S_FIRE,S_WATER,S_STEAM)} cells`);
+  /* AND THEN THE GLASS MELTS, which is why this counts both. Noita's table
+     brought srx(lava, glass -> molten glass) with it, so lava standing on sand
+     fuses it and then keeps going - counting only S_GLASS reported zero and the
+     chain was working perfectly. */
+  R.push(`RX lava on sand -> glass: ${rxTest(S_LAVA,S_SAND,S_GLASS)+rxTest(S_LAVA,S_SAND,S_MGLASS)} cells`);
+  R.push(`RX water on sand -> wet sand: ${rxTest(S_WATER,S_SAND,S_WETSND)} cells`);
+  R.push(`RX acid on rock -> air: ${rxTest(S_ACID,S_ROCK,S_AIR)>0?'eaten':'FAULT'}`);
+
+  /* ================= 6. AND IT IS IN THE GAME ================= */
+  G.mode=MODE_SWEEP; seed=9; genWorld(0); G.state='play';
+  R.push(`GRID: ${SAND.W}x${SAND.H}x${SAND.D} cells, ${(SAND.N/1048576).toFixed(1)} MB, ` +
+         `${SAND.nc} chunks, bead ${f2(CELL_M)} m`);
+  let tgt=-1, air=-1;
+  for(let y=0;y<G.ny&&tgt<0;y++) for(let z=0;z<G.nz&&tgt<0;z++) for(let x=0;x<G.nx&&tgt<0;x++){
+    const i=idx(x,y,z);
+    if(G.st[i]!==SOLID||G.mine[i]) continue;
+    for(const j of nbrsOf(i)) if(G.st[j]===AIR){ tgt=i; air=j; break; }
+  }
+  const tc=cellXYZ(tgt), ac=cellXYZ(air);
+  const loose0 = SAND.count(S_SAND)+SAND.count(S_RUBBLE)+SAND.count(S_WATER);
+  R.push(`a fresh board holds ${loose0} loose cells (should be 0)`);
+  sandBurst(tc[0],tc[1],tc[2], Math.sign(tc[0]-ac[0]),Math.sign(tc[1]-ac[1]),Math.sign(tc[2]-ac[2]), 150);
+  let live=0; for(let i=0;i<GRIT.n;i++) if(GRIT.live[i]) live++;
+  R.push(`one block burst -> ${live} beads in the air`);
+  for(let k=0;k<420;k++) sandStep(1/60);
+  const sd=SAND.count(S_SAND), rb=SAND.count(S_RUBBLE), wt=SAND.count(S_WATER), ws=SAND.count(S_WETSND);
+  R.push(`landed into the grid: ${sd} sand, ${rb} rubble, ${wt} water, ${ws} wet sand`);
+  live=0; for(let i=0;i<GRIT.n;i++) if(GRIT.live[i]) live++;
+  R.push(`still in the air: ${live} ` + (live===0?'ok':'some never landed'));
+  for(let k=0;k<600;k++) sandStep(1/60);
+  const sd2=SAND.count(S_SAND)+SAND.count(S_RUBBLE)+SAND.count(S_WATER)+SAND.count(S_WETSND);
+  R.push(`PERSISTENCE: ${sd2} cells still there after 10 more seconds ` +
+         (sd2>=sd+rb+wt+ws-2 ? 'ok' : 'FADED'));
+
+  /* the picture has a budget and the simulation does not */
+  P.x=(tc[0]+0.5)*BLOCK; P.y=(tc[1]+0.5)*BLOCK; P.z=(tc[2]+0.5)*BLOCK;
+  const drawn = sandDraw();
+  R.push(`DRAWN: ${drawn} of ${SAND_DRAW_MAX} instances, ${sandB.count} in the batch ` +
+         (drawn<=SAND_DRAW_MAX ? 'ok' : 'OVERFLOW'));
+
+  /* opening a block is the mountain becoming beads, and not before */
+  R.push(`OPEN BLOCKS: ${VOXD.size} of ${G.nx*G.ny*G.nz}`);
+
+  /* ================= 7. AND THE BIG ONE ================= */
+  G.mode=MODE_DUNGEON; seed=11; genWorld(2, true); G.state='play';
+  R.push(`DUNGEON GRID: ${SAND.W}x${SAND.H}x${SAND.D}, ${(SAND.N/1048576).toFixed(0)} MB, ` +
+         `${SAND.nc} chunks, ${SAND.awake.length} awake at rest`);
+  let t0=SAND.stats.scanned;
+  for(let k=0;k<60;k++) sandStep(1/60);
+  R.push(`a quiet dungeon: ${SAND.stats.scanned} cells scanned on the last of 60 ticks, ` +
+         `${SAND.awake.length} chunks awake ` + (SAND.awake.length===0?'ok':'FAULT'));
 
   R.push(window.__err.length ? ('FAULT '+window.__err.join(' | ')) : 'no errors');
-  document.body.dataset.r=R.join(' ~ ');
-}catch(err){ document.body.dataset.r='THREW: '+err.message+' @ '+((err.stack||'').split('\n')[1]||''); }}, 300);
+  document.body.dataset.r = R.join(' ~ ');
+}catch(err){
+  document.body.dataset.r='THREW: '+err.message+' @ '+((err.stack||'').split('\n')[1]||'');
+}}, 300);
 
 })();
 </script>

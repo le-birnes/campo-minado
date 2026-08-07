@@ -12104,127 +12104,106 @@ setScreen('menu');
 requestAnimationFrame(frame);
 
 window.requestAnimationFrame = function(){ return 0; };
-/* THE SPIT, and THE SLOW POUR.
+/* SPIN THE PLAYER, NOT THE CAMERA.
 
-   Marcelo: "add the spit mechanism", and "one block poured at a time will
-   spill slowly until only beads remain scattered".
+   Marcelo, twice: "you can't just flip the camera like that, you should spin
+   the player around, I didn't ask for a visual flip only."
 
-   The spit is the only way to place a liquid at a distance - everything else
-   moves material by breaking something - and it always doses you, because you
-   had it in your mouth.
+   The old code negated the right and up vectors in viewFrom. That is a real
+   rotation and it is still wrong, because it turns the PICTURE about the view
+   axis while the body it belongs to never changes: the mouse kept yawing in
+   the old frame and the strafe key kept pushing the old way, so turning right
+   went left and walking right went left.
 
    What has to be true:
-     1. wading through a liquid gives you a mouthful of THAT liquid
-     2. holding longer throws more of it, further
-     3. it lands as real material in the grid, not as decoration
-     4. it doses you: spitting poison poisons the one who spat it
-     5. a block of water poured out spreads, thins, and ends as scattered beads
-        that are mortal - which is the pour Marcelo described, and it is not
-        scripted anywhere: it is the spread rule and the exposure rule meeting */
+     1. TURN RIGHT GOES RIGHT under both signs of gravity. Measured in the
+        BODY's frame, which is the only frame the question means anything in:
+        after a turn-right, the new forward must lean toward the old right.
+     2. STRAFE RIGHT GOES RIGHT under both, the same way.
+     3. THE CROSSHAIR IS WHERE THE CAMERA LOOKS. viewFrom used to negate the
+        pitch and aimRay did not, so under reversed gravity the shot and the
+        picture disagreed about how high they were aiming.
+     4. IT IS A TURN AND IT TAKES TIME - the roll goes 0 to pi over ROLL_DUR
+        and is somewhere in between while it is happening.
+     5. The basis stays orthonormal and right-handed all the way through. */
 window.__err=[];
 window.addEventListener('error',e=>window.__err.push('ERR '+e.message));
 setTimeout(()=>{ try{
   G.muted=true; try{ snd.setMute(true); }catch(e){}
-  const R=[], f2=v=>(+v).toFixed(2);
-  G.mode=MODE_SWEEP; seed=6; genWorld(0); G.state='play';
-  const w=SAND;
-  /* a long clear room to spit down */
-  for(let y=1;y<G.ny;y++) for(let z=1;z<G.nz-1;z++) for(let x=1;x<G.nx-1;x++){
-    const i=idx(x,y,z); if(G.st[i]!==AIR){ G.st[i]=AIR; G.revealed++; }
-    sandDig(x,y,z);
+  const R=[], f2=v=>(+v).toFixed(3);
+  G.mode=MODE_SWEEP; seed=3; genWorld(0); G.state='play';
+  const M=new Float32Array(16);
+  const basis=()=>viewFrom(P.x,eyeY(),P.z, P.yaw, P.pitch, M, rollNow());
+  const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+
+  for(const k of [1,-1]){
+    G.gravK=k; rollReset();
+    P.yaw=0.7; P.pitch=0.2;
+    const name = k>0 ? 'upright' : 'upside down';
+
+    /* 1. TURN RIGHT */
+    const b0=basis();
+    const r0=[b0.rx,b0.ry,b0.rz], f0=[b0.fx,b0.fy,b0.fz], u0=[b0.ux,b0.uy,b0.uz];
+    turnedThisFrame = 0;                      // the per-frame turn budget is not this test's subject
+    turnView(-0.30, 0);                       // what the mouse sends for "right"
+    const b1=basis();
+    const lean = dot([b1.fx,b1.fy,b1.fz], r0);
+    R.push(`${name}: turn right -> forward leans ${f2(lean)} toward the old right ` +
+           (lean > 0.15 ? 'ok' : 'FAULT: it turned the other way'));
+
+    /* 2. LOOK UP */
+    P.yaw=0.7; P.pitch=0.0;
+    const b2=basis(), u2=[b2.ux,b2.uy,b2.uz];
+    turnedThisFrame = 0;
+    turnView(0, 0.30);                        // what the mouse sends for "up"
+    const b3=basis();
+    const rise = dot([b3.fx,b3.fy,b3.fz], u2);
+    R.push(`${name}: look up -> forward leans ${f2(rise)} toward the old up ` +
+           (rise > 0.15 ? 'ok' : 'FAULT: looking up looks down'));
+
+    /* 3. STRAFE RIGHT */
+    P.yaw=0.7; P.pitch=0;
+    const b4=basis();
+    IN.f=IN.b=IN.l=0; IN.r=1; IN.mf=IN.ms=0; IN.sprint=false;
+    P.vx=P.vz=0; P.ground=true;
+    for(let i=0;i<10;i++) physics(1/60);
+    IN.r=0;
+    const mv = [P.vx,0,P.vz], ln = Math.hypot(P.vx,P.vz)||1;
+    const along = dot([mv[0]/ln,0,mv[2]/ln], [b4.rx,b4.ry,b4.rz]);
+    R.push(`${name}: strafe right -> moving ${f2(along)} along the body's right ` +
+           (along > 0.8 ? 'ok' : 'FAULT: walking right walks left'));
+
+    /* 4. the crosshair and the camera agree */
+    P.yaw=0.7; P.pitch=0.45;
+    const b5=basis(), ar=aimRay();
+    const agree = dot([ar.dx,ar.dy,ar.dz],[b5.fx,b5.fy,b5.fz]);
+    R.push(`${name}: aim vs camera ${f2(agree)} ` +
+           (agree > 0.9999 ? 'ok, the same direction' : 'FAULT: the shot and the picture disagree'));
+
+    /* 5. still a proper frame */
+    const b6=basis();
+    const rr=Math.hypot(b6.rx,b6.ry,b6.rz), uu=Math.hypot(b6.ux,b6.uy,b6.uz);
+    const ru=b6.rx*b6.ux+b6.ry*b6.uy+b6.rz*b6.uz;
+    const crx=[b6.ry*b6.fz-b6.rz*b6.fy, b6.rz*b6.fx-b6.rx*b6.fz, b6.rx*b6.fy-b6.ry*b6.fx];
+    const hand=dot(crx,[b6.ux,b6.uy,b6.uz]);
+    R.push(`${name}: |r| ${f2(rr)} |u| ${f2(uu)} r.u ${f2(ru)} handedness ${f2(hand)} ` +
+           (Math.abs(rr-1)<1e-6 && Math.abs(uu-1)<1e-6 && Math.abs(ru)<1e-6 && hand>0.999
+            ? 'ok, orthonormal and right-handed' : 'FAULT: the basis is bent'));
   }
-  P.x=3*BLOCK; P.z=(G.nz/2|0)*BLOCK; P.y=1*BLOCK+0.1;
-  P.yaw=-Math.PI/2; P.pitch=0.10; P.vx=P.vy=P.vz=0;
-  P.fx.fill(0); P.hp=P.hpMax=HP_START;
 
-  /* 1. A MOUTHFUL. Stand in poison and it is what you are carrying. */
-  const px=sandCell(P.x), pz=sandCell(P.z);
-  for(let y=sandCell(P.y); y<=sandCell(P.y+P_H); y++)
-    for(let dz=-2;dz<=2;dz++) for(let dx=-2;dx<=2;dx++) w.put(px+dx,y,pz+dz,S_POISON);
-  sandLoad(1/60);
-  R.push(`stood in poison: mouth = ${P.mouth ? SMAT[P.mouth].n : 'nothing'} ` +
-         (P.mouth===S_POISON ? 'ok' : 'FAULT: being in a thing is not taking it'));
-
-  /* clear it away again so the throw is measured in open air */
-  for(let y=0;y<w.H;y++) for(let z=0;z<w.D;z++) for(let x=0;x<w.W;x++)
-    if(w.at(x,y,z)===S_POISON) w.m[w.idx(x,y,z)]=S_AIR;
-  for(let c=0;c<w.nc;c++){ w.cl[c]=0; }
-  P.mouth=S_POISON; P.mouthN=1;
-
-  /* 2. HOLD LONGER, THROW FURTHER. */
-  const throwIt=(hold)=>{
-    GRIT.n=0; GRIT.next=0; GRIT.live.fill(0);
-    P.mouth=S_POISON; P.mouthN=1;
-    P.spitT=hold; doSpit();
-    let n=0, far=0;
-    for(let i=0;i<GRIT.n;i++){ if(!GRIT.live[i]) continue; n++;
-      const v=Math.hypot(GRIT.vx[i],GRIT.vy[i],GRIT.vz[i]); if(v>far) far=v; }
-    return {n, far};
-  };
-  const soft = throwIt(0.15), hard = throwIt(SPIT_MAX);
-  R.push(`spit: short hold ${soft.n} beads at ${f2(soft.far)} m/s, ` +
-         `full hold ${hard.n} beads at ${f2(hard.far)} m/s ` +
-         (hard.n > soft.n && hard.far > soft.far ? 'ok, the hold is the control' : 'FAULT: the hold does nothing'));
-
-  /* 3. AND IT LANDS AS THE MATERIAL. */
-  const before = w.count(S_POISON);
-  P.mouth=S_POISON; P.mouthN=1; P.spitT=SPIT_MAX; doSpit();
-  for(let k=0;k<240;k++) sandStep(1/60);
-  const after = w.count(S_POISON);
-  R.push(`landed: ${after-before} cells of poison now in the grid ` +
-         ((after-before) > 5 ? 'ok, it is real material' : 'FAULT: it evaporated in flight or never landed'));
-
-  /* 4. IT DOSES YOU. */
-  P.fx.fill(0); P.hp=P.hpMax=HP_START;
-  P.mouth=S_POISON; P.mouthN=1; P.spitT=SPIT_MAX;
-  doSpit();
-  R.push(`the one who spat it: POISONED for ${f2(P.fx[FX_POISON])} s, hp ${f2(P.hp)} ` +
-         (P.fx[FX_POISON] > 0 && P.hp < HP_START ? 'ok, you had it in your mouth' : 'FAULT: free to use'));
-
-  /* 5. THE SLOW POUR. One block of water, on a floor, left alone. */
-  seed=6; genWorld(0); G.state='play';
-  const w5=SAND;
-  for(let y=1;y<G.ny;y++) for(let z=1;z<G.nz-1;z++) for(let x=1;x<G.nx-1;x++){
-    const i=idx(x,y,z); if(G.st[i]!==AIR){ G.st[i]=AIR; G.revealed++; }
-    sandDig(x,y,z);
-  }
-  const bx=(G.nx/2)|0, bz=(G.nz/2)|0;
-  sandFill(bx, 1, bz, S_WATER, true);
-  const pour0 = w5.count(S_WATER);
-  const shape=()=>{
-    let n=0, x0=1e9,x1=-1,z0=1e9,z1=-1, maxh=0;
-    const col={};
-    for(let y=0;y<w5.H;y++) for(let z=0;z<w5.D;z++) for(let x=0;x<w5.W;x++)
-      if(w5.at(x,y,z)===S_WATER){ n++;
-        if(x<x0)x0=x; if(x>x1)x1=x; if(z<z0)z0=z; if(z>z1)z1=z;
-        const k=x+','+z; col[k]=(col[k]||0)+1; if(col[k]>maxh) maxh=col[k]; }
-    const cols=Object.keys(col).length;
-    return {n, w:(x1-x0+1), d:(z1-z0+1), maxh, avg: cols? n/cols : 0};
-  };
-  const s0=shape();
-  const marks=[];
-  for(let k=0;k<14;k++){
-    for(let t=0;t<900;t++){ sandTick(w5, -1); ladTick(); }
-    const sh=shape();
-    marks.push(`${(k+1)*15}s ${sh.n}c ${sh.w}x${sh.d} avg${sh.avg.toFixed(1)}`);
-    if(sh.n===0) break;
-  }
-  R.push(`ONE BLOCK POURED: ${pour0} cells, ${s0.w}x${s0.d} and ${s0.avg.toFixed(1)} deep`);
-  R.push('the pour: ' + marks.join(' | '));
-  const end=shape();
-  /* SLOWLY IS THE WORD IN THE ASK. A block of water does not vanish in three
-     minutes and should not: what has to be true is that it SPREADS, that it
-     THINS to about a bead deep, and that it is going away the whole time
-     rather than settling into a permanent pond. Asking for it to be gone by
-     210 s was asking for something Marcelo did not describe. */
-  let falling = true;
-  for(let k=1;k<marks.length;k++)
-    if(+marks[k].split(' ')[1].replace('c','') > +marks[k-1].split(' ')[1].replace('c','')) falling = false;
-  R.push(`after ${marks.length*15}s: ${end.n} cells left, spread ${end.w}x${end.d}, ` +
-         `${end.avg.toFixed(1)} beads deep on average ` +
-         (end.w > s0.w*2 && end.avg < 2.2 && falling && end.n < pour0*0.95
-          ? 'ok: it spilled slowly, thinned to about a bead deep, and is still going'
-          : 'FAULT: it did not spread, or it did not thin, or it stopped going away'));
+  /* 6. AND IT IS A TURN, NOT A CUT. */
+  G.gravK=1; rollReset();
+  R.push(`settled upright: roll ${f2(rollNow())} upSign ${upSign()}`);
+  G.gravK=-1;
+  rollTick(1/60);
+  const mid=[];
+  for(let i=0;i<Math.round(ROLL_DUR*60)+2;i++){ mid.push(rollNow()); rollTick(1/60); }
+  const started=mid[0], half=mid[(mid.length/2)|0], ended=mid[mid.length-1];
+  R.push(`the turn: ${f2(started)} -> ${f2(half)} -> ${f2(ended)} rad over ${ROLL_DUR}s ` +
+         (started < 0.4 && half > 0.8 && half < 2.4 && Math.abs(ended-Math.PI) < 0.01
+          ? 'ok, it goes over rather than cutting' : 'FAULT: it snaps'));
+  R.push(`and the controls follow the body: upSign ${upSign()} ` +
+         (upSign() === -1 ? 'ok' : 'FAULT'));
 
   R.push(window.__err.length ? ('FAULT '+window.__err.join(' | ')) : 'no errors');
   document.body.dataset.r=R.join(' ~ ');

@@ -8875,6 +8875,36 @@ function buildIsland(){
     }
   }
 
+
+  /* 7. THE SHAFT - one hole with two ends, and it is HOW YOU GET OUT.
+        Marcelo: "instead of CRAWLING OUT of the dungeon where I can finally
+        see the scenery."
+
+        So it is carved BEFORE the sea is found, not after, and that one
+        reordering is the whole of it: the flood fill then walks down the shaft
+        and fills everything below the waterline, and the way out of the rock
+        is a flooded well you rise through. A person is a shade less dense than
+        brine, so you go up on your own and swimming makes it quick - which is
+        a journey, and being placed on a beach is not.
+
+        AND IT OPENS OUT AT THE BOTTOM. A cylinder the width of the hole is
+        something you have to already be standing under; a cone is something
+        you fall into. Under reversed gravity you land on what was the ceiling
+        of the boss room, and the funnel is what takes you from wherever you
+        landed to the one way up. */
+  for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
+    if(!inside(x,y,z)) continue;
+    /* the funnel: full width through the island and the water, opening out
+       through the bottom third of the chunk */
+    let r = hr;
+    if(y > ROCK0){
+      const t = (y - ROCK0)/Math.max(1, G.ny-1-ROCK0);
+      r = hr + t*t*Math.max(3, hr*3);
+    }
+    if(Math.hypot(x-hx,z-hz) >= r) continue;
+    const i=idx(x,y,z); G.st[i]=AIR; G.scenery[i]=0;
+  }
+
   /* 6. THE SEA, and it is not a floor you stand on any more.
         It is found by FLOODING IN FROM THE EDGE OF THE WORLD rather than by
         filling everything below a line, and that one choice is what makes the
@@ -8902,67 +8932,30 @@ function buildIsland(){
     for(let i=0;i<N;i++) if(seen[i]) seaB.push(i);
   }
 
-  /* 7. THE SHAFT - one hole with two ends, and it is carved AFTER the sea is
-        decided so that it stays dry. It is a well through the seamount: you
-        came up it, and from up here it is something that burst open from
-        underneath, which is what it did. */
-  for(let y=0;y<G.ny;y++) for(let z=hz-hr;z<=hz+hr;z++) for(let x=hx-hr;x<=hx+hr;x++){
-    if(!inside(x,y,z)) continue;
-    if(Math.hypot(x-hx,z-hz) >= hr) continue;
-    const i=idx(x,y,z); G.st[i]=AIR; G.scenery[i]=0;
-  }
+  /* 8. AND NOTHING MOVES YOU.
+        Marcelo: "I get TELEPORTED outside the tree/house/sand monstro, instead
+        of CRAWLING OUT of the dungeon where I can finally see the scenery."
 
-  /* 8. AND YOU ARE PUT ON THE BEACH, WITH THE HOUSE IN FRONT OF YOU, which is
-        the difference between a reveal and being buried alive.
-        The old code placed you twice and the second placement read a MIRRORED
-        height as an unmirrored one, so you were dropped inside the terrain -
-        "it appears I'm stuck in a dungeon". One placement now, and it is
-        arithmetic in one space. */
+        He is right and the teleport is deleted. The reveal is a journey and a
+        journey cannot be a cut - you have to see the walls go past or you have
+        not been anywhere. Everything needed for it is already here: gravity
+        has reversed so you fall onto what was the ceiling, the hole the boss
+        blew is above you, the funnel takes you to it, and the shaft is flooded
+        so you rise through it and break the surface next to the island.
+
+        The only thing this does now is make sure you are not left inside solid
+        rock at the instant the world changes under you, which is not a teleport
+        - it is the same courtesy as not spawning anybody inside a wall. */
   {
-    /* IN FRONT OF THE DOOR, far enough back to see the whole house. Walking
-       outward from the doorway until there is open sand under your feet finds
-       a spot that is on the island by construction, rather than one that is
-       computed and hoped for. */
-    let sx = Math.round(cx), sz = Math.round(cz), ty = -1;
-    if(house){
-      const dx0 = house.x + ((house.w/2)|0);
-      for(let k=3;k<=9;k++){
-        const zz = house.z + house.d + k;
-        const t = landY(dx0, zz);
-        if(t >= 0 && t < SEAY){ sx=dx0; sz=zz; ty=t; }
-        else if(ty >= 0) break;
+    const px = Math.floor(P.x/BLOCK), pz = Math.floor(P.z/BLOCK), py = Math.floor(P.y/BLOCK);
+    if(inside(px,py,pz) && G.st[idx(px,py,pz)] !== AIR){
+      for(let k=0;k<3;k++){
+        const yy = py + k*gsign();
+        if(!inside(px,yy,pz)) break;
+        const i = idx(px,yy,pz); G.st[i]=AIR; G.scenery[i]=0;
       }
     }
-    if(ty < 0){
-      /* no door to stand in front of: walk out from the peak instead */
-      const px=Math.round(cx), pz=Math.round(cz);
-      for(let k=0;k<G.nz;k++){
-        const t = landY(px, pz+k);
-        if(t >= 0 && t < SEAY){ sx=px; sz=pz+k; ty=t; }
-        else if(ty >= 0) break;
-      }
-    }
-    if(ty < 0){ sx = Math.round(cx); sz = Math.round(cz); ty = Math.max(1, landY(sx,sz)); }
-    P.x=(sx+0.5)*BLOCK; P.z=(sz+0.5)*BLOCK;
-    /* down is +Y, so the ground is BELOW in y and the body hangs off its top
-       face: the end of the body that rests on it is P.y+P_H. */
-    P.y = ty*BLOCK - P_H - 0.02;
-    P.vx=P.vy=P.vz=0; P.kx=P.kz=0; P.ground=true; P.coyote=COYOTE;
-    P.load=0; P.imm=0; P.immD=0;
-    /* facing the house if there is one, the peak if there is not */
-    const ax=(house?house.x+house.w*0.5:cx)*BLOCK - P.x;
-    const az=(house?house.z+house.d*0.5:cz)*BLOCK - P.z;
-    P.yaw=Math.atan2(-ax,-az); P.pitch=0;
-    /* and the space you occupy is open, or you arrive inside the sand */
-    for(let k=1;k<=3;k++){
-      const yy=ty-k;
-      if(!inside(sx,yy,sz)) continue;
-      const i=idx(sx,yy,sz); G.st[i]=AIR; G.scenery[i]=0;
-      for(const [ox,oz] of [[1,0],[-1,0],[0,1],[0,-1]]){
-        if(!inside(sx+ox,yy,sz+oz)) continue;
-        const j=idx(sx+ox,yy,sz+oz); G.st[j]=AIR; G.scenery[j]=0;
-      }
-    }
+    P.load = 0; P.imm = 0; P.immD = 0;
   }
 
   G.island=true; G.dungeon=false; G.dirty=true;
@@ -9184,7 +9177,10 @@ function bossBlows(x,y,z){
   /* AND YOU GO THE WAY THAT IS NOW UP. A positive vy under reversed gravity is
      DOWNWARD - it drove you into the floor at the moment the floor became the
      ceiling. Up is the direction gravity is not pulling, and that is one sign. */
-  P.vy = 6.5 * gsign();
+  /* AND IT THROWS YOU AT THE HOLE. Six and a half metres a second buys one
+     metre against twenty of gravity, which is not a launch, it is a hop. The
+     charge that opened the floor is what puts you through it. */
+  P.vy = 24 * gsign();
   /* AND EVERYTHING SETTLED HAS TO BE TOLD. Settled material costs nothing
      precisely because nobody looks at it, so a world where gravity has just
      reversed is a world full of sand that does not know. Every chunk holding

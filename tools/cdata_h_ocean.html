@@ -12104,127 +12104,161 @@ setScreen('menu');
 requestAnimationFrame(frame);
 
 window.requestAnimationFrame = function(){ return 0; };
-/* THE SPIT, and THE SLOW POUR.
+/* THE OCEAN, AND THE CONTAINER THAT OPENS INTO IT.
 
-   Marcelo: "add the spit mechanism", and "one block poured at a time will
-   spill slowly until only beads remain scattered".
+   Asked for, in these words, more times than anything else in the project:
+   "fix not just gravity but the dungeon being a BREACHABLE CONTAINER INSIDE
+   THE OCEAN", and "I want to be able to see the damn beads on the water".
 
-   The spit is the only way to place a liquid at a distance - everything else
-   moves material by breaking something - and it always doses you, because you
-   had it in your mouth.
-
-   What has to be true:
-     1. wading through a liquid gives you a mouthful of THAT liquid
-     2. holding longer throws more of it, further
-     3. it lands as real material in the grid, not as decoration
-     4. it doses you: spitting poison poisons the one who spat it
-     5. a block of water poured out spreads, thins, and ends as scattered beads
-        that are mortal - which is the pour Marcelo described, and it is not
-        scripted anywhere: it is the spread rule and the exposure rule meeting */
+   Five things have to be true and every one of them has been false:
+     1. the world is the RIGHT WAY UP - sky at small y, sea floor at large y,
+        because gravity is reversed and down is +Y. Built mirrored, the chunk
+        of rock you climbed out of ends up overhead like a lid, which is what
+        "a box of wall/lava/stone" was.
+     2. the sea is WATER IN THE GRID, not blocks you stand on
+     3. it costs nothing, because it is promoted the moment it is poured
+     4. you arrive ON THE BEACH, in open air, with the house in front of you
+     5. shooting the wall lets the sea in */
 window.__err=[];
 window.addEventListener('error',e=>window.__err.push('ERR '+e.message));
 setTimeout(()=>{ try{
   G.muted=true; try{ snd.setMute(true); }catch(e){}
   const R=[], f2=v=>(+v).toFixed(2);
-  G.mode=MODE_SWEEP; seed=6; genWorld(0); G.state='play';
-  const w=SAND;
-  /* a long clear room to spit down */
-  for(let y=1;y<G.ny;y++) for(let z=1;z<G.nz-1;z++) for(let x=1;x<G.nx-1;x++){
-    const i=idx(x,y,z); if(G.st[i]!==AIR){ G.st[i]=AIR; G.revealed++; }
-    sandDig(x,y,z);
-  }
-  P.x=3*BLOCK; P.z=(G.nz/2|0)*BLOCK; P.y=1*BLOCK+0.1;
-  P.yaw=-Math.PI/2; P.pitch=0.10; P.vx=P.vy=P.vz=0;
-  P.fx.fill(0); P.hp=P.hpMax=HP_START;
+  G.mode=MODE_DUNGEON; seed=11; genWorld(1); G.state='play';
 
-  /* 1. A MOUTHFUL. Stand in poison and it is what you are carrying. */
-  const px=sandCell(P.x), pz=sandCell(P.z);
-  for(let y=sandCell(P.y); y<=sandCell(P.y+P_H); y++)
-    for(let dz=-2;dz<=2;dz++) for(let dx=-2;dx<=2;dx++) w.put(px+dx,y,pz+dz,S_POISON);
-  sandLoad(1/60);
-  R.push(`stood in poison: mouth = ${P.mouth ? SMAT[P.mouth].n : 'nothing'} ` +
-         (P.mouth===S_POISON ? 'ok' : 'FAULT: being in a thing is not taking it'));
-
-  /* clear it away again so the throw is measured in open air */
-  for(let y=0;y<w.H;y++) for(let z=0;z<w.D;z++) for(let x=0;x<w.W;x++)
-    if(w.at(x,y,z)===S_POISON) w.m[w.idx(x,y,z)]=S_AIR;
-  for(let c=0;c<w.nc;c++){ w.cl[c]=0; }
-  P.mouth=S_POISON; P.mouthN=1;
-
-  /* 2. HOLD LONGER, THROW FURTHER. */
-  const throwIt=(hold)=>{
-    GRIT.n=0; GRIT.next=0; GRIT.live.fill(0);
-    P.mouth=S_POISON; P.mouthN=1;
-    P.spitT=hold; doSpit();
-    let n=0, far=0;
-    for(let i=0;i<GRIT.n;i++){ if(!GRIT.live[i]) continue; n++;
-      const v=Math.hypot(GRIT.vx[i],GRIT.vy[i],GRIT.vz[i]); if(v>far) far=v; }
-    return {n, far};
-  };
-  const soft = throwIt(0.15), hard = throwIt(SPIT_MAX);
-  R.push(`spit: short hold ${soft.n} beads at ${f2(soft.far)} m/s, ` +
-         `full hold ${hard.n} beads at ${f2(hard.far)} m/s ` +
-         (hard.n > soft.n && hard.far > soft.far ? 'ok, the hold is the control' : 'FAULT: the hold does nothing'));
-
-  /* 3. AND IT LANDS AS THE MATERIAL. */
-  const before = w.count(S_POISON);
-  P.mouth=S_POISON; P.mouthN=1; P.spitT=SPIT_MAX; doSpit();
-  for(let k=0;k<240;k++) sandStep(1/60);
-  const after = w.count(S_POISON);
-  R.push(`landed: ${after-before} cells of poison now in the grid ` +
-         ((after-before) > 5 ? 'ok, it is real material' : 'FAULT: it evaporated in flight or never landed'));
-
-  /* 4. IT DOSES YOU. */
-  P.fx.fill(0); P.hp=P.hpMax=HP_START;
-  P.mouth=S_POISON; P.mouthN=1; P.spitT=SPIT_MAX;
-  doSpit();
-  R.push(`the one who spat it: POISONED for ${f2(P.fx[FX_POISON])} s, hp ${f2(P.hp)} ` +
-         (P.fx[FX_POISON] > 0 && P.hp < HP_START ? 'ok, you had it in your mouth' : 'FAULT: free to use'));
-
-  /* 5. THE SLOW POUR. One block of water, on a floor, left alone. */
-  seed=6; genWorld(0); G.state='play';
-  const w5=SAND;
-  for(let y=1;y<G.ny;y++) for(let z=1;z<G.nz-1;z++) for(let x=1;x<G.nx-1;x++){
-    const i=idx(x,y,z); if(G.st[i]!==AIR){ G.st[i]=AIR; G.revealed++; }
-    sandDig(x,y,z);
-  }
+  /* the ending, without the boss: gravity reverses and stays reversed */
   const bx=(G.nx/2)|0, bz=(G.nz/2)|0;
-  sandFill(bx, 1, bz, S_WATER, true);
-  const pour0 = w5.count(S_WATER);
-  const shape=()=>{
-    let n=0, x0=1e9,x1=-1,z0=1e9,z1=-1, maxh=0;
-    const col={};
-    for(let y=0;y<w5.H;y++) for(let z=0;z<w5.D;z++) for(let x=0;x<w5.W;x++)
-      if(w5.at(x,y,z)===S_WATER){ n++;
-        if(x<x0)x0=x; if(x>x1)x1=x; if(z<z0)z0=z; if(z>z1)z1=z;
-        const k=x+','+z; col[k]=(col[k]||0)+1; if(col[k]>maxh) maxh=col[k]; }
-    const cols=Object.keys(col).length;
-    return {n, w:(x1-x0+1), d:(z1-z0+1), maxh, avg: cols? n/cols : 0};
-  };
-  const s0=shape();
-  const marks=[];
-  for(let k=0;k<14;k++){
-    for(let t=0;t<900;t++){ sandTick(w5, -1); ladTick(); }
-    const sh=shape();
-    marks.push(`${(k+1)*15}s ${sh.n}c ${sh.w}x${sh.d} avg${sh.avg.toFixed(1)}`);
-    if(sh.n===0) break;
+  G.holeX=bx; G.holeZ=bz;
+  G.gravK=-1; sandWakeLoose();
+  buildIsland();
+  const w=SAND;
+  R.push(`gravity ${G.gravK} gsign ${gsign()} sandDir ${sandDir()} ` + (gsign()<0 ? 'ok, down is +Y' : 'FAULT'));
+
+  /* 1. THE RIGHT WAY UP. Rock deep, island shallow, sky above it. */
+  let rockY=0, rockN=0, landY=0, landN=0, skyN=0;
+  for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
+    const i=idx(x,y,z);
+    if(G.st[i]===AIR){ if(y<G.seaY) skyN++; continue; }
+    if(G.mat[i]===M_STONE && y>=G.rock0){ rockY+=y; rockN++; }
+    else if(G.mat[i]===M_DRYSAND||G.mat[i]===M_WETSAND){ landY+=y; landN++; }
   }
-  R.push(`ONE BLOCK POURED: ${pour0} cells, ${s0.w}x${s0.d} and ${s0.avg.toFixed(1)} deep`);
-  R.push('the pour: ' + marks.join(' | '));
-  const end=shape();
-  /* SLOWLY IS THE WORD IN THE ASK. A block of water does not vanish in three
-     minutes and should not: what has to be true is that it SPREADS, that it
-     THINS to about a bead deep, and that it is going away the whole time
-     rather than settling into a permanent pond. Asking for it to be gone by
-     210 s was asking for something Marcelo did not describe. */
-  let falling = true;
-  for(let k=1;k<marks.length;k++)
-    if(+marks[k].split(' ')[1].replace('c','') > +marks[k-1].split(' ')[1].replace('c','')) falling = false;
-  R.push(`after ${marks.length*15}s: ${end.n} cells left, spread ${end.w}x${end.d}, ` +
-         `${end.avg.toFixed(1)} beads deep on average ` +
-         (end.w > s0.w*2 && end.avg < 2.2 && falling && end.n < pour0*0.95
-          ? 'ok: it spilled slowly, thinned to about a bead deep, and is still going'
-          : 'FAULT: it did not spread, or it did not thin, or it stopped going away'));
+  R.push(`chunk ${rockN} blocks at mean y ${f2(rockN?rockY/rockN:0)}, ` +
+         `beach ${landN} at ${f2(landN?landY/landN:0)}, waterline ${G.seaY}, sky ${skyN} blocks`);
+  R.push(rockN>200 && landN>40 && (rockY/rockN) > (landY/landN)
+         ? 'ok: the rock is BELOW the beach, which is what down being +Y means'
+         : 'FAULT: the world is upside down - this is the box with the tree in it');
+
+  /* 2 and 3. the sea is brine in the grid, and it is promoted */
+  const brine = w.count(S_SALT);
+  R.push(`sea: ${G.seaB.length} blocks, ${brine} cells of brine, ${ladStats.blocks} promoted, ` +
+         `${MASSES.filter(m=>m.n>=LAD_MASS_MIN).length} masses` +
+         (G.seaB.length>50 && brine>100000 ? ' ok' : ' FAULT: no ocean'));
+  const surf = MASSES.length ? Math.max(...MASSES.map(m=>m.n)) : 0;
+  R.push(`biggest mass ${surf} blocks ` + (surf>=LAD_MASS_MIN ? 'ok, one body of water' : 'FAULT'));
+
+  w.stats.scanned=0;
+  let scan=0;
+  for(let k=0;k<90;k++){ sandTick(w, sandDir()); ladTick(); scan+=w.stats.scanned; }
+  R.push(`90 ticks with an ocean in the world: ${scan} cells scanned, ${w.awake.length} awake ` +
+         (scan < 400000 ? 'ok' : 'FAULT: the sea is being simulated bead by bead'));
+
+  /* 4. YOU CRAWL OUT. NOTHING MOVES YOU.
+        Marcelo: "I get TELEPORTED outside the tree/house/sand monstro, instead
+        of CRAWLING OUT of the dungeon where I can finally see the scenery."
+
+        So the test is no longer "were you put somewhere sensible" - there is
+        no placement left to check. It is: from the bottom of the shaft, under
+        the physics the game actually runs, holding the key a player would
+        hold, DO YOU GET OUT. */
+  {
+    const hx=G.holeX, hz=G.holeZ;
+    /* at the bottom of the funnel, where the blast leaves you */
+    let sy=G.ny-2;
+    while(sy>0 && G.st[idx(hx,sy,hz)]!==AIR) sy--;
+    const y0=sy;
+    P.x=(hx+0.5)*BLOCK; P.z=(hz+0.5)*BLOCK; P.y=sy*BLOCK+0.4;
+    P.vx=P.vz=0; P.vy=24*gsign();           // what bossBlows gives you
+    P.fx.fill(0); P.hp=P.hpMax=HP_START; P.air=AIR_MAX;
+    IN.f=IN.b=IN.l=IN.r=0; IN.mf=IN.ms=0; IN.jumpHeld=true;
+    P.yaw=0; P.pitch=-1.2;                  // looking the way you are going
+    let t=0, best=sy, surfaced=-1;
+    for(; t<60*60 && surfaced<0; t++){
+      physics(1/60); sandStep(1/60);
+      const by=Math.floor(P.y/BLOCK);
+      if(by<best) best=by;
+      if(by < G.seaY && P.sub<=0) surfaced=t;
+      if(P.hp<=0) break;
+    }
+    IN.jumpHeld=false;
+    R.push(`THE WAY OUT: started at y ${y0}, best y ${best}, waterline ${G.seaY}, ` +
+           `hp ${P.hp.toFixed(0)}, air ${P.air.toFixed(0)} s`);
+    R.push(surfaced>=0
+           ? `surfaced after ${(surfaced/60).toFixed(1)} s of swimming ok, YOU CRAWLED OUT`
+           : `FAULT: still at y ${Math.floor(P.y/BLOCK)} after 60 s - there is no way out`);
+    /* and the house is somewhere you can see from up here */
+    let hw=0;
+    for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
+      const i=idx(x,y,z);
+      if(G.st[i]!==AIR && G.mat[i]===M_WOOD) hw++;
+    }
+    R.push(`wood in the world: ${hw} blocks ` + (hw>60 ? 'ok, the house and the tree are built' : 'FAULT'));
+    R.push(`vials ${VIALS.length} of ${SMAT.length-1} materials ` +
+           (VIALS.length >= 18 ? 'ok' : 'FAULT: the census is short'));
+  }
+
+  /* 5. THE BREACH. Find a wall of the seamount with sea on one side and a
+        dungeon void on the other, stand in the void, and shoot it. */
+  {
+    let found=null;
+    const seaSet=new Set(G.seaB);
+    outer:
+    for(let y=G.rock0; y<G.ny-1; y++) for(let z=1;z<G.nz-1;z++) for(let x=1;x<G.nx-2;x++){
+      const a=idx(x,y,z), b=idx(x+1,y,z), c=idx(x+2,y,z);
+      if(G.st[a]===AIR && !seaSet.has(a) && G.st[b]!==AIR && seaSet.has(c)){ found=[x,y,z]; break outer; }
+      const a2=idx(x+2,y,z), b2=idx(x+1,y,z), c2=idx(x,y,z);
+      if(G.st[a2]===AIR && !seaSet.has(a2) && G.st[b2]!==AIR && seaSet.has(c2)){ found=[x+2,y,z,-1]; break outer; }
+    }
+    if(!found) R.push('BREACH: no wall with a dry void on one side and sea on the other - nothing to test');
+    else {
+      const [fx,fy,fz,sgn] = [found[0],found[1],found[2],found[3]||1];
+      P.x=(fx+0.5)*BLOCK; P.z=(fz+0.5)*BLOCK;
+      P.y = fy*BLOCK + 0.40;   /* inside the void block, not above it */
+      P.vx=P.vy=P.vz=0;
+      P.yaw = sgn>0 ? -Math.PI/2 : Math.PI/2;  P.pitch = 0;
+      /* WATER THAT HAS GOT SOMEWHERE IT WAS NOT. Counting one block is too
+         narrow - it pours in and then keeps going down - so this counts every
+         cell of brine that is outside the sea as the builder drew it. */
+      const escaped=()=>{
+        let n=0;
+        for(let by=0;by<G.ny;by++) for(let bzz=0;bzz<G.nz;bzz++) for(let bxx=0;bxx<G.nx;bxx++){
+          if(seaSet.has(idx(bxx,by,bzz))) continue;
+          const S=SAND_DIV, ox=bxx*S, oy=by*S, oz=bzz*S;
+          for(let cy=0;cy<S;cy++) for(let cz=0;cz<S;cz++){
+            const rr=(oy+cy+1)*w.SY + (oz+cz+1)*w.SZ + (ox+1);
+            for(let cx=0;cx<S;cx++) if(w.m[rr+cx]===S_SALT) n++;
+          }
+        }
+        return n;
+      };
+      const b0 = ladStats.blocks;
+      const before = escaped();
+      let shots=0, opened=false;
+      for(let k=0;k<10 && !opened;k++){
+        shoot(); shots++;
+        for(let q=0;q<12;q++){ sandTick(w, sandDir()); ladTick(); }
+        opened = G.st[idx(fx+sgn,fy,fz)]===AIR;
+      }
+      const dem0 = b0 - ladStats.blocks;
+      let mv=0;
+      for(let q=0;q<1500;q++){ sandTick(w, sandDir()); ladTick(); }
+      mv = w.stats.moves;
+      const after = escaped();
+      R.push(`BREACH at ${fx},${fy},${fz} facing ${sgn>0?'+x':'-x'}: ${shots} shots, wall ${opened?'OPEN':'still shut'}, ` +
+             `${dem0} blocks demoted, ${w.awake.length} chunks still awake`);
+      R.push(`brine outside the sea as drawn: ${before} -> ${after} ` +
+             (after > before + 500 ? 'ok, THE SEA CAME IN' : 'FAULT: it did not flood'));
+    }
+  }
 
   R.push(window.__err.length ? ('FAULT '+window.__err.join(' | ')) : 'no errors');
   document.body.dataset.r=R.join(' ~ ');

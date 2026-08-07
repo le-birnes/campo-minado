@@ -27,6 +27,15 @@ setTimeout(()=>{ try{
     const i=idx(x,y,z); if(G.st[i]!==AIR){ G.st[i]=AIR; G.revealed++; }
     sandDig(x,y,z);
   }
+  /* AND IT IS SEALED. A fresh board already has air blocks in it, so a tank
+     dug beside one has open sky on a face - and cells with open sky are MORTAL
+     now, so they never settle and the chunk never goes quiet. That is correct
+     behaviour and it is not what this test is asking about: the question here
+     is whether the INSIDE of a body of water costs nothing. Stone all round it. */
+  for(let y=by0-1;y<=by0+BH;y++) for(let z=bz0-1;z<=bz0+BD;z++) for(let x=bx0-1;x<=bx0+BW;x++){
+    if(y>=by0 && y<by0+BH && z>=bz0 && z<bz0+BD && x>=bx0 && x<bx0+BW) continue;
+    sandFill(x,y,z, S_ROCK, false);
+  }
   for(let y=by0;y<by0+BH;y++) for(let z=bz0;z<bz0+BD;z++) for(let x=bx0;x<bx0+BW;x++)
     sandFill(x,y,z, S_WATER, true);
   const NB = BW*BH*BD;
