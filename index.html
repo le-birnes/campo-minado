@@ -7455,6 +7455,36 @@ function buildIsland(){
     if(Math.hypot(x-hx,z-hz) >= hr) continue;
     const i=idx(x,y,z); G.st[i]=AIR; G.scenery[i]=0;
   }
+  /* AND YOU ARE PUT ON IT, which is the difference between a reveal and being
+     buried alive. Nothing moved the player: gravity reversed, so you fell
+     TOWARD the new down - the top of the grid - while the island was being
+     built there, and you ended up inside it. Reported as "stuck in a dungeon"
+     and it was exactly that.
+
+     You arrive standing beside the shaft you came up, on the surface, facing
+     it. G.holeX/holeZ is the same hole from both ends, so this is the mouth of
+     the one you just climbed. */
+  {
+    const sx = Math.max(1, Math.min(G.nx-2, hx + hr + 2));
+    const sz = Math.max(1, Math.min(G.nz-2, hz));
+    const st = top(sx,sz);
+    const sy = G.ny-1-(st<0 ? SEA+1 : st);            // mirrored, like everything
+    P.x=(sx+0.5)*BLOCK; P.z=(sz+0.5)*BLOCK;
+    /* down is +Y, so standing ON that block means being just under it */
+    P.y=(sy-1)*BLOCK - P_H*0.02;
+    P.vx=P.vy=P.vz=0; P.kx=P.kz=0; P.ground=true; P.coyote=COYOTE;
+    P.load=0;
+    const ax=(hx+0.5)*BLOCK-P.x, az=(hz+0.5)*BLOCK-P.z;
+    P.yaw=Math.atan2(-ax,-az); P.pitch=0;
+    /* and clear the two blocks you are standing in, or you arrive inside sand */
+    for(let dy=-2;dy<=2;dy++){
+      const yy=sy-1+dy;
+      if(!inside(sx,yy,sz)) continue;
+      const i=idx(sx,yy,sz);
+      if(dy<0){ G.st[i]=AIR; G.scenery[i]=0; }
+    }
+  }
+
   /* THE TREE, attached to the bank. Five wood blocks and a ball of leaves was
      not a tree, it was a lollipop. A trunk, real BRANCHES going out and up,
      and a leaf CLUSTER hung on each branch tip — because a canopy is a set of
