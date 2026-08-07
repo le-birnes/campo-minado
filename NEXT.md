@@ -158,6 +158,37 @@ And the same solver is what the rocket in item 0 needs - thrust is a force with
 a direction, drag opposes, gravity pulls. ONE SOLVER, THREE CONSUMERS: the
 swimmer, the bead, and the rocket.
 
+### 0d. DUNGEON MODE HAS NO WIN CONDITION - it is the way in to a world
+
+> "Dungeon mode actually has NO WINNING CONDITIONS. When the dungeon is
+> completed and the boss is killed, the HUD should change (only health should
+> remain, and add a thumb with a pixelated shotgun to indicate equipped weapon
+> and two empty slots for belt equipment). Idea now is to create an OPEN WORLD
+> in the game where we can interact, create and explore (at some point we'll
+> build a rocket to go to the moon or sun)."
+
+This settles the question 0c left open, and it settles it the good way: nothing
+outside the cylinder has to be countable, because nothing is being counted. The
+puzzle volume is the only finite thing in the game.
+
+DONE: the HUD changes. Mines left, safe blocks and a clock are what a PUZZLE
+needs to be told; a world needs to know what is in your hands. So the readouts
+are not hidden one at a time - the body gets a class and the stylesheet decides
+what a world looks like. Health stays, the belt appears, and the first slot has
+a twenty-pixel shotgun drawn out of a string, one character a pixel, because
+everything else this game owns is data rather than a file.
+
+STILL OPEN, and it is what the world is FOR:
+  a. INTERACT - the vial, the spit, picking things up, the two empty slots
+  b. CREATE - placing material, building. The Forge already makes voxel things;
+     the world needs a way to put one down
+  c. EXPLORE - which needs 0c: an ocean with no edge
+  d. AND THE ROCKET. He has said it twice now, and it is the reason momentum
+     (item 0) must be a law of the engine and not a feature of the gun: a
+     rocket is a thing that throws mass one way and goes the other. If
+     conservation lives in shoot(), the rocket is a second implementation and
+     the two will disagree.
+
 ### 0c. TWO MODES, TWO KINDS OF THING
 
 > "Minesweeper 3D shouldn't be touched anymore (except the game mechanics, I
