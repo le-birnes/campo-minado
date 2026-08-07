@@ -155,16 +155,60 @@ straight back. Three candidates, all measurable, none of them the swim solver:
   a. THE WELL IS NOT FLOODED at the bottom, so there is no water to rise
      through. The sea flood-fill walks down the well from the island surface;
      find out where it stops and why.
-  b. HOLDING THE JUMP KEY DOES NOT REPEAT - if the jump is an edge, then
-     IN.jumpHeld=true is one jump and the harness's "a player holding the key"
-     is not what a player holding the key does. Check which, and if it is an
-     edge, the harness is wrong and a real player would climb.
+  b. RULED OUT. The jump DOES repeat while held - index.html line 10449,
+     "if(!IN.jumpFired && canJump() && (IN.jumpHeld || IN.jumpBuf>0)) startJump()"
+     - and there are twenty of them before your feet have to touch anything.
+     So the harness is holding the key correctly and the player still cannot
+     climb. It is (a) or (c).
   c. THE DIRECTION. Down is +Y after the boss and the sky is at small y, so
      leaving means going UP AGAINST GRAVITY for sixteen blocks. If that is
      right, the emergence needs the flooded well (a) or a current, and no
      amount of kick will do it.
 
 Do (b) first: it is one grep and it decides whether the other two matter.
+
+### 0f. THE SEVEN-METRE SPHERE, AND WHAT WATER IS - his words, 2026-08-07, DONE
+
+> "Scaling should prevent a large amount of beads, making MAX COMPUTED BEADS
+> only what fits a 7 m radius sphere around the player. Everything else should
+> be just blocks or large bodies stored as info. Water should no longer
+> evaporate spontaneously, it should merely be mortal when in the form of beads
+> AND NOT IN THE AREA OF A BLOCK OF WATER. A block of water is considered so
+> once there are AT LEAST BLOCK/8 beads of water in it."
+
+Both built. Three parts:
+
+  a. THE SPHERE IS A CEILING, not a heuristic. 7 m at 17.5 cm a bead is 268,083
+     cells and that is the most one tick may look at, whatever is falling.
+     A chunk outside it goes back on the awake list exactly as it was - nothing
+     lost, nothing decided early - and starts again when you walk over.
+     Measured on the tick gravity reverses and six million cells of ocean wake:
+
+         without the sphere   8,978,432 cells in ONE tick  (33x over)
+         with it              0, and 274 chunks left for later
+
+  b. A BLOCK OF WATER IS BLOCK/8 OF IT - 512 of 4,096 cells, two beads deep
+     across the block or any arrangement holding as much. LADB, a second and
+     looser rung beside LADM: LADM says "every one of my cells is this", which
+     is what lets the page be freed; LADB says "there is enough of this here to
+     be a BODY", which is what decides whether a bead is alone.
+  c. SO WATER NO LONGER EVAPORATES SPONTANEOUSLY. A bead is mortal because it
+     is ALONE - a splash on a rock, the last of a spill - and a bead on the sea
+     is not alone even with open sky over it, because its block is a block of
+     water. Heat still overrides all of it.
+
+     And (c) is what stopped the ocean costing 27 MILLION cells a tick: every
+     surface cell had open sky, so it stayed awake "or it would never find out",
+     and staying awake means touch(), and touch() means mark(), and mark() on a
+     chunk holding promoted blocks DEMOTES one. The sea demoted its own top
+     layer every tick for ever. h_ocean: 43 s -> 0.7 s.
+
+  STILL FROZEN, NOT SOLVED. A chunk outside the sphere is PAUSED, so a
+  waterfall thirty metres away stops in mid-air until you walk to it. The vault
+  note "The 500 m sphere" says everything outside the simulated radius should be
+  SOLVED rather than frozen - given a block of falling water and no observer,
+  compute where it ends up rather than stepping it. That is the next rung and it
+  is what (a) makes possible rather than what it delivers.
 
 ### 0b. SWIMMING - one solver, three consumers
 

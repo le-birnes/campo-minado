@@ -4589,6 +4589,14 @@ let SAND_LAT = 8;
    through a property every cell. Written back when it ends. */
 let SRS = 0, SSCAN = 0, SMOV = 0;
 
+/* HOW MUCH OF THE WORLD IS COMPUTED AS BEADS. Marcelo: "max computed beads
+   only what fits a 7 m radius sphere around the player." At 17.5 cm a bead
+   that sphere is about 268,000 cells, and it is a CEILING rather than a target:
+   whatever else is happening in the world, one tick may not look at more. */
+const SIM_R = 7.0;
+const SIM_BEADS = Math.round(4/3*Math.PI*Math.pow(SIM_R/0.175, 3));
+let SIM_SPHERE = true;
+
 /* ==========================================================================
    THE PAGED CELL STORE — why the world can be any size
    --------------------------------------------------------------------------
@@ -4758,6 +4766,15 @@ class SandWorld {
      reaches the chunk's full extent, say so in one byte. Costs nothing when
      the world is quiet, because a quiet chunk never saturates. */
   mark(c, lx,ly,lz){
+    /* AND IT HAS TO BE A CHUNK. wakeShell reaches one cell outside the box it
+       carved, so touch() is called at x=-1 on a block at the edge of the world,
+       and c comes out negative. Every write through it was silently dropped -
+       a typed array ignores an index it does not have - which was harmless
+       until the seven-metre sphere started PUTTING CHUNKS BACK: cw[-1] reads
+       undefined, undefined is falsy, so the same nonexistent chunk was pushed
+       onto the awake list once a tick for ever. Twenty-two thousand entries in
+       a world with nine hundred and seventy-two chunks. */
+    if(c < 0 || c >= this.nc) return;
     this.cl[c]=1;
     /* SOMETHING CHANGED IN A PROMOTED BLOCK, so it stops being one record and
        goes back to being four thousand beads - and ONLY it does. The local
@@ -5030,32 +5047,32 @@ function sStepCell(w, x,y,z, mat, gdir){
        only ever touches material that is loose - the scattered beads and the
        edges of a spill, which is exactly what is meant to be evaporating. The
        ladder is what makes this affordable, again. */
-    /* A BODY IS NOT A SHEET, AND THE SEA MUST NOT SPEND ETERNITY FINDING OUT
-       THAT IT IS STILL THE SEA. This is the fault h_ocean has been reporting
-       since the ocean was poured - 27 MILLION cells scanned over ninety ticks
-       of a world where nothing is happening - and the cause is the line below
-       rather than anything about evaporation.
+    /* WATER DOES NOT EVAPORATE SPONTANEOUSLY. Marcelo, and it replaces the
+       rule that was here:
 
-       Every cell of the sea SURFACE has open sky over it, so open is nine, so
-       it stays awake "or it would never find out". Staying awake means touch(),
-       and touch() means mark(), and mark() on a chunk holding promoted blocks
-       DEMOTES one. So the top layer of the ocean demoted its own block every
-       single tick, for ever, and the four thousand cells underneath it were
-       rescanned each time to discover they had nowhere to go. The ladder was
-       working exactly as designed and being undone once per tick by the one
-       rule that never sleeps.
+         "Water should no longer evaporate spontaneously, it should merely be
+          mortal when in the form of BEADS **and not in the area of a block of
+          water**. A block of water is considered so once there are at least
+          BLOCK/8 beads of water in it."
 
-       The fix is the question the rule should have been asking all along: is
-       there a BODY under this bead, or is this all there is of it? Four cells -
-       seventy centimetres - is the whole test. A sea is fed from below and does
-       not evaporate at bead scale; a sheet two beads deep is not, and still
-       thins from its edges inward exactly as Marcelo asked. Heat overrides it,
-       because a fire under the sea should still boil what is above it. */
-    if((open >= 9 || hot > 0) && hot === 0){
-      let below = 0;
-      while(below < 4 && cGet(w, x, y+dir*(below+1), z) === mat) below++;
-      if(below >= 4) open = 0;                 // the top of a body: leave it alone
-    }
+       Which is the right rule and it is his ladder answering, rather than a
+       threshold I invented. A bead is mortal because it is ALONE - a splash on
+       a rock, the last of a spill - and a bead sitting on the sea is not alone
+       even though it has open sky over it, because the block it is in is a
+       block of water. One array read, and it is the same question the ladder
+       was already asking, only with a fraction instead of "all of it".
+
+       BLOCK/8 is 512 of the 4,096 cells - two beads deep across the block, or
+       any arrangement of that much. Below it there is not enough of it there to
+       be a body, and it goes.
+
+       And this is also what stopped the ocean costing 27 MILLION cells a tick:
+       every cell of the sea SURFACE has open sky, so it stayed awake "or it
+       would never find out", and staying awake means touch(), and touch() means
+       mark(), and mark() on a chunk holding promoted blocks DEMOTES one. The
+       sea demoted its own top layer every tick for ever. Heat still overrides
+       all of it, because a fire under the sea should boil what is above it. */
+    if(hot === 0 && ladBodyAt(x,y,z) === mat) open = 0;
     if(open >= 9 || hot > 0){
       /* staggered by WHERE it is, so a sheet does not all ask on the same tick */
       if((w.tick & (EVAP_EVERY-1)) === ((x + z*3 + y*5) & (EVAP_EVERY-1))){
@@ -5183,11 +5200,47 @@ function sandTick(w, gdir){
     w.reset(c);
   }
   w.stats.awake = rect.length/7;
+  w.stats.deferred = 0;
+
+  /* THE SEVEN-METRE SPHERE, and it is the ceiling on what a tick can ever cost.
+     Marcelo: "scaling should prevent a large amount of beads, making MAX
+     COMPUTED BEADS only what fits a 7 m radius sphere around the player.
+     Everything else should be just blocks or large bodies stored as info."
+
+     Which is a bound, not a heuristic: a sphere of radius 7 m at 17.5 cm a bead
+     holds about 268,000 cells, and that is the most this loop may look at
+     however large the world is or however much of it is falling. It is the same
+     rule as NEXT.md rule 1 - the simulated radius - and the ladder is what
+     everything outside it becomes.
+
+     A chunk outside the sphere is NOT reset: it goes back on the awake list
+     exactly as it was, so nothing is lost and nothing is decided early. Walk
+     towards it and it starts moving from where it was. That is FREEZING and not
+     SOLVING, and the difference matters - a waterfall thirty metres away is
+     paused rather than continuing - so it is written down as the next rung
+     rather than pretended away.
+
+     Only the game's own world gets the sphere. A harness that builds a tank and
+     ticks it has no player in it and must simulate all of what it built. */
+  const sphere = (w === SAND && SIM_SPHERE) ? SIM_R + SCS*CELL_M*0.87 : 0;
+  const sph2 = sphere*sphere;
 
   for(let r=0; r<rect.length; r+=7){
     const c = rect[r];
     const cx = c % CW, q = (c/CW)|0, cz = q % CD, cy = (q/CD)|0;
     const bx = cx*SCS, by = cy*SCS, bz = cz*SCS;
+    if(sph2){
+      const ex=(cx+0.5)*SCS*CELL_M-P.x, ey=(cy+0.5)*SCS*CELL_M-P.y, ez=(cz+0.5)*SCS*CELL_M-P.z;
+      if(ex*ex+ey*ey+ez*ez > sph2){
+        /* put it back exactly as it was and spend nothing on it */
+        const o=c*6, b=w.cb;
+        b[o]=rect[r+1]; b[o+1]=rect[r+2]; b[o+2]=rect[r+3];
+        b[o+3]=rect[r+4]; b[o+4]=rect[r+5]; b[o+5]=rect[r+6];
+        if(!w.cw[c]){ w.cw[c]=1; w.awake.push(c); }
+        w.stats.deferred++;
+        continue;
+      }
+    }
     const x0=rect[r+1], y0=rect[r+2], z0=rect[r+3];
     const x1=rect[r+4], y1=rect[r+5], z1=rect[r+6];
     const span = x1-x0;
@@ -5667,6 +5720,25 @@ function sandWakeLoose(){
    whatever the physics actually does - which is the correct answer and also
    the cheap one.
    ========================================================================== */
+/* IS THIS A BLOCK OF WATER? Marcelo: "a block of water is considered so once
+   there are AT LEAST BLOCK/8 beads of water in it." So this is a second, looser
+   rung beside LADM: LADM says "every one of my 4,096 cells is this", which is
+   what lets the page be freed; LADB says "there is enough of this here to be a
+   BODY of it", which is what decides whether a bead is alone in the world.
+
+   512 of 4,096. Two beads deep across the whole block, or any arrangement
+   holding as much. Below that there is not enough of it there to be anything
+   but scattered. */
+let LADB  = null;      // Uint8Array, one per BLOCK: what it is a BODY of, 0 = nothing
+const LAD_BODY_MIN = PGC >> 3;
+const LADH = new Uint16Array(256);           // census histogram, reused
+const LADSEEN = [];                          // which of its entries were touched
+function ladBodyAt(x,y,z){
+  if(!LADB) return 0;
+  const bx=(x>>4), by=(y>>4), bz=(z>>4);
+  if(bx<0||by<0||bz<0||bx>=G.nx||by>=G.ny||bz>=G.nz) return 0;
+  return LADB[(by*G.nz + bz)*G.nx + bx];
+}
 let LADM  = null;      // Uint8Array, one per BLOCK: the material it is made of, 0 = not promoted
 let LADS  = null;      // Int32Array, one per block: which mass it belongs to, -1 = none
 let LADQF = null;      // Uint8Array: is it already in the census queue?
@@ -5689,8 +5761,9 @@ function ladInit(){
   const N = G.nx*G.ny*G.nz;
   if(!LADM || LADM.length !== N){
     LADM = new Uint8Array(N); LADS = new Int32Array(N); LADQF = new Uint8Array(N);
+    LADB = new Uint8Array(N);
   }
-  LADM.fill(0); LADS.fill(-1); LADQF.fill(0);
+  LADM.fill(0); LADS.fill(-1); LADQF.fill(0); LADB.fill(0);
   LADQ.length = 0; MASSES.length = 0;
   LAD_MDIRTY = false; LAD_MWAIT = 0;
   ladStats.blocks = ladStats.masses = ladStats.census = 0;
@@ -5718,10 +5791,34 @@ function ladCensus(bi){
   if((bx+1)*S > w.W || (by+1)*S > w.H || (bz+1)*S > w.D) return -1;
   const b = ((by+PGP)*w.BD + (bz+PGP))*w.BW + (bx+PGP);
   const p = w.pg[b];
-  if(p === null) return w.pgu[b];        // it is already one record and costs one byte
-  const first = p[0];
-  for(let o=1;o<PGC;o++) if(p[o] !== first) return -1;
-  return first;
+  if(p === null){
+    const u = w.pgu[b];                  // it is already one record and costs one byte
+    LADB[bi] = ladBodyKind(u) ? u : 0;
+    return u;
+  }
+  /* IT HAS CELLS, so count them - and the count is what LADB wants anyway, so
+     the walk that decides uniformity decides the body in the same pass. The
+     histogram is cleared through the list of materials actually seen, so a
+     block of two things costs two writes and not two hundred and fifty-six. */
+  let first = p[0], uniform = 1;
+  LADSEEN.length = 0;
+  for(let o=0;o<PGC;o++){
+    const m = p[o];
+    if(m !== first) uniform = 0;
+    if(LADH[m] === 0) LADSEEN.push(m);
+    LADH[m]++;
+  }
+  let best = 0, bestN = 0;
+  for(const m of LADSEEN){ if(ladBodyKind(m) && LADH[m] > bestN){ best = m; bestN = LADH[m]; } LADH[m] = 0; }
+  LADB[bi] = bestN >= LAD_BODY_MIN ? best : 0;
+  return uniform ? first : -1;
+}
+/* Only something that can POOL can be a body: a powder heaps and a liquid
+   pools, air and stone and a gas do not. */
+function ladBodyKind(mat){
+  if(!mat || mat === S_AIR || mat === S_ROCK) return false;
+  const K = SM_K[mat];
+  return K === K_LIQUID || K === K_POWDER;
 }
 /* Static never promotes - the world's own stone is already one record - and
    neither does a gas, which is going somewhere by definition. */
@@ -9534,6 +9631,7 @@ function oceanFill(){
     const x0=bx*S, y0=by*S, z0=bz*S;
     if(x0+S > w.W || y0+S > w.H || z0+S > w.D) continue;
     cFreeBlock(w, bx,by,bz, S_SALT);
+    if(LADB) LADB[bi] = S_SALT;                    // a block of sea IS a body of sea
     /* IT IS POURED ALREADY SETTLED, so it goes straight to the block rung.
        Making the census discover this at 48 blocks a tick would be four
        thousand ticks of finding out what we just wrote. */

@@ -17,6 +17,11 @@ window.__err=[];
 window.addEventListener('error',e=>window.__err.push('ERR '+e.message));
 setTimeout(()=>{ try{
   G.muted=true; try{ snd.setMute(true); }catch(e){}
+  /* THE SEVEN-METRE SPHERE IS OFF HERE. This builds a tank and ticks it with
+     nobody standing in it, so the scheduler would defer the whole thing; what
+     is under test is the ladder and the matter, not what the player can see.
+     h_ocean is where the sphere itself is measured. */
+  SIM_SPHERE = false;
   const R=[], f2=v=>(+v).toFixed(3);
   G.mode=MODE_SWEEP; seed=4; genWorld(0); G.state='play';
   const w=SAND;

@@ -140,10 +140,40 @@ setTimeout(()=>{ try{
            `${spMB(w).toFixed(2)} MB where the flat grid was ` +
            `${(w.W*w.H*w.D/1048576).toFixed(0)} MB`);
     R.push(`  ladder: ${ladStats.blocks} promoted blocks, ${ladStats.masses} masses`);
-    for(let t=0;t<90;t++){ sandTick(w, sandDir()); ladTick(); }
-    R.push(`  90 ticks: ${w.stats.scanned} cells scanned, ${w.pgn} pages, ` +
+    let spPeak = 0, spDef = 0;
+    for(let t=0;t<90;t++){
+      sandTick(w, sandDir()); ladTick();
+      if(w.stats.scanned > spPeak) spPeak = w.stats.scanned;
+      spDef = w.stats.deferred;
+    }
+    R.push(`  90 ticks: ${w.stats.scanned} cells scanned on the last, ${w.pgn} pages, ` +
            `${spMB(w).toFixed(2)} MB ` +
            (w.stats.scanned < 5000 ? 'ok, a settled world costs nothing' : 'note: still moving'));
+    /* THE SEVEN-METRE SPHERE, measured where it matters: the moment gravity
+       reverses and SIX MILLION CELLS OF OCEAN all wake at once. A world at rest
+       proves nothing about a ceiling. So: the same 90 ticks twice, once with
+       the sphere and once without, and the difference is the whole feature. */
+    const spRun = (on) => {
+      SIM_SPHERE = on;
+      G.gravK = -1; sandWakeLoose();
+      let peak=0, tot=0, def=0;
+      for(let t=0;t<90;t++){
+        sandTick(w, sandDir()); ladTick();
+        if(w.stats.scanned > peak) peak = w.stats.scanned;
+        tot += w.stats.scanned; def = w.stats.deferred;
+      }
+      return {peak, tot, def};
+    };
+    const spOff = spRun(false);
+    seed=11; genWorld(0); G.state='play';           // put it back as it was
+    const spOn = spRun(true);
+    SIM_SPHERE = true;
+    R.push(`  THE SPHERE, on the tick the ocean wakes: 7 m holds ${SIM_BEADS} beads.` +
+           ` WITHOUT it the busiest tick looked at ${spOff.peak} cells (${spOff.tot} over 90);` +
+           ` WITH it, ${spOn.peak} (${spOn.tot} over 90) and ${spOn.def} chunks left for when you walk over ` +
+           (spOn.peak <= SIM_BEADS && spOn.peak < spOff.peak
+            ? 'ok, under his ceiling and it was over it before'
+            : 'FAULT: the ceiling is not holding'));
     /* AND A SHOT STILL BREAKS IT, which is the whole loop: a solid block is one
        byte until it is opened, the page faults in, the beads fly, and when what
        is left of it settles it goes back to being a record. */

@@ -12751,187 +12751,211 @@ setScreen('menu');
 requestAnimationFrame(frame);
 
 window.requestAnimationFrame = function(){ return 0; };
-/* Does sand.js live in the game, and did 26 neighbours make the pile round?
-   Everything here runs on the grid itself, not on the picture. */
+/* THE SPARSE GRID: a world ten times wider must cost the same at rest.
+
+   Marcelo: "why is it so hard to build a cylinder like 100 m wide and 1000 m
+   tall with the dungeon inside? We won't be able to have an open interactive
+   world if we can't have ULTRA LARGE STRUCTURES to enter and explore."
+
+   The cylinder was never the problem. One flat Uint8Array over the whole world
+   at BLOCK/16 was: 576 x 5712 x 576 cells is 1.9 BILLION bytes, and today's
+   little 18x24x18 dungeon already paid 31 MB of it up front for a world which
+   is almost entirely one thing.
+
+   So this asks four questions and none of them is "did the code run":
+
+     1. does a fresh world of any size allocate NOTHING
+     2. does a world TEN TIMES WIDER cost the same at rest
+     3. can a hundred-metre-by-thousand-metre structure be built at all
+     4. and does the matter still behave - poured, settled, conserved
+
+   Careful with the identifiers: the game already declares mark, set, landY and
+   idx, and a duplicate const is a SyntaxError, which means nothing runs and
+   Chrome sits out its whole virtual-time budget in silence. Everything here is
+   prefixed. */
 window.__err=[];
 window.addEventListener('error',e=>window.__err.push('ERR '+e.message));
+document.body.dataset.r = 'STAGE start';
 setTimeout(()=>{ try{
   G.muted=true; try{ snd.setMute(true); }catch(e){}
-  /* THE SEVEN-METRE SPHERE IS OFF HERE. This builds a tank and ticks it with
-     nobody standing in it, so the scheduler would defer the whole thing; what
-     is under test is the ladder and the matter, not what the player can see.
-     h_ocean is where the sphere itself is measured. */
-  SIM_SPHERE = false;
   const R=[];
-  const f2=v=>v.toFixed(2);
+  const spMB = w => (w.bytes()/1048576);
+  const spMark = s => { document.body.dataset.r = 'STAGE '+s; };
 
-  /* ---- a bare box to pour into, so nothing but the rule is being measured */
-  function box(W,H,D){
-    const w = new SandWorld(W,H,D);
-    for(let y=1;y<H;y++) for(let z=0;z<D;z++) for(let x=0;x<W;x++){
-      w.set(x,y,z,S_AIR);
+  /* ---- 1. a fresh world allocates nothing ------------------------------- */
+  spMark('fresh');
+  const spW1 = new SandWorld(288, 384, 288);            // today's dungeon
+  R.push(`FRESH ${spW1.W}x${spW1.H}x${spW1.D} cells: ${spW1.pgn} pages, ` +
+         `${spMB(spW1).toFixed(2)} MB ` +
+         (spW1.pgn===0 ? 'ok, nothing exists until something moves'
+                       : 'FAULT: it allocated up front'));
+
+  /* ---- 2. ten times wider, at rest -------------------------------------- */
+  spMark('wide');
+  const spW2 = new SandWorld(2880, 384, 2880);          // a hundred times the volume
+  const spDense1 = 290*386*290/1048576, spDense2 = 2882*386*2882/1048576;
+  R.push(`TEN TIMES WIDER ${spW2.W}x${spW2.H}x${spW2.D}: ${spMB(spW2).toFixed(2)} MB ` +
+         `where the flat grid would have been ${spDense2.toFixed(0)} MB ` +
+         (spMB(spW2) < spDense2/50 ? 'ok' : 'FAULT: still paying for the volume'));
+  R.push(`  the flat grid was ${spDense1.toFixed(0)} MB at the small size and ` +
+         `${spDense2.toFixed(0)} MB at this one; paged is ` +
+         `${spMB(spW1).toFixed(2)} and ${spMB(spW2).toFixed(2)}`);
+
+  /* ---- 3. HIS CYLINDER. 100 m wide, 1000 m tall ------------------------- */
+  spMark('cylinder');
+  {
+    const nbx = Math.round(100/BLOCK), nby = Math.round(1000/BLOCK);
+    const spCyl = new SandWorld(nbx*SAND_DIV, nby*SAND_DIV, nbx*SAND_DIV);
+    const spCells = spCyl.W*spCyl.H*spCyl.D;
+    R.push(`THE CYLINDER ${nbx}x${nby}x${nbx} blocks = ` +
+           `${spCyl.W}x${spCyl.H}x${spCyl.D} cells (${(spCells/1e9).toFixed(2)} billion): ` +
+           `${spMB(spCyl).toFixed(1)} MB against ${(spCells/1048576/1024).toFixed(2)} GB flat`);
+    /* and it is a WORLD, not a declaration: write the shell as blocks and read
+       it back. A shell of solid rock is uniform blocks, so it costs no pages. */
+    const spR = nbx*0.5 - 1.5;
+    let spShell = 0;
+    for(let by=0; by<nby; by+=17){                        // every 17th layer, to keep it quick
+      for(let bz=0; bz<nbx; bz++) for(let bx=0; bx<nbx; bx++){
+        const ex=bx-nbx*0.5+0.5, ez=bz-nbx*0.5+0.5;
+        const dd=Math.sqrt(ex*ex+ez*ez);
+        if(dd > spR || dd < spR-3) continue;
+        cFreeBlock(spCyl, bx,by,bz, S_ROCK); spShell++;
+      }
     }
-    return w;                                    // y=0 is the floor, and stays rock
+    const spMid = (nby>>1) - ((nby>>1)%17);
+    const spProbe = spCyl.at(Math.round(nbx*0.5*SAND_DIV), spMid*SAND_DIV+8,
+                             Math.round((nbx*0.5 + spR - 1)*SAND_DIV));
+    R.push(`  shell: ${spShell} blocks written, still ${spCyl.pgn} pages, ` +
+           `${spMB(spCyl).toFixed(1)} MB ` +
+           (spCyl.pgn===0 ? 'ok, a solid shell is free' : 'FAULT: uniform blocks allocated'));
+    /* one cell of it, read back through the same path the physics uses */
+    R.push(`  a cell of the wall reads ${spProbe===S_ROCK?'ROCK':'mat '+spProbe} ` +
+           (spProbe===S_ROCK ? 'ok' : 'FAULT: the shell is not there'));
   }
-  /* Pour from one cell until it stops accepting, then let it settle. */
-  function pour(w, mat, grains, cap){
-    const cx=w.W>>1, cz=w.D>>1, top=w.H-3;
-    let left=grains, t=0;
-    while(t++ < cap){
-      for(let k=0;k<6 && left>0;k++) if(w.at(cx,top,cz)===S_AIR){ w.put(cx,top,cz,mat); left--; }
-      sandTick(w,-1);
-      if(!left && !w.awake.length) break;
+
+  /* ---- 4. and matter still behaves -------------------------------------- */
+  spMark('matter');
+  {
+    const spW = new SandWorld(96, 96, 96);
+    /* a sealed tank of air with a floor, then a block of water dropped in it */
+    for(let by=0;by<6;by++) for(let bz=0;bz<6;bz++) for(let bx=0;bx<6;bx++)
+      if(by>0) cFreeBlock(spW, bx,by,bz, S_AIR);
+    const spBefore = spW.pgn;
+    /* SAND FIRST, and on purpose: it is the material with no way out of the
+       world. Water is MORTAL - a sheet with open sky over it evaporates, which
+       is a feature and would make "beads lost" mean two things at once. */
+    let spPour=0;
+    for(let y=64;y<80;y++) for(let z=40;z<56;z++) for(let x=40;x<56;x++){ spW.put(x,y,z,S_SAND); spPour++; }
+    R.push(`POURED ${spPour} beads of sand: pages ${spBefore} -> ${spW.pgn}, ` +
+           `${spMB(spW).toFixed(2)} MB`);
+    const spN0 = spW.count(S_SAND);
+    const spG = LAD_ON; LAD_ON = false;                 // no ladder: just the physics
+    for(let t=0;t<400;t++) sandTick(spW, -1);
+    const spN1 = spW.count(S_SAND);
+    R.push(`  after 400 ticks: ${spN0} -> ${spN1} beads ` +
+           (spN1 === spN0 ? 'ok, matter conserved through the page faults'
+                          : `FAULT: ${spN0-spN1} beads lost`));
+    let spHeap=0, spDeep=0;
+    for(let x=0;x<96;x++) if(spW.at(x, 17, 48)===S_SAND) spHeap++;
+    for(let y=0;y<96;y++) if(spW.at(48, y, 48)===S_SAND) spDeep++;
+    R.push(`  the heap is ${spHeap} cells across and ${spDeep} deep ` +
+           (spHeap > 16 && spDeep > 2 ? 'ok, it fell and it piled' : 'FAULT: it did not move'));
+
+    /* AND WATER, which must find its LEVEL and may legitimately evaporate. So
+       the books are balanced against water plus the steam it became. */
+    const spW3 = new SandWorld(96, 96, 96);
+    for(let by=0;by<6;by++) for(let bz=0;bz<6;bz++) for(let bx=0;bx<6;bx++)
+      if(by>0) cFreeBlock(spW3, bx,by,bz, S_AIR);
+    for(let y=64;y<80;y++) for(let z=40;z<56;z++) for(let x=40;x<56;x++) spW3.put(x,y,z,S_WATER);
+    const spV0 = spW3.count(S_WATER);
+    for(let t=0;t<400;t++) sandTick(spW3, -1);
+    LAD_ON = spG;
+    const spV1 = spW3.count(S_WATER), spSteam = spW3.count(SM_VAP[S_WATER]);
+    let spWide=0;
+    for(let x=0;x<96;x++) if(spW3.at(x, 17, 48)===S_WATER) spWide++;
+    R.push(`  water: ${spV0} -> ${spV1} beads with ${spSteam} of steam, spread ${spWide} across ` +
+           (spWide > 16 && spV0-spV1 < spV0*0.1 ? 'ok, it found its level and only its skin went'
+                                                : 'FAULT'));
+    for(let t=0;t<60;t++) sandTick(spW, -1);
+    R.push(`  and 60 more ticks of the heap scan ${spW.stats.scanned} cells ` +
+           (spW.stats.scanned < 20000 ? 'ok, it is settling' : 'FAULT: it never settles'));
+  }
+
+  /* ---- 5. the real dungeon, end to end ---------------------------------- */
+  spMark('dungeon');
+  document.querySelector('.diffs [data-m="1"]').click();
+  document.querySelector('.diffs [data-d="0"]').click();
+  document.getElementById('btnStart').click();
+  seed=11; genWorld(0); G.state='play';
+  {
+    const w = SAND;
+    R.push(`DUNGEON ${w.W}x${w.H}x${w.D} cells, ${w.pgn} of ${w.nb} pages live, ` +
+           `${spMB(w).toFixed(2)} MB where the flat grid was ` +
+           `${(w.W*w.H*w.D/1048576).toFixed(0)} MB`);
+    R.push(`  ladder: ${ladStats.blocks} promoted blocks, ${ladStats.masses} masses`);
+    let spPeak = 0, spDef = 0;
+    for(let t=0;t<90;t++){
+      sandTick(w, sandDir()); ladTick();
+      if(w.stats.scanned > spPeak) spPeak = w.stats.scanned;
+      spDef = w.stats.deferred;
     }
-    for(let k=0;k<200 && w.awake.length;k++) sandTick(w,-1);
-    return t;
+    R.push(`  90 ticks: ${w.stats.scanned} cells scanned on the last, ${w.pgn} pages, ` +
+           `${spMB(w).toFixed(2)} MB ` +
+           (w.stats.scanned < 5000 ? 'ok, a settled world costs nothing' : 'note: still moving'));
+    /* THE SEVEN-METRE SPHERE, measured where it matters: the moment gravity
+       reverses and SIX MILLION CELLS OF OCEAN all wake at once. A world at rest
+       proves nothing about a ceiling. So: the same 90 ticks twice, once with
+       the sphere and once without, and the difference is the whole feature. */
+    const spRun = (on) => {
+      SIM_SPHERE = on;
+      G.gravK = -1; sandWakeLoose();
+      let peak=0, tot=0, def=0;
+      for(let t=0;t<90;t++){
+        sandTick(w, sandDir()); ladTick();
+        if(w.stats.scanned > peak) peak = w.stats.scanned;
+        tot += w.stats.scanned; def = w.stats.deferred;
+      }
+      return {peak, tot, def};
+    };
+    const spOff = spRun(false);
+    seed=11; genWorld(0); G.state='play';           // put it back as it was
+    const spOn = spRun(true);
+    SIM_SPHERE = true;
+    R.push(`  THE SPHERE, on the tick the ocean wakes: 7 m holds ${SIM_BEADS} beads.` +
+           ` WITHOUT it the busiest tick looked at ${spOff.peak} cells (${spOff.tot} over 90);` +
+           ` WITH it, ${spOn.peak} (${spOn.tot} over 90) and ${spOn.def} chunks left for when you walk over ` +
+           (spOn.peak <= SIM_BEADS && spOn.peak < spOff.peak
+            ? 'ok, under his ceiling and it was over it before'
+            : 'FAULT: the ceiling is not holding'));
+    /* AND A SHOT STILL BREAKS IT, which is the whole loop: a solid block is one
+       byte until it is opened, the page faults in, the beads fly, and when what
+       is left of it settles it goes back to being a record. */
+    let spBi = -1;
+    for(let by=0; by<G.ny && spBi<0; by++) for(let bz=0; bz<G.nz && spBi<0; bz++)
+      for(let bx=0; bx<G.nx && spBi<0; bx++)
+        if(G.st[idx(bx,by,bz)]!==AIR) spBi = idx(bx,by,bz);
+    const spB = cellXYZ(spBi), p0 = w.pgn;
+    const spFull = () => { let k=0, o=spB[0]*PGS, oy2=spB[1]*PGS, oz2=spB[2]*PGS;
+      for(let ly=0;ly<PGS;ly++) for(let lz=0;lz<PGS;lz++) for(let lx=0;lx<PGS;lx++)
+        if(w.at(o+lx, oy2+ly, oz2+lz) !== S_AIR) k++;
+      return k; };
+    voxelise(spBi);
+    const spOpened = w.pgn;
+    const spSolid = spFull();
+    voxCarve(spBi, 8,8,8, 1,0,0, 40000, null, true);
+    const spAfter = spFull();
+    for(let t=0;t<180;t++){ sandTick(w, sandDir()); ladTick(); gritStep(1/60); }
+    R.push(`  opening one block: pages ${p0} -> ${spOpened} (+${spOpened-p0}), ` +
+           `${spMB(w).toFixed(2)} MB ` +
+           (spOpened === p0+1 ? 'ok, exactly one block became real' : 'FAULT'));
+    R.push(`  shooting it: ${spSolid} beads -> ${spAfter}, ${spSolid-spAfter} taken out ` +
+           (spAfter < spSolid ? 'ok, the shot reached the cells' : 'FAULT: the shot did nothing'));
   }
-  /* How far the base of the heap reaches along a direction, in CELLS of real
-     distance, so an axis run and a corner run are comparable. */
-  function reach(w, mat, dx, dz){
-    const cx=w.W>>1, cz=w.D>>1, len=Math.hypot(dx,dz);
-    let r=0;
-    for(let s=1;s<(w.W>>1)-1;s++){
-      let any=0;
-      for(let y=1;y<6 && !any;y++) if(w.at(cx+dx*s,y,cz+dz*s)===mat) any=1;
-      if(any) r=s*len;
-    }
-    return r;
-  }
-  function shape(w, mat){
-    const ax=(reach(w,mat,1,0)+reach(w,mat,-1,0)+reach(w,mat,0,1)+reach(w,mat,0,-1))/4;
-    const dg=(reach(w,mat,1,1)+reach(w,mat,1,-1)+reach(w,mat,-1,1)+reach(w,mat,-1,-1))/4;
-    return {ax, dg, ratio: ax>0 ? dg/ax : 0};
-  }
-
-  /* ================= 1. IS THE PILE ROUND ================= */
-  /* A round heap has the same radius in every direction, so diagonal/axis is
-     1.00. Four lateral directions can only make a DIAMOND - the reachable set
-     is |dx|+|dz| <= n - and a diamond measures 0.71. Eight with equal weight
-     would overshoot to a SQUARE at 1.41, which is why the corner is taken at
-     1/sqrt(2). */
-  const GR = 2600;
-  SAND_LAT = 4;
-  const w4 = box(80,44,80); pour(w4, S_SAND, GR, 900);
-  const s4 = shape(w4, S_SAND);
-  SAND_LAT = 8;
-  const w8 = box(80,44,80); pour(w8, S_SAND, GR, 900);
-  const s8 = shape(w8, S_SAND);
-  R.push(`PILE 4 lateral: axis ${f2(s4.ax)} diag ${f2(s4.dg)} cells, diag/axis ${f2(s4.ratio)} (a diamond is 0.71)`);
-  R.push(`PILE 8 lateral: axis ${f2(s8.ax)} diag ${f2(s8.dg)} cells, diag/axis ${f2(s8.ratio)} (round is 1.00)`);
-  const roundErr4=Math.abs(s4.ratio-1), roundErr8=Math.abs(s8.ratio-1);
-  R.push(`ROUNDNESS: 26 neighbours is off by ${f2(roundErr8)}, 6 by ${f2(roundErr4)} - ` +
-         (roundErr8 < roundErr4 ? 'ROUNDER' : 'NO BETTER'));
-
-  /* ================= 2. LIQUID FINDS ITS LEVEL ================= */
-  SAND_LAT = 8;
-  const wl = box(80,44,80); pour(wl, S_WATER, GR, 900);
-  const sl = shape(wl, S_WATER);
-  /* HEIGHT is the honest test, not width. A powder HEAPS and a liquid does
-     not, and that is the one bit of difference between them; comparing radii
-     compares two different shapes of the same volume and says less. */
-  function peak(w, mat){
-    const cx=w.W>>1, cz=w.D>>1; let top=0;
-    for(let x=cx-2;x<=cx+2;x++) for(let z=cz-2;z<=cz+2;z++)
-      for(let y=1;y<w.H-1;y++) if(w.at(x,y,z)===mat && y>top) top=y;
-    return top;
-  }
-  const hw=peak(wl,S_WATER), hs=peak(w8,S_SAND);
-  R.push(`WATER: ${f2(sl.ax)} cells across, ${hw} tall; SAND: ${f2(s8.ax)} across, ${hs} tall ` +
-         (hw*2 < hs ? 'ok, the liquid does not heap' : 'FAULT: liquid heaps'));
-  R.push(`WATER isotropy: diag/axis ${f2(sl.ratio)} (powder is ${f2(s8.ratio)})`);
-
-  /* ================= 3. SETTLED COSTS NOTHING ================= */
-  const before = w8.stats.scanned;
-  let awake=0; for(let k=0;k<30;k++){ sandTick(w8,-1); awake+=w8.stats.awake; }
-  R.push(`DIRTY RECT: ${GR} beads at rest, ${awake} chunks awake over 30 ticks, ` +
-         `${w8.stats.scanned} cells scanned ` + (awake===0 ? 'ok' : 'FAULT'));
-
-  /* ================= 4. WHAT 26 COSTS =================
-     NOT in nanoseconds: run_harness drives Chrome under a virtual time budget,
-     which freezes performance.now(), so every timing taken in here reads 0.00.
-     The 3.7x (49.4 ns a particle against 13.1) is measured on a real page in
-     voxel/storm.html and stands. What CAN be counted under virtual time is
-     work, so this counts it: cells looked at, and moves got out of them. */
-  function work(lat){
-    SAND_LAT=lat;
-    const w=box(64,64,64);
-    const cx=w.W>>1, cz=w.D>>1;
-    for(let y=20;y<44;y++) for(let z=cz-10;z<cz+10;z++) for(let x=cx-10;x<cx+10;x++) w.put(x,y,z,S_SAND);
-    let cells=0, moves=0;
-    for(let k=0;k<60;k++){ const m0=w.stats.moves; sandTick(w,-1); cells+=w.stats.scanned; moves+=w.stats.moves-m0; }
-    return {cells, moves, settled: w.awake.length===0};
-  }
-  const k4=work(4), k8=work(8);
-  SAND_LAT=8;
-  R.push(`WORK 4 lateral: ${k4.cells} cells scanned, ${k4.moves} moves, settled ${k4.settled}`);
-  R.push(`WORK 8 lateral: ${k8.cells} cells scanned, ${k8.moves} moves, settled ${k8.settled}`);
-
-  /* ================= 5. REACTIONS, WHICH THE GAME NEVER HAD ================= */
-  function rxTest(a,b,want){
-    const w=box(36,36,36);
-    const cx=18,cz=18;
-    for(let x=cx-3;x<=cx+3;x++) for(let z=cz-3;z<=cz+3;z++){ w.put(x,3,z,b); w.put(x,4,z,a); }
-    for(let k=0;k<80;k++) sandTick(w,-1);
-    return w.count(want);
-  }
-  R.push(`RX water on fire -> steam: ${rxTest(S_FIRE,S_WATER,S_STEAM)} cells`);
-  /* AND THEN THE GLASS MELTS, which is why this counts both. Noita's table
-     brought srx(lava, glass -> molten glass) with it, so lava standing on sand
-     fuses it and then keeps going - counting only S_GLASS reported zero and the
-     chain was working perfectly. */
-  R.push(`RX lava on sand -> glass: ${rxTest(S_LAVA,S_SAND,S_GLASS)+rxTest(S_LAVA,S_SAND,S_MGLASS)} cells`);
-  R.push(`RX water on sand -> wet sand: ${rxTest(S_WATER,S_SAND,S_WETSND)} cells`);
-  R.push(`RX acid on rock -> air: ${rxTest(S_ACID,S_ROCK,S_AIR)>0?'eaten':'FAULT'}`);
-
-  /* ================= 6. AND IT IS IN THE GAME ================= */
-  G.mode=MODE_SWEEP; seed=9; genWorld(0); G.state='play';
-  R.push(`GRID: ${SAND.W}x${SAND.H}x${SAND.D} cells, ${(SAND.bytes()/1048576).toFixed(1)} MB, ` +
-         `${SAND.nc} chunks, bead ${f2(CELL_M)} m`);
-  let tgt=-1, air=-1;
-  for(let y=0;y<G.ny&&tgt<0;y++) for(let z=0;z<G.nz&&tgt<0;z++) for(let x=0;x<G.nx&&tgt<0;x++){
-    const i=idx(x,y,z);
-    if(G.st[i]!==SOLID||G.mine[i]) continue;
-    for(const j of nbrsOf(i)) if(G.st[j]===AIR){ tgt=i; air=j; break; }
-  }
-  const tc=cellXYZ(tgt), ac=cellXYZ(air);
-  const loose0 = SAND.count(S_SAND)+SAND.count(S_RUBBLE)+SAND.count(S_WATER);
-  R.push(`a fresh board holds ${loose0} loose cells (should be 0)`);
-  sandBurst(tc[0],tc[1],tc[2], Math.sign(tc[0]-ac[0]),Math.sign(tc[1]-ac[1]),Math.sign(tc[2]-ac[2]), 150);
-  let live=0; for(let i=0;i<GRIT.n;i++) if(GRIT.live[i]) live++;
-  R.push(`one block burst -> ${live} beads in the air`);
-  for(let k=0;k<420;k++) sandStep(1/60);
-  const sd=SAND.count(S_SAND), rb=SAND.count(S_RUBBLE), wt=SAND.count(S_WATER), ws=SAND.count(S_WETSND);
-  R.push(`landed into the grid: ${sd} sand, ${rb} rubble, ${wt} water, ${ws} wet sand`);
-  live=0; for(let i=0;i<GRIT.n;i++) if(GRIT.live[i]) live++;
-  R.push(`still in the air: ${live} ` + (live===0?'ok':'some never landed'));
-  for(let k=0;k<600;k++) sandStep(1/60);
-  const sd2=SAND.count(S_SAND)+SAND.count(S_RUBBLE)+SAND.count(S_WATER)+SAND.count(S_WETSND);
-  R.push(`PERSISTENCE: ${sd2} cells still there after 10 more seconds ` +
-         (sd2>=sd+rb+wt+ws-2 ? 'ok' : 'FADED'));
-
-  /* the picture has a budget and the simulation does not */
-  P.x=(tc[0]+0.5)*BLOCK; P.y=(tc[1]+0.5)*BLOCK; P.z=(tc[2]+0.5)*BLOCK;
-  const drawn = sandDraw();
-  R.push(`DRAWN: ${drawn} of ${SAND_DRAW_MAX} instances, ${sandB.count} in the batch ` +
-         (drawn<=SAND_DRAW_MAX ? 'ok' : 'OVERFLOW'));
-
-  /* opening a block is the mountain becoming beads, and not before */
-  R.push(`OPEN BLOCKS: ${VOXD.size} of ${G.nx*G.ny*G.nz}`);
-
-  /* ================= 7. AND THE BIG ONE ================= */
-  G.mode=MODE_DUNGEON; seed=11; genWorld(2, true); G.state='play';
-  R.push(`DUNGEON GRID: ${SAND.W}x${SAND.H}x${SAND.D}, ${(SAND.bytes()/1048576).toFixed(1)} MB, ` +
-         `${SAND.nc} chunks, ${SAND.awake.length} awake at rest`);
-  let t0=SAND.stats.scanned;
-  for(let k=0;k<60;k++) sandStep(1/60);
-  R.push(`a quiet dungeon: ${SAND.stats.scanned} cells scanned on the last of 60 ticks, ` +
-         `${SAND.awake.length} chunks awake ` + (SAND.awake.length===0?'ok':'FAULT'));
 
   R.push(window.__err.length ? ('FAULT '+window.__err.join(' | ')) : 'no errors');
-  document.body.dataset.r = R.join(' ~ ');
-}catch(err){
-  document.body.dataset.r='THREW: '+err.message+' @ '+((err.stack||'').split('\n')[1]||'');
-}}, 300);
+  document.body.dataset.r=R.join(' ~ ');
+}catch(err){ document.body.dataset.r='THREW at '+(document.body.dataset.r||'?')+
+  ': '+err.message+' @ '+((err.stack||'').split('\n')[1]||''); }}, 300);
 
 })();
 </script>
