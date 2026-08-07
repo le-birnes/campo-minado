@@ -6711,18 +6711,61 @@ const BLAST_BLOCKS = new Set();
 
 /* The first loose cell along a ray, or null. Half a cell a step, so a bead
    cannot be passed through. */
+/* HOW FAST A SHOT DIES IN A FLUID, per metre per kg/m3. Water at 1,000 leaves
+   about a third of the shot after a metre and a twentieth after three, which is
+   roughly what a shotgun does underwater; lava at 3,100 stops it in a hand's
+   width; smoke barely touches it. One number, and it is the same Beer-Lambert
+   shape already used for the water's opacity - applied to the SHOT instead of
+   to the light. */
+const SHOT_ABSORB = 2.6e-4;
+/*  water at 1,000 kg/m3, what is left of the shot:
+        1 m  77%      3 m  46%      5 m  27%      12 m  4%, and it is gone
+    which makes the sea something you can fight in for a few metres and not
+    across. Lava at 3,100 dies in four; smoke at 1 barely registers. Measured
+    at 1.1e-3 first, and three metres of water killed a shot outright - true
+    enough of a real shotgun and useless as a game, which is the trade this
+    number exists to make. */
+
+/* THE FIRST THING ALONG THE RAY THAT IS NOT A FLUID - and a fluid is passed
+   THROUGH rather than treated as a wall.
+
+   Marcelo, three times: "I can't seem to be able to shoot inside water."
+   This is why. It returned the first LOOSE cell, and standing in water that
+   cell is at your own face, at t = 0 - so the blast went off half a metre in
+   front of your eyes and shoot() RETURNED, and every block, enemy and chest
+   further along the ray was never reached. Every underwater shot was spent on
+   the water touching your face. It blew a bubble and stopped.
+
+   A shotgun fired into water genuinely does carry, and genuinely does lose
+   energy fast. So the ray crosses fluid, spends energy doing it, and what is
+   left arrives at whatever has mass behind it. */
 function sandRayHit(ox,oy,oz, dx,dy,dz, maxT){
   const w=SAND; if(!w) return null;
   const step = CELL_M*0.5;
+  let e = 1, wet = 0;                      // energy left, metres of fluid crossed
+  let fx=-1, fy=0, fz=0, fm=0, ft=0;       // where it ENTERED the fluid
   for(let t=0; t<=maxT; t+=step){
     const cx=sandCell(ox+dx*t), cy=sandCell(oy+dy*t), cz=sandCell(oz+dz*t);
     if(!w.inBox(cx,cy,cz)) continue;
     const m = cGet(w,cx,cy,cz);
     /* S_ROCK is the block world and the block raycast already owns it. */
-    if(m===S_AIR || m===S_ROCK || SM_K[m]===K_STATIC) continue;
-    return {t, cx, cy, cz, m};
+    if(m===S_AIR || m===S_ROCK) continue;
+    const K = SM_K[m];
+    if(K===K_LIQUID || K===K_GAS){
+      if(fx<0){ fx=cx; fy=cy; fz=cz; fm=m; ft=t; }
+      wet += step;
+      e *= Math.exp(-SM_D[m]*step*SHOT_ABSORB);
+      if(e < 0.04)                          // the water ate it
+        return {t, cx, cy, cz, m, e:0, wet, fx, fy, fz, fm, ft, stopped:true};
+      continue;
+    }
+    /* something with mass, and it gets whatever the fluid left */
+    return {t, cx, cy, cz, m, e, wet, fx, fy, fz, fm, ft, stopped:false};
   }
-  return null;
+  /* nothing solid in reach - but if it went through water, the water still
+     knows about it */
+  return fx>=0 ? {t:ft, cx:fx, cy:fy, cz:fz, m:fm, e, wet, fx, fy, fz, fm, ft,
+                  stopped:false, through:true} : null;
 }
 
 /* Beads within reach are lifted out of the grid and thrown. Past the budget
@@ -6761,7 +6804,12 @@ function blockCollapse(bi){
      and the cube stops being painted over them. Below that it is a block with a
      dent in it and it keeps its cube - which is what stops an invisible wall. */
   if(air > tot*0.25) VOXHOLLOW.add(bi); else VOXHOLLOW.delete(bi);
-  if(air <= tot*0.60) return false;
+  /* AND NEARLY HALF GONE IS GONE. Sixty per cent was a guess and it was too
+     high by exactly the amount that matters: six point-blank shots take a
+     dungeon block to fifty per cent air - a hole you can plainly see through -
+     and it was still standing in his way. What is left of a block that has lost
+     half of itself is rubble around a hole, not a wall. */
+  if(air <= tot*0.45) return false;
   /* it is gone: the world stops claiming it, and what is left of its beads
      stays exactly where it is */
   G.st[bi] = AIR;
@@ -6788,6 +6836,39 @@ function sandBlast(wx,wy,wz, dx,dy,dz, scale){
      the scan reached the budget before it reached the far half of the sphere.
      A budget has to be spent evenly over what it is choosing between, so the
      candidates are collected and then sampled. */
+  /* OPEN WHAT IT IS ABOUT TO HIT. This is the missing link between "the shot
+     reached a wall" and "the wall came apart", and his log named it in one
+     line: "blast: 2 CAUGHT, 2 broke" - where the same blast in a tank caught
+     eight thousand.
+
+     S_ROCK is the byte that means "the block world owns this cell", and the
+     gather skips it, correctly: bedrock is not sand. But an unshot BLOCK is
+     also S_ROCK in the grid until voxelise() opens it, so a blast against a
+     wall was finding nothing but the handful of loose beads already lying
+     around, and all that showed was the little cone voxCarve had cut in the
+     middle. "It broke but beads were not spread, only visual in the center of
+     the block, and I couldn't pass through it."
+
+     So the blast opens every block it covers first. Not the hull - that is the
+     one promise the shell makes - and not blocks that are already air. */
+  {
+    const b0x=Math.max(0,((cx-R)/SAND_DIV)|0), b1x=Math.min(G.nx-1,((cx+R)/SAND_DIV)|0);
+    const b0y=Math.max(0,((cy-R)/SAND_DIV)|0), b1y=Math.min(G.ny-1,((cy+R)/SAND_DIV)|0);
+    const b0z=Math.max(0,((cz-R)/SAND_DIV)|0), b1z=Math.min(G.nz-1,((cz+R)/SAND_DIV)|0);
+    for(let by=b0y;by<=b1y;by++) for(let bz=b0z;bz<=b1z;bz++) for(let bx=b0x;bx<=b1x;bx++){
+      const bi = idx(bx,by,bz);
+      if(G.st[bi]===AIR) continue;
+      if(G.hull && G.hull[bi]) continue;      // the shell does not open to a shot
+      if(VOXD.has(bi)) continue;
+      /* only if the sphere actually reaches into it */
+      const nx2=Math.max(bx*SAND_DIV, Math.min(cx,(bx+1)*SAND_DIV-1));
+      const ny2=Math.max(by*SAND_DIV, Math.min(cy,(by+1)*SAND_DIV-1));
+      const nz2=Math.max(bz*SAND_DIV, Math.min(cz,(bz+1)*SAND_DIV-1));
+      const ddx=nx2-cx, ddy=ny2-cy, ddz=nz2-cz;
+      if(ddx*ddx+ddy*ddy+ddz*ddz > rH*rH) continue;
+      voxelise(bi);
+    }
+  }
   let nc=0;
   for(let z=cz-R;z<=cz+R;z++) for(let y=cy-R;y<=cy+R;y++) for(let x=cx-R;x<=cx+R;x++){
     if(!w.inBox(x,y,z)) continue;
@@ -6877,6 +6958,7 @@ function sandBlast(wx,wy,wz, dx,dy,dz, scale){
          leaves slowly; a light one is flung. */
       if(c < take){
         cSet(w,x,y,z,S_AIR); w.touch(x,y,z);
+        BLAST_BLOCKS.add(((y/SAND_DIV|0)*G.nz + (z/SAND_DIV|0))*G.nx + (x/SAND_DIV|0));
         const sv = Math.min(vel, 90);
         gritAdd((x+0.5)*CELL_M,(y+0.5)*CELL_M,(z+0.5)*CELL_M,
                 px*sv, py*sv + sv*0.15, pz*sv, m);
@@ -6901,6 +6983,7 @@ function sandBlast(wx,wy,wz, dx,dy,dz, scale){
            cGet(w,sx2,sy2,sz2)===S_AIR){
           cSet(w,x,y,z,S_AIR); cSet(w,sx2,sy2,sz2,m);
           w.touch(x,y,z); w.touch(sx2,sy2,sz2);
+          BLAST_BLOCKS.add(((y/SAND_DIV|0)*G.nz + (z/SAND_DIV|0))*G.nx + (x/SAND_DIV|0));
           shoved++;
         } else { w.touch(x,y,z); woken++; }
       }
@@ -7757,9 +7840,22 @@ function shoot(){
      direction, which is exactly the case Marcelo asked for. */
   {
     const sh = sandRayHit(r.ox, r.oy, r.oz, r.dx, r.dy, r.dz, Math.min(dist, REACH));
-    if(sh){
+    /* AND WATER IT PASSED THROUGH IS STILL DISTURBED. A shot into the sea makes
+       a cavity whether or not it reaches anything - that is the bubble - and it
+       happens at the point it ENTERED the water rather than wherever it ended. */
+    if(sh && sh.wet > 0 && sh.fx >= 0){
+      sandBlast((sh.fx+0.5)*CELL_M, (sh.fy+0.5)*CELL_M, (sh.fz+0.5)*CELL_M,
+                r.dx, r.dy, r.dz, 0.6);
+      snd.crumble();
+    }
+    /* IT WENT THROUGH. The water took its share and there was nothing solid in
+       reach, so the shot carries on to the blocks and the enemies with what is
+       left of it - which is the whole of what "I can't shoot inside water" was
+       asking for. */
+    if(sh && sh.through) { /* fall through to the block and enemy passes */ }
+    else if(sh){
       const bx=(sh.cx+0.5)*CELL_M, by=(sh.cy+0.5)*CELL_M, bz=(sh.cz+0.5)*CELL_M;
-      const n = sandBlast(bx,by,bz, r.dx,r.dy,r.dz, 1);
+      const n = sandBlast(bx,by,bz, r.dx,r.dy,r.dz, Math.max(0.25, sh.e));
       snd.crumble();
       G.shake = Math.max(G.shake, 0.06);
       for(let k=0;k<10;k++)
