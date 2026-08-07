@@ -183,8 +183,10 @@ setTimeout(()=>{ try{
            ` and the BOX around it ${spBox}, which is what a chunk scheduler can promise.` +
            ` WITHOUT it the busiest tick looked at ${spOff.peak} cells (${spOff.tot} over 90);` +
            ` WITH it, ${spOn.peak} (${spOn.tot} over 90) and ${spOn.def} chunks left for when you walk over ` +
-           (spOn.peak <= spBox && spOn.peak < spOff.peak
-            ? 'ok, inside the box around his ceiling, and it was 100x over before'
+           (spOn.peak <= spBox
+            ? (spOff.peak > spBox
+               ? 'ok, inside the box around his ceiling, and over it without'
+               : 'ok, inside his ceiling - and there is nothing to compare against because the WAKE is bounded now too, so the runaway never gets scheduled')
             : 'FAULT: the ceiling is not holding'));
     /* AND A SHOT STILL BREAKS IT, which is the whole loop: a solid block is one
        byte until it is opened, the page faults in, the beads fly, and when what

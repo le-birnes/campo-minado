@@ -2823,6 +2823,17 @@ function genWorld(d){
   G.rockHit=new Uint8Array(N);      // shots taken by each cinderstone wall
   G.lamp=0;                         // lanterns found: each adds to the ambient
   G.noWin=false; G.island=false; G.emerge=0; G.gravK=1; rollReset();
+  /* THE WORLD OUTSIDE THE DUNGEON STARTS FROZEN. Marcelo: "world outside
+     dungeon should start frozen and only un-freeze after spin is complete."
+
+     Which is the fix for the slowdown as well as his instruction. Killing the
+     boss reverses gravity, and reversing gravity wakes every chunk holding
+     anything loose - and what is loose out there is an OCEAN. Twenty-four
+     thousand cells of it, six hundred thousand lattice blocks, every one of
+     them asking which way down is at the exact moment the player is falling
+     upward through a shaft. Frozen, none of them is asked until he is out and
+     the turn is finished, and by then the sphere is what limits it. */
+  G.outerLive = false;
   document.body.classList.remove('world');
   /* A NEW BOARD STARTS WITH NO RUBBLE ON IT. Without this the grains and, far
      worse, their occupancy claims survive into the next game — so the second
@@ -5421,6 +5432,9 @@ function sandTick(w, gdir){
      663,552 cells in a tick against a ceiling of 217,961, three times over.
      The distance to the nearest point of the chunk is the honest test and it
      costs three subtractions. */
+  /* FROZEN UNTIL THE SPIN IS OVER: while the dungeon is still a dungeon,
+     nothing outside its own volume is ticked at all. */
+  const froz = (w === SAND && G.mode===MODE_DUNGEON && !G.outerLive && G.lump) ? G.lump : null;
   const sphere = (w === SAND && SIM_SPHERE) ? SIM_R : 0;
   const sph2 = sphere*sphere, CHM = SCS*CELL_M;
   /* and the BOX around the ball, in cells, so a chunk that only clips its
@@ -5434,6 +5448,19 @@ function sandTick(w, gdir){
     const c = rect[r];
     const cx = c % CW, q = (c/CW)|0, cz = q % CD, cy = (q/CD)|0;
     const bx = cx*SCS, by = cy*SCS, bz = cz*SCS;
+    if(froz){
+      /* the chunk's middle, in cells, against the dungeon's own volume */
+      const mx=(cx+0.5)*SCS/SAND_DIV, my=(cy+0.5)*SCS/SAND_DIV, mz=(cz+0.5)*SCS/SAND_DIV;
+      if(my < froz.y0-1 || my > froz.y1+1 ||
+         Math.hypot(mx-froz.cx, mz-froz.cz) > froz.r+1){
+        const o=c*6, b=w.cb;
+        b[o]=rect[r+1]; b[o+1]=rect[r+2]; b[o+2]=rect[r+3];
+        b[o+3]=rect[r+4]; b[o+4]=rect[r+5]; b[o+5]=rect[r+6];
+        if(!w.cw[c]){ w.cw[c]=1; w.awake.push(c); }
+        w.stats.deferred++;
+        continue;
+      }
+    }
     if(sph2){
       const ex=Math.max(cx*CHM-P.x, 0, P.x-(cx+1)*CHM);
       const ey=Math.max(cy*CHM-P.y, 0, P.y-(cy+1)*CHM);
@@ -5855,23 +5882,47 @@ function sandWakeLoose(){
      something that is not more of itself - and the physics spreads inward from
      there if it turns out it needs to. */
   if(LADM){
-    const nx=G.nx, ny=G.ny, nz=G.nz;
+    const nx=LNX, ny=LNY, nz=LNZ;      // the ladder counts LAT blocks now
+    /* AND ONLY NEAR HIM. This used to demote the surface of every mass in the
+       world - which is the whole ocean, fourteen thousand lattice blocks, each
+       one now ALLOCATING A PAGE on the way down - on the single frame the boss
+       dies. That is the slowdown he reported, and it was measured in tens of
+       megabytes of allocation inside one tick.
+
+       Nothing outside the simulated sphere is going to be ticked anyway, so
+       waking it is work done to be thrown away. Three times the radius, so
+       there is a margin of already-awake material to swim into. */
+    const WAKE_R = SIM_R*3, WAKE_R2 = WAKE_R*WAKE_R;
     const surf = [];
     for(let bi=0; bi<LADM.length; bi++){
       const mat = LADM[bi]; if(!mat) continue;
       const x=bi%nx, q=(bi/nx)|0, z=q%nz, y=(q/nz)|0;
+      const dx0=(x+0.5)*LAT_M-P.x, dy0=(y+0.5)*LAT_M-P.y, dz0=(z+0.5)*LAT_M-P.z;
+      if(dx0*dx0+dy0*dy0+dz0*dz0 > WAKE_R2) continue;
       for(let k=0;k<6;k++){
         const ax=x+NB26X[k], ay=y+NB26Y[k], az=z+NB26Z[k];
-        if(ax<0||ay<0||az<0||ax>=nx||ay>=ny||az>=nz){ surf.push(bi); break; }
+        /* off the end of the array is MORE WORLD, not air - the same rule the
+           draw pass needed, and for the same reason */
+        if(ax<0||ay<0||az<0||ax>=nx||ay>=ny||az>=nz) continue;
         if(LADM[(ay*nz + az)*nx + ax] !== mat){ surf.push(bi); break; }
       }
     }
     for(const bi of surf) ladDemote(bi);
   }
+  const CHM2 = SCS*CELL_M;
+  const WR2 = (SIM_R*3)*(SIM_R*3);
   for(let c=0;c<w.nc;c++){
     if(!w.cl[c]) continue;
     /* and a chunk that is still all mass stays asleep */
     if(w.cbulk[c] === 8) continue;
+    /* nor one he is nowhere near: it would be deferred on the next tick and
+       every tick after, and the deferral is not free - it is a walk over the
+       whole awake list */
+    {
+      const ccx=c%w.CW, cq=(c/w.CW)|0, ccz=cq%w.CD, ccy=(cq/w.CD)|0;
+      const ex=(ccx+0.5)*CHM2-P.x, ey=(ccy+0.5)*CHM2-P.y, ez=(ccz+0.5)*CHM2-P.z;
+      if(ex*ex+ey*ey+ez*ez > WR2) continue;
+    }
     const b=w.cb, o=c*6;
     b[o]=0; b[o+1]=0; b[o+2]=0; b[o+3]=SCS-1; b[o+4]=SCS-1; b[o+5]=SCS-1;
     w.cf[c]=1;
@@ -12171,9 +12222,18 @@ function frame(now){
   if(G.state==='forge'){ fzFrame(dt); return; }
 
   logSample(dt);
-  /* AND IT DUMPS ITSELF WHEN THE RUN ENDS, because the moment you most want the
-     log is the moment you are least likely to press a key for it. */
-  if((G.state==='over' || G.state==='won') && !LOG_DUMPED){ LOG_DUMPED = true; logDump(G.state); }
+  /* F3 AND ONLY F3. It dumped itself on a death at first, and he asked for that
+     to stop: a file arriving in Downloads uninvited every time you die is a
+     nuisance, and the run you want is the run you noticed something in. */
+  /* AND THE WORLD UNFREEZES WHEN THE TURN IS FINISHED, not when the boss dies:
+     the spin takes ROLL_DUR and the ocean should not start moving in the middle
+     of it. */
+  if(G.island && !G.outerLive && ROLL_T <= 0){
+    G.outerLive = true;
+    logEvent('OUTER WORLD UNFROZEN after the spin: pages='+(SAND?SAND.pgn:0)+
+             ' lad='+ladStats.blocks);
+    sandWakeLoose();
+  }
   const sim = dt * (G.state==='over' ? G.slowmo : 1);
   if(G.state==='over' && G.slowmo<1) G.slowmo = Math.min(1, G.slowmo + dt*0.35);
 
