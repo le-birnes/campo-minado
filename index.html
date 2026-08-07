@@ -693,6 +693,48 @@ function gnow(){ return GRAV * (G.gravK === undefined ? 1 : G.gravK); }
    and the world comes round with them. Without this the ending was a man
    falling into the sky, which reads as a bug however deliberate it is. */
 function gsign(){ return gnow() >= 0 ? 1 : -1; }
+/* ==========================================================================
+   WHICH WAY UP THE PLAYER IS
+   --------------------------------------------------------------------------
+   Marcelo, and he had to say it twice: "you can't just flip the camera like
+   that, you should spin the PLAYER around, I didn't ask for a visual flip
+   only."
+
+   He was right, and the difference is not cosmetic. Negating the right and up
+   vectors at the last moment is a real rotation - determinant +1, no mirror -
+   but it turns the PICTURE about the view axis while the body it belongs to
+   never changes. So the mouse still yawed in the old frame, the strafe key
+   still pushed you the old way, and every control fought the image: turning
+   right went left.
+
+   What is actually true is that the body TURNS OVER. Its own right hand points
+   the other way in the world afterwards, and so every control that means "my
+   right" has to go with it. That is what upSign is for, and it is applied to
+   the INPUT rather than to the output - which is the whole fix, because it
+   means P.yaw and P.pitch always describe where the player is looking in the
+   world and aimRay and the camera can never disagree about it again. (They did:
+   viewFrom negated the pitch and aimRay did not, so under reversed gravity the
+   crosshair and the camera were looking at different heights.)
+
+   And it takes time, because a body turning over takes time. ROLL_DUR of it. */
+const ROLL_DUR = 0.75;
+let ROLL_A = 0, ROLL_B = 0, ROLL_T = 0;      // from, to, seconds left
+function rollTarget(){ return gsign() > 0 ? 0 : Math.PI; }
+function rollNow(){
+  if(ROLL_T <= 0) return ROLL_B;
+  const u = 1 - ROLL_T/ROLL_DUR;
+  return ROLL_A + (ROLL_B-ROLL_A)*(u*u*(3-2*u));   // smoothstep: starts and ends still
+}
+function rollTick(dt){
+  const t = rollTarget();
+  if(t !== ROLL_B){ ROLL_A = rollNow(); ROLL_B = t; ROLL_T = ROLL_DUR; }
+  if(ROLL_T > 0) ROLL_T = Math.max(0, ROLL_T - dt);
+}
+/* +1 while the player's right hand points the world's way, -1 once they are
+   more than halfway over. Read from the roll rather than from gravity, so the
+   controls follow the body through the turn instead of switching before it. */
+function upSign(){ return Math.cos(rollNow()) >= 0 ? 1 : -1; }
+function rollReset(){ ROLL_A = ROLL_B = rollTarget(); ROLL_T = 0; }
 const JUMP_LO = 6.0;    // jump apex = 3x your height
 const V_LO    = Math.sqrt(2*GRAV*JUMP_LO);
 /* Every jump is the same jump, and you get twenty of them before your feet
@@ -842,17 +884,29 @@ const m4 = {
   },
   ident(){ const o=new Float32Array(16); o[0]=o[5]=o[10]=o[15]=1; return o; }
 };
-function viewFrom(px,py,pz, yaw, pitch, out, us){
+function viewFrom(px,py,pz, yaw, pitch, out, roll){
   const cy=Math.cos(yaw), sy=Math.sin(yaw), cp=Math.cos(pitch), sp=Math.sin(pitch);
   const fx=-sy*cp, fy=sp, fz=-cy*cp;
   let rx= cy,    ry=0,  rz=-sy;
   let ux= ry*fz-rz*fy, uy= rz*fx-rx*fz, uz= rx*fy-ry*fx;
-  /* A HUNDRED AND EIGHTY DEGREES ABOUT THE WAY YOU ARE LOOKING, when gravity
-     has changed its mind. Roll rather than yaw: forward stays forward, so you
-     are still looking at whatever you were looking at, and up and right both
-     invert - which is exactly what standing on the other surface does to you.
-     Negating the two basis vectors IS that rotation, and it costs two signs. */
-  if(us < 0){ rx=-rx; ry=-ry; rz=-rz; ux=-ux; uy=-uy; uz=-uz; }
+  /* THE BODY TURNS OVER, through however far it has got. Rodrigues about the
+     forward axis, and f x r is exactly -u, so it is four multiplies and no
+     trigonometry past the one angle:
+
+         r' = r cos t - u sin t
+         u' = u cos t + r sin t
+
+     Forward is the axis, so it does not move - you are still looking at
+     whatever you were looking at while the world rotates about it, which is
+     what turning over does to you. At t = pi both vectors invert, which is the
+     rest state on the other side; everything between is the half second of
+     actually going over. */
+  if(roll){
+    const c=Math.cos(roll), s=Math.sin(roll);
+    const nx=rx*c-ux*s, ny=ry*c-uy*s, nz=rz*c-uz*s;
+    ux=ux*c+rx*s; uy=uy*c+ry*s; uz=uz*c+rz*s;
+    rx=nx; ry=ny; rz=nz;
+  }
   out[0]=rx; out[4]=ry; out[8]=rz;  out[12]=-(rx*px+ry*py+rz*pz);
   out[1]=ux; out[5]=uy; out[9]=uz;  out[13]=-(ux*px+uy*py+uz*pz);
   out[2]=-fx;out[6]=-fy;out[10]=-fz;out[14]= (fx*px+fy*py+fz*pz);
@@ -2411,7 +2465,7 @@ function genWorld(d){
   G.crack=new Uint8Array(N);
   G.rockHit=new Uint8Array(N);      // shots taken by each cinderstone wall
   G.lamp=0;                         // lanterns found: each adds to the ambient
-  G.noWin=false; G.island=false; G.emerge=0; G.gravK=1;
+  G.noWin=false; G.island=false; G.emerge=0; G.gravK=1; rollReset();
   /* A NEW BOARD STARTS WITH NO RUBBLE ON IT. Without this the grains and, far
      worse, their occupancy claims survive into the next game — so the second
      run of a session has invisible solid cells scattered through its air. */
@@ -5593,7 +5647,9 @@ function physics(dt){
   /* Keyboard gives whole numbers, a thumbstick gives fractions; they simply
      add, so a keyboard player is unaffected and a thumb gets real analog. */
   const fwd  = (IN.f-IN.b) + IN.mf;
-  const side = (IN.r-IN.l) + IN.ms;
+  /* AND SO IS THE STRAFE KEY. Forward is the axis you turned about, so it is
+     unchanged; your right hand is not. */
+  const side = ((IN.r-IN.l) + IN.ms) * upSign();
   let wx = -sy*fwd + cy*side;
   let wz = -cy*fwd - sy*side;
   const ln=Math.hypot(wx,wz); if(ln>0){ wx/=ln; wz/=ln; }
@@ -8842,6 +8898,13 @@ function turnView(dYaw, dPitch){
   if(room <= 0){ turnClamped++; return; }
   const mag = Math.hypot(dYaw, dPitch);
   if(mag > room){ const k = room/mag; dYaw*=k; dPitch*=k; turnClamped++; }
+  /* INTO THE BODY'S FRAME. This one multiply is what "spin the player" means
+     in practice: your right hand points the other way in the world once you
+     are over, so an input that means "turn to my right" has to turn the other
+     way in world yaw. Applied here rather than at each call site so that the
+     mouse, the arrow keys and the gamepad cannot disagree about it. */
+  const us = upSign();
+  dYaw *= us; dPitch *= us;
   turnedThisFrame += Math.hypot(dYaw, dPitch);
   P.yaw   += dYaw;
   P.pitch = clamp(P.pitch + dPitch, -1.5, 1.5);
@@ -9203,8 +9266,8 @@ function updateLock(dt){
 /* arrow keys turn the camera (accessibility / plan B) */
 function keyLook(dt){
   const s = 1.9*dt;
-  if(KEY['ArrowLeft'])  P.yaw += s;
-  if(KEY['ArrowRight']) P.yaw -= s;
+  if(KEY['ArrowLeft'])  turnView( s, 0);
+  if(KEY['ArrowRight']) turnView(-s, 0);
   if(KEY['PageUp'])   P.pitch = clamp(P.pitch+s, -1.5, 1.5);
   if(KEY['PageDown']) P.pitch = clamp(P.pitch-s, -1.5, 1.5);
 }
@@ -10145,6 +10208,7 @@ function frame(now){
       toast('The sand let you go. You come up on a bank in open water.', 6000);
     }
   }
+  rollTick(dt);
   recoil = Math.max(0, recoil - dt*6.2);
   swayX -= swayX*Math.min(1, dt*6); swayY -= swayY*Math.min(1, dt*6);
   G.shake = Math.max(0, G.shake - dt*0.55);
@@ -10182,10 +10246,13 @@ function frame(now){
   const camX = P.x + (Math.random()-0.5)*shk*0.42;
   const camY = eyeY() + Math.sin(P.bob*2)*0.035 + (Math.random()-0.5)*shk*0.42;
   const camZ = P.z + (Math.random()-0.5)*shk*0.42;
-  const yaw = P.yaw, us = gsign();
-  /* and the pitch inverts with the roll, or looking up would look down */
-  const pit = (P.pitch + recoil*VIEW_PUNCH) * us;
-  const basis = viewFrom(camX, camY, camZ, yaw, pit, viewM, us);
+  /* NO SIGN ON THE PITCH ANY MORE. P.yaw and P.pitch are where the player is
+     looking in the WORLD, always, and the roll is what being upside down does
+     to the picture. That is why aimRay can build the shot straight out of them
+     and be certain the crosshair is where the camera is pointing. */
+  const yaw = P.yaw;
+  const pit = P.pitch + recoil*VIEW_PUNCH;
+  const basis = viewFrom(camX, camY, camZ, yaw, pit, viewM, rollNow());
   const aspect = W/H;
   const projMain = m4.persp(70*Math.PI/180, aspect, 0.08, 400);
   const projView = m4.persp(55*Math.PI/180, aspect, 0.01, 20);
