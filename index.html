@@ -679,16 +679,28 @@ body.world .stat.foe-only{ display:flex !important; }
 /* ==========================================================================
    0. WORLD CONSTANTS — real proportions
    ========================================================================== */
-const P_H     = 2.0;    // altura do personagem
+const P_H     = 1.8;    // altura do personagem — his number
 /* One face is 1.4 of you, not 2. At 4 m a cube read as architecture rather than
    as a block: standing in a one-cell corridor you could not see over anything,
    the creatures looked like toys next to the walls, and crossing the cave was
    admin. 2.8 m still hides a person and still stacks into walls, but the cave
    became somewhere you move through instead of somewhere you commute across.
    Everything else in the game is written in terms of BLOCK and follows. */
-const BLOCK   = P_H * 1.4;   // 2.8 m
+/* AND A BLOCK IS A METRE. Marcelo, after seeing the world from the air:
+   "let's resize the world. Player is 1,8m, blocks are 1m each, beads (minimal
+   structure of materials or mix materials) is BLOCK/8."
+
+   Which is a different proportion from the one above and it is his call: a
+   block is now a bit over half your height rather than one and a half times
+   it, so it stacks into walls you look OVER rather than walls you look AT, and
+   the world is 2.8 times smaller in every direction for the same block count.
+
+   THE BEAD IS BLOCK/8 = 12.5 cm, which is the number that matters for the
+   complaint. Eight cells to a block edge instead of sixteen is 512 cells in a
+   block instead of 4,096 - EIGHT TIMES FEWER BEADS to hold, tick and draw. */
+const BLOCK   = 1.0;
 const P_R     = 0.52;   // collision radius
-const EYE     = 1.72;   // eye height
+const EYE     = 1.62;   // eye height, 0.9 of him
 /* WHICH END OF THE BODY THE EYES ARE AT. The body is always P.y .. P.y+P_H in
    world coordinates, whichever way gravity points - so under reversed gravity
    the end that rests on the ground is P.y+P_H, and the eyes are 1.72 m from
@@ -4211,9 +4223,12 @@ const hellB   = makeCubeBatch(6000);
        Without it piles come out flatter along the diagonals, which is the same
        artefact as before wearing a different hat.
    ========================================================================== */
-const SAND_DIV = 16;                       // cells per block edge
-const CELL_M   = BLOCK/SAND_DIV;           // 0.175 m — the bead
-const SCS = 32;                            // chunk edge, in cells
+const SAND_DIV = 8;                        // cells per block edge — BLOCK/8, his number
+const CELL_M   = BLOCK/SAND_DIV;           // 0.125 m — the bead, BLOCK/8
+/* A CHUNK IS STILL EXACTLY 2x2x2 BLOCKS, which is what the whole ladder hangs
+   off, so it follows the divisor rather than being written down twice. */
+const SCS = SAND_DIV*2;                    // chunk edge, in cells
+const SCSH = Math.round(Math.log2(SCS)), SCSM = SCS-1;
 const SCS3 = SCS*SCS*SCS;
 
 /* How a material moves. This is the whole of its physics. */
@@ -4676,7 +4691,7 @@ let SRS = 0, SSCAN = 0, SMOV = 0;
    that sphere is about 268,000 cells, and it is a CEILING rather than a target:
    whatever else is happening in the world, one tick may not look at more. */
 const SIM_R = 7.0;
-const SIM_BEADS = Math.round(4/3*Math.PI*Math.pow(SIM_R/0.175, 3));
+const SIM_BEADS = Math.round(4/3*Math.PI*Math.pow(SIM_R/CELL_M, 3));
 let SIM_SPHERE = true;
 
 /* ==========================================================================
@@ -4722,18 +4737,19 @@ let SIM_SPHERE = true;
    the furthest anything reaches is the eight-cell column walk in the liquid
    rule, and the pad is thirty-two. */
 const PGS = SAND_DIV;              // page edge in cells — one block, on purpose
-const PGC = PGS*PGS*PGS;           // 4,096 cells
+const PGSH = Math.round(Math.log2(PGS)), PGM = PGS-1;
+const PGC = PGS*PGS*PGS;           // cells in a block
 const PGB = PGC*2;                 // materials, then the age byte for each
 const PGP = 2;                     // pages of padding on every side
 const PGO = PGP*PGS;               // 32 — added before the shift so it never goes negative
 /* local offset inside a page: x fastest, then z, then y, as the world is */
-function pgOff(x,y,z){ return ((y&15)<<8) | ((z&15)<<4) | (x&15); }
-function pgOf(w,x,y,z){ return ((((y+PGO)>>4)*w.BD + ((z+PGO)>>4))*w.BW + ((x+PGO)>>4)); }
+function pgOff(x,y,z){ return ((y&PGM)<<(PGSH*2)) | ((z&PGM)<<PGSH) | (x&PGM); }
+function pgOf(w,x,y,z){ return ((((y+PGO)>>PGSH)*w.BD + ((z+PGO)>>PGSH))*w.BW + ((x+PGO)>>PGSH)); }
 
 function cGet(w,x,y,z){
-  const b = (((y+PGO)>>4)*w.BD + ((z+PGO)>>4))*w.BW + ((x+PGO)>>4);
+  const b = (((y+PGO)>>PGSH)*w.BD + ((z+PGO)>>PGSH))*w.BW + ((x+PGO)>>PGSH);
   const p = w.pg[b];
-  return p === null ? w.pgu[b] : p[((y&15)<<8) | ((z&15)<<4) | (x&15)];
+  return p === null ? w.pgu[b] : p[((y&PGM)<<(PGSH*2)) | ((z&PGM)<<PGSH) | (x&PGM)];
 }
 /* Make the block real. Idempotent, because demotion and the first write into a
    uniform block can arrive in either order. */
@@ -4747,28 +4763,28 @@ function cFault(w,b){
   return p;
 }
 function cSet(w,x,y,z,mat){
-  const b = (((y+PGO)>>4)*w.BD + ((z+PGO)>>4))*w.BW + ((x+PGO)>>4);
+  const b = (((y+PGO)>>PGSH)*w.BD + ((z+PGO)>>PGSH))*w.BW + ((x+PGO)>>PGSH);
   let p = w.pg[b];
   if(p === null){
     if(w.pgu[b] === mat) return;             // it is already that: nothing exists to change
     p = cFault(w,b);
   }
-  p[((y&15)<<8) | ((z&15)<<4) | (x&15)] = mat;
+  p[((y&PGM)<<(PGSH*2)) | ((z&PGM)<<PGSH) | (x&PGM)] = mat;
 }
 /* THE AGE LIVES IN THE SAME PAGE, in the second half of it. It used to be a
    second array the size of the world, allocated the first time anything had a
    life in it; now it is free, because a block that has no page has no ages
    either and a block that has one has them already. */
 function aGet(w,x,y,z){
-  const b = (((y+PGO)>>4)*w.BD + ((z+PGO)>>4))*w.BW + ((x+PGO)>>4);
+  const b = (((y+PGO)>>PGSH)*w.BD + ((z+PGO)>>PGSH))*w.BW + ((x+PGO)>>PGSH);
   const p = w.pg[b];
-  return p === null ? 0 : p[PGC + (((y&15)<<8) | ((z&15)<<4) | (x&15))];
+  return p === null ? 0 : p[PGC + (((y&PGM)<<(PGSH*2)) | ((z&PGM)<<PGSH) | (x&PGM))];
 }
 function aSet(w,x,y,z,v){
-  const b = (((y+PGO)>>4)*w.BD + ((z+PGO)>>4))*w.BW + ((x+PGO)>>4);
+  const b = (((y+PGO)>>PGSH)*w.BD + ((z+PGO)>>PGSH))*w.BW + ((x+PGO)>>PGSH);
   let p = w.pg[b];
   if(p === null){ if(v === 0) return; p = cFault(w,b); }
-  p[PGC + (((y&15)<<8) | ((z&15)<<4) | (x&15))] = v;
+  p[PGC + (((y&PGM)<<(PGSH*2)) | ((z&PGM)<<PGSH) | (x&PGM))] = v;
 }
 /* A WHOLE BLOCK IS ONE THING AGAIN — the only operation that gives memory back,
    and the reason a settled ocean costs nothing to hold as well as nothing to
@@ -4879,7 +4895,7 @@ class SandWorld {
   /* A change on a chunk face wakes the chunk next door, or material stops dead
      at chunk seams — the classic falling-sand bug, and it looks like a shelf. */
   touch(x,y,z){
-    const cx=x>>5, cy=y>>5, cz=z>>5, lx=x&31, ly=y&31, lz=z&31;
+    const cx=x>>SCSH, cy=y>>SCSH, cz=z>>SCSH, lx=x&SCSM, ly=y&SCSM, lz=z&SCSM;
     const CWd=this.CW, CDd=this.CD;
     const row = (cy*CDd + cz)*CWd;
     this.mark(row+cx, lx,ly,lz);
@@ -5154,7 +5170,7 @@ function sStepCell(w, x,y,z, mat, gdir){
        mark(), and mark() on a chunk holding promoted blocks DEMOTES one. The
        sea demoted its own top layer every tick for ever. Heat still overrides
        all of it, because a fire under the sea should boil what is above it. */
-    if(hot === 0 && ladBodyAt(x,y,z) === mat) open = 0;
+    if(hot === 0 && ladBodyAt(w,x,y,z) === mat) open = 0;
     if(open >= 9 || hot > 0){
       /* staggered by WHERE it is, so a sheet does not all ask on the same tick */
       if((w.tick & (EVAP_EVERY-1)) === ((x + z*3 + y*5) & (EVAP_EVERY-1))){
@@ -5451,8 +5467,8 @@ const SAND_DRAW_R = BLOCK*11;              // chunks past this are not drawn
    Loose material - a heap of sand, a spill - keeps the full bead radius,
    because it has no rung above bead to go to. Only what has been PROMOTED
    changes size, which means the size you see is the rung it is on. */
-const SAND_BEAD_R = BLOCK*3.6;             // promoted material past this is a cube
-const LAD_MASS_R  = BLOCK*15;              // and past this the whole body is one box
+const SAND_BEAD_R = 10.0;             // promoted material past this is a cube
+const LAD_MASS_R  = 42.0;              // and past this the whole body is one box
 const SAND_DRAW_MAX = 22000;               // instances the sand layer may spend
 const SAND_CHUNKS = 26;                    // chunks it may scan for them
 /* SIXTY, not thirty, and it is half of why falling was slow: a bead can only
@@ -5815,9 +5831,15 @@ let LADB  = null;      // Uint8Array, one per BLOCK: what it is a BODY of, 0 = n
 const LAD_BODY_MIN = PGC >> 3;
 const LADH = new Uint16Array(256);           // census histogram, reused
 const LADSEEN = [];                          // which of its entries were touched
-function ladBodyAt(x,y,z){
-  if(!LADB) return 0;
-  const bx=(x>>4), by=(y>>4), bz=(z>>4);
+function ladBodyAt(w,x,y,z){
+  /* AND IT HAS TO BE THIS WORLD'S LADDER. LADB is sized for the game's block
+     grid; a harness that builds its own SandWorld of different dimensions was
+     indexing into it anyway and reading whatever happened to be at that offset,
+     which said "you are in a body of water" to a bead sitting alone on a rock
+     and made it immortal. A second world has no ladder, and that is the answer
+     rather than a coincidence. */
+  if(!LADB || w !== SAND) return 0;
+  const bx=(x>>PGSH), by=(y>>PGSH), bz=(z>>PGSH);
   if(bx<0||by<0||bz<0||bx>=G.nx||by>=G.ny||bz>=G.nz) return 0;
   return LADB[(by*G.nz + bz)*G.nx + bx];
 }
@@ -5980,7 +6002,7 @@ function ladDemote(bi){
 function ladBreak(w, c, lx,ly,lz){
   if(!LADM) return;
   const cx = c % w.CW, q = (c/w.CW)|0, cz = q % w.CD, cy = (q/w.CD)|0;
-  const bx = cx*2 + (lx>>4), by = cy*2 + (ly>>4), bz = cz*2 + (lz>>4);
+  const bx = cx*2 + (lx>>PGSH), by = cy*2 + (ly>>PGSH), bz = cz*2 + (lz>>PGSH);
   if(bx<0||by<0||bz<0||bx>=G.nx||by>=G.ny||bz>=G.nz) return;
   const bi = (by*G.nz + bz)*G.nx + bx;
   if(LADM[bi]) ladDemote(bi);
@@ -6085,7 +6107,7 @@ function ladSweep(){
    "see the damn beads on the water", so within the bead radius the ocean is
    beads and past it the ocean is water. */
 const LAD_DRAW_MAX = 5000;
-const LAD_DRAW_R = BLOCK*80;
+const LAD_DRAW_R = 224.0;
 function ladDraw(d, n){
   if(!LADM || !SAND) return n;
   const R2 = SAND_BEAD_R*SAND_BEAD_R, F2 = LAD_DRAW_R*LAD_DRAW_R;
@@ -6235,7 +6257,7 @@ function voxCarve(bi, fx0,fy0,fz0, dx,dy,dz, budgetJ, thrower, wide){
       if(left < COST) break;
       const ex=x-cx, ey=y-cy, ez=z-cz;
       if(ex*ex+ey*ey+ez*ez > rad*rad) continue;
-      const i = (y<<8) | (z<<4) | x;
+      const i = (y<<(PGSH*2)) | (z<<PGSH) | x;
       const mt = pg[i];
       if(mt===S_AIR) continue;
       pg[i]=S_AIR; out++; left -= COST;
@@ -6598,7 +6620,7 @@ function sandDraw(){
             /* the inside of a uniform block: jump straight to its far face */
             if(inYZ && lx===1){ lx = PGS-2; continue; }
             const x=ox+lx; if(x>=w.W) break;
-            const mt = bulk >= 0 ? bulk : pge[(ly<<8)|(lz<<4)|lx];
+            const mt = bulk >= 0 ? bulk : pge[(ly<<(PGSH*2))|(lz<<PGSH)|lx];
             if(!SM_SEE[mt]) continue;         // air, and the world's own stone
             /* AND YOU DO NOT SEE THE BEADS YOU ARE INSIDE. Standing in water and
                drawing the water you are standing in puts opaque cubes across

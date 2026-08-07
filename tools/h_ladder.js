@@ -71,7 +71,7 @@ setTimeout(()=>{ try{
         liquefies. One block, or a handful of them where the poke straddles a
         chunk seam - never the whole tank. */
   const before = ladStats.blocks;
-  const pcx=(bx0+((BW/2)|0))*SAND_DIV+8, pcy=(by0+((BH/2)|0))*SAND_DIV+8, pcz=(bz0+((BD/2)|0))*SAND_DIV+8;
+  const pcx=(bx0+((BW/2)|0))*SAND_DIV+(SAND_DIV>>1), pcy=(by0+((BH/2)|0))*SAND_DIV+(SAND_DIV>>1), pcz=(bz0+((BD/2)|0))*SAND_DIV+(SAND_DIV>>1);
   w.put(pcx,pcy,pcz, S_AIR);
   for(let k=0;k<90;k++){ sandTick(w,-1); ladTick(); }
   const lost = before - ladStats.blocks;

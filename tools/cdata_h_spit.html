@@ -679,16 +679,28 @@ body.world .stat.foe-only{ display:flex !important; }
 /* ==========================================================================
    0. WORLD CONSTANTS — real proportions
    ========================================================================== */
-const P_H     = 2.0;    // altura do personagem
+const P_H     = 1.8;    // altura do personagem — his number
 /* One face is 1.4 of you, not 2. At 4 m a cube read as architecture rather than
    as a block: standing in a one-cell corridor you could not see over anything,
    the creatures looked like toys next to the walls, and crossing the cave was
    admin. 2.8 m still hides a person and still stacks into walls, but the cave
    became somewhere you move through instead of somewhere you commute across.
    Everything else in the game is written in terms of BLOCK and follows. */
-const BLOCK   = P_H * 1.4;   // 2.8 m
+/* AND A BLOCK IS A METRE. Marcelo, after seeing the world from the air:
+   "let's resize the world. Player is 1,8m, blocks are 1m each, beads (minimal
+   structure of materials or mix materials) is BLOCK/8."
+
+   Which is a different proportion from the one above and it is his call: a
+   block is now a bit over half your height rather than one and a half times
+   it, so it stacks into walls you look OVER rather than walls you look AT, and
+   the world is 2.8 times smaller in every direction for the same block count.
+
+   THE BEAD IS BLOCK/8 = 12.5 cm, which is the number that matters for the
+   complaint. Eight cells to a block edge instead of sixteen is 512 cells in a
+   block instead of 4,096 - EIGHT TIMES FEWER BEADS to hold, tick and draw. */
+const BLOCK   = 1.0;
 const P_R     = 0.52;   // collision radius
-const EYE     = 1.72;   // eye height
+const EYE     = 1.62;   // eye height, 0.9 of him
 /* WHICH END OF THE BODY THE EYES ARE AT. The body is always P.y .. P.y+P_H in
    world coordinates, whichever way gravity points - so under reversed gravity
    the end that rests on the ground is P.y+P_H, and the eyes are 1.72 m from
@@ -878,7 +890,59 @@ const DIFFS = [
 ];
 const CUSTOM = 3;
 /* The dungeon's own geometry, used whichever difficulty picked it. */
-const DUNGEON = {nx:18, nz:18, ny:24, dungeon:true};
+/* THE DUNGEON IS AS BIG AS IT NEEDS TO BE, AND THE WORLD IS BIGGER.
+
+   Marcelo: "it is being generated with 1 or 4 mines sometimes." Measured over
+   six seeds it was worse than that - 0, 1, 4, 7, 10, 12 - and one mine is not
+   a minesweeper.
+
+   The generator was never the problem. It lays out a whole board across the
+   grid; buildOuterWorld then keeps only what fits INSIDE a cylinder, and after
+   a three-block shell an 18-wide grid leaves a tube about seven blocks across
+   and fourteen tall. There is no dungeon in a seven-block tube.
+
+   So the world grows and the dungeon stays where it was. The cylinder's
+   INTERIOR is now about as wide as the whole old board, and the shell, the
+   seamount, the beach and the sea live in what was added - which is exactly
+   "the cylinder interior is the countable part, sized by difficulty, and
+   everything outside it is world".
+
+   AND IT COSTS NOTHING, which is the whole reason it can be done today rather
+   than last week: the bead grid is paged now, so a world with four times the
+   footprint still allocates a page only where something has actually moved.
+   The block arrays grow with it and they are bytes - about 1.3 MB for all of
+   them together. */
+const DUNGEON = {nx:46, nz:46, ny:40, dungeon:true};
+/* HOW WIDE THE PLAYABLE DUNGEON IS, in blocks - the old whole board, which is
+   what a difficulty used to mean. The WORLD around it is sized from this
+   rather than the other way round. */
+const DUN_W = 18;
+/* WHERE THE SHELL IS, DECIDED ONCE. buildOuterWorld used to work these out
+   for itself, which was fine while it was the only thing that needed them -
+   and stopped being fine the moment the generator had to dig INSIDE them.
+   Two callers, one set of numbers, no chance of them disagreeing. */
+function dungeonGeom(nx, ny, nz){
+  const SEAY  = Math.max(4, Math.round(ny*0.30));    // the waterline
+  const ISLY  = Math.max(2, SEAY-3);                 // the beach, and the top face
+  const HULLT = 3;                                   // 8.4 m, past the 7 m bubble
+  /* THE INTERIOR IS SIZED BY THE DUNGEON, NOT BY A FRACTION OF THE BOARD. It
+     has to hold a box DUN_W across - the old whole board - and the largest box
+     inside a cylinder of radius r is r*sqrt(2) across, so r is DUN_W/sqrt(2). */
+  const RIN  = Math.ceil(DUN_W/Math.SQRT2/2) + 1;
+  const RCYL = RIN + HULLT;
+  const RISL = RCYL + 4;                             // the sand slopes away from it
+  const cx = nx/2, cz = nz/2;
+  const y0 = ISLY + HULLT, y1 = ny - HULLT - 1;
+  return {SEAY, ISLY, HULLT, RIN, RCYL, RISL, cx, cz, y0, y1};
+}
+/* THE BOX THE DUNGEON IS DUG INTO: the largest one that fits in the interior,
+   so that nothing the generator makes is ever cropped away afterwards. */
+function dungeonBox(){
+  const g = dungeonGeom(G.nx, G.ny, G.nz);
+  const half = Math.floor(g.RIN/Math.SQRT2);
+  return {x0: Math.round(g.cx)-half, z0: Math.round(g.cz)-half, y0: g.y0,
+          nx: half*2, nz: half*2, ny: g.y1 - g.y0 + 1};
+}
 const MODE_SWEEP = 0, MODE_DUNGEON = 1;
 /* Every quoted figure in the level design — how much of Arcane is structure,
    how many mines a dungeon zone holds — is a target with a fifth of slack, not
@@ -2405,17 +2469,37 @@ function setDungeonLevels(n){
 const ZONE = {drop:0.17, hMin:2, hMax:5};
 
 function shapeDungeon(){
+  /* THE DUNGEON IS DUG INTO A BOX, AND THE WORLD IS BIGGER THAN THE BOX.
+
+     Marcelo: "it is being generated with 1 or 4 mines sometimes." Measured over
+     six seeds it was 0, 1, 4, 7, 10 and 12, and one mine is not a minesweeper.
+
+     The generator was never at fault. It laid a whole board out across the
+     whole grid and buildOuterWorld then kept only what fitted inside a cylinder
+     - about thirty per cent of it by area - so most of the dungeon, and most of
+     its mines with it, was thrown away after being made.
+
+     So it is told where to dig. G.gen is the largest box that fits INSIDE the
+     shell, everything below is in that box's own coordinates, and dgi() is the
+     one place the offset is added. Nothing generated is outside the cylinder,
+     so nothing generated is cropped.
+
+     G.gen is absent in the plain puzzle, where the board IS the world, and then
+     the box is the world and this costs one addition of zero. */
+  const B = G.gen || {x0:0, y0:0, z0:0, nx:G.nx, ny:G.ny, nz:G.nz};
+  const OX=B.x0, OY=B.y0, OZ=B.z0, NX=B.nx, NY=B.ny, NZ=B.nz;
+  const dgi=(x,y,z)=>idx(x+OX, y+OY, z+OZ);
   const L = blankLayout();
   G.st.fill(ROCK);
   const ri=(a,b)=> a + ((rnd()*(b-a+1))|0);
-  const clampX=v=>Math.max(2,Math.min(G.nx-3,v));
-  const clampZ=v=>Math.max(2,Math.min(G.nz-3,v));
+  const clampX=v=>Math.max(2,Math.min(NX-3,v));
+  const clampZ=v=>Math.max(2,Math.min(NZ-3,v));
 
   const carve=(x0,x1,z0,z1,y0,y1)=>{
-    for(let y=Math.max(0,y0); y<=Math.min(G.ny-1,y1); y++)
-      for(let z=Math.max(0,z0); z<=Math.min(G.nz-1,z1); z++)
-        for(let x=Math.max(0,x0); x<=Math.min(G.nx-1,x1); x++)
-          G.st[idx(x,y,z)]=AIR;
+    for(let y=Math.max(0,y0); y<=Math.min(NY-1,y1); y++)
+      for(let z=Math.max(0,z0); z<=Math.min(NZ-1,z1); z++)
+        for(let x=Math.max(0,x0); x<=Math.min(NX-1,x1); x++)
+          G.st[dgi(x,y,z)]=AIR;
   };
   /* An L-shaped walk carved wide and ragged: width and headroom change every
      step, so no two stretches of tunnel are the same size. */
@@ -2436,7 +2520,7 @@ function shapeDungeon(){
       carve(sx-1,sx+1,sz-1,sz+1,y,y);
       if(rnd()<0.7){ const ex=ri(-2,2), ez=ri(-2,2); carve(sx+ex,sx+ex,sz+ez,sz+ez,y,y); }
     }
-    L.shafts.push([sx,sz,yTop,yBot]);
+    L.shafts.push([sx+OX, sz+OZ, yTop+OY, yBot+OY]);
   };
   /* A minefield: a chamber with a mass of puzzle blocks standing in it. Every
      column is 2 to 5 blocks tall and about one in six is missing altogether,
@@ -2462,13 +2546,13 @@ function shapeDungeon(){
      own mines. */
   const mass=(cx,cz,rad,yb,mx,mz)=>{
     const cells=[];
-    for(let z=Math.max(0,cz-rad); z<=Math.min(G.nz-1,cz+rad); z++)
-      for(let x=Math.max(0,cx-rad); x<=Math.min(G.nx-1,cx+rad); x++){
+    for(let z=Math.max(0,cz-rad); z<=Math.min(NZ-1,cz+rad); z++)
+      for(let x=Math.max(0,cx-rad); x<=Math.min(NX-1,cx+rad); x++){
         if(Math.max(Math.abs(x-mx),Math.abs(z-mz))<=1) continue;
         if(rnd()<ZONE.drop) continue;
         const h=ri(ZONE.hMin, ZONE.hMax);
-        for(let y=yb; y<yb+h && y<G.ny-1; y++){
-          const i=idx(x,y,z); G.st[i]=SOLID; cells.push(i);
+        for(let y=yb; y<yb+h && y<NY-1; y++){
+          const i=dgi(x,y,z); G.st[i]=SOLID; cells.push(i);
         }
       }
     return cells;
@@ -2476,7 +2560,7 @@ function shapeDungeon(){
 
   let ex=0, ez=0;                       // where the level being built is entered
   for(let lv=0; lv<DL_LEVELS; lv++){
-    const yb = G.ny - DL_H*(lv+1);      // this band's floor
+    const yb = NY - DL_H*(lv+1);      // this band's floor
 
     if(lv===DL_LEVELS-1){
       /* The arena. You come in through the ceiling and land on top of it. */
@@ -2487,14 +2571,14 @@ function shapeDungeon(){
          the spawn ledge onto the arena's own centre, so the run began inside
          the minefield. Centre it, and stand outside it. */
       const only = (lv===0);
-      const cx = only ? (G.nx>>1) : clampX(ex);
-      const cz = only ? (G.nz>>1) : clampZ(ez);
+      const cx = only ? (NX>>1) : clampX(ex);
+      const cz = only ? (NZ>>1) : clampZ(ez);
       chamber(cx,cz,rad,yb);
       let mox=-99, moz=-99;
       if(only){
         const sx2 = cx-rad-2, sz2 = cz;
         carve(sx2-1, cx-rad, sz2-1, sz2+1, yb, yb+DL_H-2);   // a landing to stand on
-        L.spawn=[(sx2+0.5)*BLOCK, yb*BLOCK, (sz2+0.5)*BLOCK];
+        L.spawn=[(sx2+OX+0.5)*BLOCK, (yb+OY)*BLOCK, (sz2+OZ+0.5)*BLOCK];
         L.yaw = Math.atan2(-(cx-sx2), 0);
         mox = cx-rad; moz = cz;            // and the field keeps its mouth clear
       }
@@ -2512,19 +2596,19 @@ function shapeDungeon(){
          run, because that is the picture the whole descent is introduced by. */
       const alongX = rnd()<0.5, dir = rnd()<0.5 ? 1 : -1;
       if(alongX){
-        ez = clampZ(ri(4,G.nz-5)); zz = ez;
-        ex = dir>0 ? 1 : G.nx-2;   zx = dir>0 ? G.nx-3-rad : 2+rad;
+        ez = clampZ(ri(4,NZ-5)); zz = ez;
+        ex = dir>0 ? 1 : NX-2;   zx = dir>0 ? NX-3-rad : 2+rad;
       } else {
-        ex = clampX(ri(4,G.nx-5)); zx = ex;
-        ez = dir>0 ? 1 : G.nz-2;   zz = dir>0 ? G.nz-3-rad : 2+rad;
+        ex = clampX(ri(4,NX-5)); zx = ex;
+        ez = dir>0 ? 1 : NZ-2;   zz = dir>0 ? NZ-3-rad : 2+rad;
       }
-      L.spawn=[(ex+0.5)*BLOCK, yb*BLOCK, (ez+0.5)*BLOCK];
+      L.spawn=[(ex+OX+0.5)*BLOCK, (yb+OY)*BLOCK, (ez+OZ+0.5)*BLOCK];
       L.yaw = Math.atan2(-((zx-ex)), -((zz-ez)));
     } else {
-      zx=clampX(ri(2,G.nx-3)); zz=clampZ(ri(2,G.nz-3));
+      zx=clampX(ri(2,NX-3)); zz=clampZ(ri(2,NZ-3));
       let guard=0;
       while(Math.hypot(zx-ex,zz-ez) < rad+4 && guard++<60){
-        zx=clampX(ri(2,G.nx-3)); zz=clampZ(ri(2,G.nz-3));
+        zx=clampX(ri(2,NX-3)); zz=clampZ(ri(2,NZ-3));
       }
     }
     // the mouth: the point on the zone edge the corridor arrives at
@@ -2544,8 +2628,8 @@ function shapeDungeon(){
         sx, sz, yb, rnd()<0.5);
     /* Into the next band's floor, except above the arena, where the shaft
        stops at the chamber ceiling and lets you fall the rest of the way. */
-    const yBot = (lv===DL_LEVELS-2) ? (G.ny - DL_H*DL_LEVELS) + DL_H - 2
-                                    : (G.ny - DL_H*(lv+2));
+    const yBot = (lv===DL_LEVELS-2) ? (NY - DL_H*DL_LEVELS) + DL_H - 2
+                                    : (NY - DL_H*(lv+2));
     shaft(sx,sz, yb, yBot);
 
     // now, with every tunnel on this level cut, stand the minefield up in it
@@ -2572,8 +2656,8 @@ function shapeDungeon(){
   for(const [sx,sz,yTop,yBot] of L.shafts)
     for(let y=yBot;y<yTop;y++){
       const [dx,dz]=SIDE[((y%4)+4)%4];
-      if(inside(sx+dx,y,sz+dz) && G.st[idx(sx+dx,y,sz+dz)]===AIR)
-        G.st[idx(sx+dx,y,sz+dz)]=ROCK;
+      if(inside(sx+dx,y,sz+dz) && G.st[dgi(sx+dx,y,sz+dz)]===AIR)
+        G.st[dgi(sx+dx,y,sz+dz)]=ROCK;
     }
 
   /* Last word: a cell that some later tunnel took back is not a puzzle block,
@@ -2681,6 +2765,9 @@ function genWorld(d){
   for(let i=0;i<N;i++) G.mat[i] = (rnd()<0.055) ? 4 : (rnd()*4)|0;
 
   G.dungeon = dung;
+  /* WHERE TO DIG. The plain puzzle has no box: there the board IS the world
+     and the generator may use all of it. */
+  G.gen = dung ? dungeonBox() : null;
   const L = dung ? shapeDungeon() : (D.rough ? shapeRough(D) : shapeArena(D));
   G.shafts = L.shafts;
   const safe = L.safe;
@@ -4002,7 +4089,14 @@ const snd = (function(){
 /* Sized for the largest board there is. Custom tops out at 20 x 5 x 20, but
    the dungeon is 18 x 24 x 18, and with its shell that is 20 * 26 * 20 — six
    times the cubes. Overflowing this batch drops geometry silently. */
-const worldB  = makeCubeBatch(20*26*20 + 64);
+/* BIG ENOUGH FOR THE WORLD IT DRAWS, and it was not: this held 10,464 and the
+   dungeon world now asks for 15,280, and a cube batch DROPS WHAT DOES NOT FIT
+   IN SILENCE - so a third of the world simply was not there and nothing said
+   so. Measured by tools/h_batch.js on three seeds, in the dungeon and again on
+   the island, and it is sized off the world rather than off a number I liked:
+   a little over half the blocks in it, which is three times what it has ever
+   actually wanted. */
+const worldB  = makeCubeBatch(Math.max(20*26*20, ((DUNGEON.nx*DUNGEON.ny*DUNGEON.nz)*0.55)|0) + 64);
 /* Empty cells the hint wants you to look at. Air has nothing to draw, so the
    hint draws the space itself: a translucent block where a block would be. */
 const ghostB  = makeCubeBatch(64);
@@ -4129,9 +4223,12 @@ const hellB   = makeCubeBatch(6000);
        Without it piles come out flatter along the diagonals, which is the same
        artefact as before wearing a different hat.
    ========================================================================== */
-const SAND_DIV = 16;                       // cells per block edge
-const CELL_M   = BLOCK/SAND_DIV;           // 0.175 m — the bead
-const SCS = 32;                            // chunk edge, in cells
+const SAND_DIV = 8;                        // cells per block edge — BLOCK/8, his number
+const CELL_M   = BLOCK/SAND_DIV;           // 0.125 m — the bead, BLOCK/8
+/* A CHUNK IS STILL EXACTLY 2x2x2 BLOCKS, which is what the whole ladder hangs
+   off, so it follows the divisor rather than being written down twice. */
+const SCS = SAND_DIV*2;                    // chunk edge, in cells
+const SCSH = Math.round(Math.log2(SCS)), SCSM = SCS-1;
 const SCS3 = SCS*SCS*SCS;
 
 /* How a material moves. This is the whole of its physics. */
@@ -4589,6 +4686,14 @@ let SAND_LAT = 8;
    through a property every cell. Written back when it ends. */
 let SRS = 0, SSCAN = 0, SMOV = 0;
 
+/* HOW MUCH OF THE WORLD IS COMPUTED AS BEADS. Marcelo: "max computed beads
+   only what fits a 7 m radius sphere around the player." At 17.5 cm a bead
+   that sphere is about 268,000 cells, and it is a CEILING rather than a target:
+   whatever else is happening in the world, one tick may not look at more. */
+const SIM_R = 7.0;
+const SIM_BEADS = Math.round(4/3*Math.PI*Math.pow(SIM_R/CELL_M, 3));
+let SIM_SPHERE = true;
+
 /* ==========================================================================
    THE PAGED CELL STORE — why the world can be any size
    --------------------------------------------------------------------------
@@ -4632,18 +4737,19 @@ let SRS = 0, SSCAN = 0, SMOV = 0;
    the furthest anything reaches is the eight-cell column walk in the liquid
    rule, and the pad is thirty-two. */
 const PGS = SAND_DIV;              // page edge in cells — one block, on purpose
-const PGC = PGS*PGS*PGS;           // 4,096 cells
+const PGSH = Math.round(Math.log2(PGS)), PGM = PGS-1;
+const PGC = PGS*PGS*PGS;           // cells in a block
 const PGB = PGC*2;                 // materials, then the age byte for each
 const PGP = 2;                     // pages of padding on every side
 const PGO = PGP*PGS;               // 32 — added before the shift so it never goes negative
 /* local offset inside a page: x fastest, then z, then y, as the world is */
-function pgOff(x,y,z){ return ((y&15)<<8) | ((z&15)<<4) | (x&15); }
-function pgOf(w,x,y,z){ return ((((y+PGO)>>4)*w.BD + ((z+PGO)>>4))*w.BW + ((x+PGO)>>4)); }
+function pgOff(x,y,z){ return ((y&PGM)<<(PGSH*2)) | ((z&PGM)<<PGSH) | (x&PGM); }
+function pgOf(w,x,y,z){ return ((((y+PGO)>>PGSH)*w.BD + ((z+PGO)>>PGSH))*w.BW + ((x+PGO)>>PGSH)); }
 
 function cGet(w,x,y,z){
-  const b = (((y+PGO)>>4)*w.BD + ((z+PGO)>>4))*w.BW + ((x+PGO)>>4);
+  const b = (((y+PGO)>>PGSH)*w.BD + ((z+PGO)>>PGSH))*w.BW + ((x+PGO)>>PGSH);
   const p = w.pg[b];
-  return p === null ? w.pgu[b] : p[((y&15)<<8) | ((z&15)<<4) | (x&15)];
+  return p === null ? w.pgu[b] : p[((y&PGM)<<(PGSH*2)) | ((z&PGM)<<PGSH) | (x&PGM)];
 }
 /* Make the block real. Idempotent, because demotion and the first write into a
    uniform block can arrive in either order. */
@@ -4657,28 +4763,28 @@ function cFault(w,b){
   return p;
 }
 function cSet(w,x,y,z,mat){
-  const b = (((y+PGO)>>4)*w.BD + ((z+PGO)>>4))*w.BW + ((x+PGO)>>4);
+  const b = (((y+PGO)>>PGSH)*w.BD + ((z+PGO)>>PGSH))*w.BW + ((x+PGO)>>PGSH);
   let p = w.pg[b];
   if(p === null){
     if(w.pgu[b] === mat) return;             // it is already that: nothing exists to change
     p = cFault(w,b);
   }
-  p[((y&15)<<8) | ((z&15)<<4) | (x&15)] = mat;
+  p[((y&PGM)<<(PGSH*2)) | ((z&PGM)<<PGSH) | (x&PGM)] = mat;
 }
 /* THE AGE LIVES IN THE SAME PAGE, in the second half of it. It used to be a
    second array the size of the world, allocated the first time anything had a
    life in it; now it is free, because a block that has no page has no ages
    either and a block that has one has them already. */
 function aGet(w,x,y,z){
-  const b = (((y+PGO)>>4)*w.BD + ((z+PGO)>>4))*w.BW + ((x+PGO)>>4);
+  const b = (((y+PGO)>>PGSH)*w.BD + ((z+PGO)>>PGSH))*w.BW + ((x+PGO)>>PGSH);
   const p = w.pg[b];
-  return p === null ? 0 : p[PGC + (((y&15)<<8) | ((z&15)<<4) | (x&15))];
+  return p === null ? 0 : p[PGC + (((y&PGM)<<(PGSH*2)) | ((z&PGM)<<PGSH) | (x&PGM))];
 }
 function aSet(w,x,y,z,v){
-  const b = (((y+PGO)>>4)*w.BD + ((z+PGO)>>4))*w.BW + ((x+PGO)>>4);
+  const b = (((y+PGO)>>PGSH)*w.BD + ((z+PGO)>>PGSH))*w.BW + ((x+PGO)>>PGSH);
   let p = w.pg[b];
   if(p === null){ if(v === 0) return; p = cFault(w,b); }
-  p[PGC + (((y&15)<<8) | ((z&15)<<4) | (x&15))] = v;
+  p[PGC + (((y&PGM)<<(PGSH*2)) | ((z&PGM)<<PGSH) | (x&PGM))] = v;
 }
 /* A WHOLE BLOCK IS ONE THING AGAIN — the only operation that gives memory back,
    and the reason a settled ocean costs nothing to hold as well as nothing to
@@ -4758,6 +4864,15 @@ class SandWorld {
      reaches the chunk's full extent, say so in one byte. Costs nothing when
      the world is quiet, because a quiet chunk never saturates. */
   mark(c, lx,ly,lz){
+    /* AND IT HAS TO BE A CHUNK. wakeShell reaches one cell outside the box it
+       carved, so touch() is called at x=-1 on a block at the edge of the world,
+       and c comes out negative. Every write through it was silently dropped -
+       a typed array ignores an index it does not have - which was harmless
+       until the seven-metre sphere started PUTTING CHUNKS BACK: cw[-1] reads
+       undefined, undefined is falsy, so the same nonexistent chunk was pushed
+       onto the awake list once a tick for ever. Twenty-two thousand entries in
+       a world with nine hundred and seventy-two chunks. */
+    if(c < 0 || c >= this.nc) return;
     this.cl[c]=1;
     /* SOMETHING CHANGED IN A PROMOTED BLOCK, so it stops being one record and
        goes back to being four thousand beads - and ONLY it does. The local
@@ -4780,7 +4895,7 @@ class SandWorld {
   /* A change on a chunk face wakes the chunk next door, or material stops dead
      at chunk seams — the classic falling-sand bug, and it looks like a shelf. */
   touch(x,y,z){
-    const cx=x>>5, cy=y>>5, cz=z>>5, lx=x&31, ly=y&31, lz=z&31;
+    const cx=x>>SCSH, cy=y>>SCSH, cz=z>>SCSH, lx=x&SCSM, ly=y&SCSM, lz=z&SCSM;
     const CWd=this.CW, CDd=this.CD;
     const row = (cy*CDd + cz)*CWd;
     this.mark(row+cx, lx,ly,lz);
@@ -5030,32 +5145,32 @@ function sStepCell(w, x,y,z, mat, gdir){
        only ever touches material that is loose - the scattered beads and the
        edges of a spill, which is exactly what is meant to be evaporating. The
        ladder is what makes this affordable, again. */
-    /* A BODY IS NOT A SHEET, AND THE SEA MUST NOT SPEND ETERNITY FINDING OUT
-       THAT IT IS STILL THE SEA. This is the fault h_ocean has been reporting
-       since the ocean was poured - 27 MILLION cells scanned over ninety ticks
-       of a world where nothing is happening - and the cause is the line below
-       rather than anything about evaporation.
+    /* WATER DOES NOT EVAPORATE SPONTANEOUSLY. Marcelo, and it replaces the
+       rule that was here:
 
-       Every cell of the sea SURFACE has open sky over it, so open is nine, so
-       it stays awake "or it would never find out". Staying awake means touch(),
-       and touch() means mark(), and mark() on a chunk holding promoted blocks
-       DEMOTES one. So the top layer of the ocean demoted its own block every
-       single tick, for ever, and the four thousand cells underneath it were
-       rescanned each time to discover they had nowhere to go. The ladder was
-       working exactly as designed and being undone once per tick by the one
-       rule that never sleeps.
+         "Water should no longer evaporate spontaneously, it should merely be
+          mortal when in the form of BEADS **and not in the area of a block of
+          water**. A block of water is considered so once there are at least
+          BLOCK/8 beads of water in it."
 
-       The fix is the question the rule should have been asking all along: is
-       there a BODY under this bead, or is this all there is of it? Four cells -
-       seventy centimetres - is the whole test. A sea is fed from below and does
-       not evaporate at bead scale; a sheet two beads deep is not, and still
-       thins from its edges inward exactly as Marcelo asked. Heat overrides it,
-       because a fire under the sea should still boil what is above it. */
-    if((open >= 9 || hot > 0) && hot === 0){
-      let below = 0;
-      while(below < 4 && cGet(w, x, y+dir*(below+1), z) === mat) below++;
-      if(below >= 4) open = 0;                 // the top of a body: leave it alone
-    }
+       Which is the right rule and it is his ladder answering, rather than a
+       threshold I invented. A bead is mortal because it is ALONE - a splash on
+       a rock, the last of a spill - and a bead sitting on the sea is not alone
+       even though it has open sky over it, because the block it is in is a
+       block of water. One array read, and it is the same question the ladder
+       was already asking, only with a fraction instead of "all of it".
+
+       BLOCK/8 is 512 of the 4,096 cells - two beads deep across the block, or
+       any arrangement of that much. Below it there is not enough of it there to
+       be a body, and it goes.
+
+       And this is also what stopped the ocean costing 27 MILLION cells a tick:
+       every cell of the sea SURFACE has open sky, so it stayed awake "or it
+       would never find out", and staying awake means touch(), and touch() means
+       mark(), and mark() on a chunk holding promoted blocks DEMOTES one. The
+       sea demoted its own top layer every tick for ever. Heat still overrides
+       all of it, because a fire under the sea should boil what is above it. */
+    if(hot === 0 && ladBodyAt(w,x,y,z) === mat) open = 0;
     if(open >= 9 || hot > 0){
       /* staggered by WHERE it is, so a sheet does not all ask on the same tick */
       if((w.tick & (EVAP_EVERY-1)) === ((x + z*3 + y*5) & (EVAP_EVERY-1))){
@@ -5183,11 +5298,47 @@ function sandTick(w, gdir){
     w.reset(c);
   }
   w.stats.awake = rect.length/7;
+  w.stats.deferred = 0;
+
+  /* THE SEVEN-METRE SPHERE, and it is the ceiling on what a tick can ever cost.
+     Marcelo: "scaling should prevent a large amount of beads, making MAX
+     COMPUTED BEADS only what fits a 7 m radius sphere around the player.
+     Everything else should be just blocks or large bodies stored as info."
+
+     Which is a bound, not a heuristic: a sphere of radius 7 m at 17.5 cm a bead
+     holds about 268,000 cells, and that is the most this loop may look at
+     however large the world is or however much of it is falling. It is the same
+     rule as NEXT.md rule 1 - the simulated radius - and the ladder is what
+     everything outside it becomes.
+
+     A chunk outside the sphere is NOT reset: it goes back on the awake list
+     exactly as it was, so nothing is lost and nothing is decided early. Walk
+     towards it and it starts moving from where it was. That is FREEZING and not
+     SOLVING, and the difference matters - a waterfall thirty metres away is
+     paused rather than continuing - so it is written down as the next rung
+     rather than pretended away.
+
+     Only the game's own world gets the sphere. A harness that builds a tank and
+     ticks it has no player in it and must simulate all of what it built. */
+  const sphere = (w === SAND && SIM_SPHERE) ? SIM_R + SCS*CELL_M*0.87 : 0;
+  const sph2 = sphere*sphere;
 
   for(let r=0; r<rect.length; r+=7){
     const c = rect[r];
     const cx = c % CW, q = (c/CW)|0, cz = q % CD, cy = (q/CD)|0;
     const bx = cx*SCS, by = cy*SCS, bz = cz*SCS;
+    if(sph2){
+      const ex=(cx+0.5)*SCS*CELL_M-P.x, ey=(cy+0.5)*SCS*CELL_M-P.y, ez=(cz+0.5)*SCS*CELL_M-P.z;
+      if(ex*ex+ey*ey+ez*ez > sph2){
+        /* put it back exactly as it was and spend nothing on it */
+        const o=c*6, b=w.cb;
+        b[o]=rect[r+1]; b[o+1]=rect[r+2]; b[o+2]=rect[r+3];
+        b[o+3]=rect[r+4]; b[o+4]=rect[r+5]; b[o+5]=rect[r+6];
+        if(!w.cw[c]){ w.cw[c]=1; w.awake.push(c); }
+        w.stats.deferred++;
+        continue;
+      }
+    }
     const x0=rect[r+1], y0=rect[r+2], z0=rect[r+3];
     const x1=rect[r+4], y1=rect[r+5], z1=rect[r+6];
     const span = x1-x0;
@@ -5316,8 +5467,8 @@ const SAND_DRAW_R = BLOCK*11;              // chunks past this are not drawn
    Loose material - a heap of sand, a spill - keeps the full bead radius,
    because it has no rung above bead to go to. Only what has been PROMOTED
    changes size, which means the size you see is the rung it is on. */
-const SAND_BEAD_R = BLOCK*3.6;             // promoted material past this is a cube
-const LAD_MASS_R  = BLOCK*15;              // and past this the whole body is one box
+const SAND_BEAD_R = 10.0;             // promoted material past this is a cube
+const LAD_MASS_R  = 42.0;              // and past this the whole body is one box
 const SAND_DRAW_MAX = 22000;               // instances the sand layer may spend
 const SAND_CHUNKS = 26;                    // chunks it may scan for them
 /* SIXTY, not thirty, and it is half of why falling was slow: a bead can only
@@ -5667,6 +5818,31 @@ function sandWakeLoose(){
    whatever the physics actually does - which is the correct answer and also
    the cheap one.
    ========================================================================== */
+/* IS THIS A BLOCK OF WATER? Marcelo: "a block of water is considered so once
+   there are AT LEAST BLOCK/8 beads of water in it." So this is a second, looser
+   rung beside LADM: LADM says "every one of my 4,096 cells is this", which is
+   what lets the page be freed; LADB says "there is enough of this here to be a
+   BODY of it", which is what decides whether a bead is alone in the world.
+
+   512 of 4,096. Two beads deep across the whole block, or any arrangement
+   holding as much. Below that there is not enough of it there to be anything
+   but scattered. */
+let LADB  = null;      // Uint8Array, one per BLOCK: what it is a BODY of, 0 = nothing
+const LAD_BODY_MIN = PGC >> 3;
+const LADH = new Uint16Array(256);           // census histogram, reused
+const LADSEEN = [];                          // which of its entries were touched
+function ladBodyAt(w,x,y,z){
+  /* AND IT HAS TO BE THIS WORLD'S LADDER. LADB is sized for the game's block
+     grid; a harness that builds its own SandWorld of different dimensions was
+     indexing into it anyway and reading whatever happened to be at that offset,
+     which said "you are in a body of water" to a bead sitting alone on a rock
+     and made it immortal. A second world has no ladder, and that is the answer
+     rather than a coincidence. */
+  if(!LADB || w !== SAND) return 0;
+  const bx=(x>>PGSH), by=(y>>PGSH), bz=(z>>PGSH);
+  if(bx<0||by<0||bz<0||bx>=G.nx||by>=G.ny||bz>=G.nz) return 0;
+  return LADB[(by*G.nz + bz)*G.nx + bx];
+}
 let LADM  = null;      // Uint8Array, one per BLOCK: the material it is made of, 0 = not promoted
 let LADS  = null;      // Int32Array, one per block: which mass it belongs to, -1 = none
 let LADQF = null;      // Uint8Array: is it already in the census queue?
@@ -5689,8 +5865,9 @@ function ladInit(){
   const N = G.nx*G.ny*G.nz;
   if(!LADM || LADM.length !== N){
     LADM = new Uint8Array(N); LADS = new Int32Array(N); LADQF = new Uint8Array(N);
+    LADB = new Uint8Array(N);
   }
-  LADM.fill(0); LADS.fill(-1); LADQF.fill(0);
+  LADM.fill(0); LADS.fill(-1); LADQF.fill(0); LADB.fill(0);
   LADQ.length = 0; MASSES.length = 0;
   LAD_MDIRTY = false; LAD_MWAIT = 0;
   ladStats.blocks = ladStats.masses = ladStats.census = 0;
@@ -5718,10 +5895,34 @@ function ladCensus(bi){
   if((bx+1)*S > w.W || (by+1)*S > w.H || (bz+1)*S > w.D) return -1;
   const b = ((by+PGP)*w.BD + (bz+PGP))*w.BW + (bx+PGP);
   const p = w.pg[b];
-  if(p === null) return w.pgu[b];        // it is already one record and costs one byte
-  const first = p[0];
-  for(let o=1;o<PGC;o++) if(p[o] !== first) return -1;
-  return first;
+  if(p === null){
+    const u = w.pgu[b];                  // it is already one record and costs one byte
+    LADB[bi] = ladBodyKind(u) ? u : 0;
+    return u;
+  }
+  /* IT HAS CELLS, so count them - and the count is what LADB wants anyway, so
+     the walk that decides uniformity decides the body in the same pass. The
+     histogram is cleared through the list of materials actually seen, so a
+     block of two things costs two writes and not two hundred and fifty-six. */
+  let first = p[0], uniform = 1;
+  LADSEEN.length = 0;
+  for(let o=0;o<PGC;o++){
+    const m = p[o];
+    if(m !== first) uniform = 0;
+    if(LADH[m] === 0) LADSEEN.push(m);
+    LADH[m]++;
+  }
+  let best = 0, bestN = 0;
+  for(const m of LADSEEN){ if(ladBodyKind(m) && LADH[m] > bestN){ best = m; bestN = LADH[m]; } LADH[m] = 0; }
+  LADB[bi] = bestN >= LAD_BODY_MIN ? best : 0;
+  return uniform ? first : -1;
+}
+/* Only something that can POOL can be a body: a powder heaps and a liquid
+   pools, air and stone and a gas do not. */
+function ladBodyKind(mat){
+  if(!mat || mat === S_AIR || mat === S_ROCK) return false;
+  const K = SM_K[mat];
+  return K === K_LIQUID || K === K_POWDER;
 }
 /* Static never promotes - the world's own stone is already one record - and
    neither does a gas, which is going somewhere by definition. */
@@ -5801,7 +6002,7 @@ function ladDemote(bi){
 function ladBreak(w, c, lx,ly,lz){
   if(!LADM) return;
   const cx = c % w.CW, q = (c/w.CW)|0, cz = q % w.CD, cy = (q/w.CD)|0;
-  const bx = cx*2 + (lx>>4), by = cy*2 + (ly>>4), bz = cz*2 + (lz>>4);
+  const bx = cx*2 + (lx>>PGSH), by = cy*2 + (ly>>PGSH), bz = cz*2 + (lz>>PGSH);
   if(bx<0||by<0||bz<0||bx>=G.nx||by>=G.ny||bz>=G.nz) return;
   const bi = (by*G.nz + bz)*G.nx + bx;
   if(LADM[bi]) ladDemote(bi);
@@ -5906,7 +6107,7 @@ function ladSweep(){
    "see the damn beads on the water", so within the bead radius the ocean is
    beads and past it the ocean is water. */
 const LAD_DRAW_MAX = 5000;
-const LAD_DRAW_R = BLOCK*80;
+const LAD_DRAW_R = 224.0;
 function ladDraw(d, n){
   if(!LADM || !SAND) return n;
   const R2 = SAND_BEAD_R*SAND_BEAD_R, F2 = LAD_DRAW_R*LAD_DRAW_R;
@@ -6056,7 +6257,7 @@ function voxCarve(bi, fx0,fy0,fz0, dx,dy,dz, budgetJ, thrower, wide){
       if(left < COST) break;
       const ex=x-cx, ey=y-cy, ez=z-cz;
       if(ex*ex+ey*ey+ez*ez > rad*rad) continue;
-      const i = (y<<8) | (z<<4) | x;
+      const i = (y<<(PGSH*2)) | (z<<PGSH) | x;
       const mt = pg[i];
       if(mt===S_AIR) continue;
       pg[i]=S_AIR; out++; left -= COST;
@@ -6419,7 +6620,7 @@ function sandDraw(){
             /* the inside of a uniform block: jump straight to its far face */
             if(inYZ && lx===1){ lx = PGS-2; continue; }
             const x=ox+lx; if(x>=w.W) break;
-            const mt = bulk >= 0 ? bulk : pge[(ly<<8)|(lz<<4)|lx];
+            const mt = bulk >= 0 ? bulk : pge[(ly<<(PGSH*2))|(lz<<PGSH)|lx];
             if(!SM_SEE[mt]) continue;         // air, and the world's own stone
             /* AND YOU DO NOT SEE THE BEADS YOU ARE INSIDE. Standing in water and
                drawing the water you are standing in puts opaque cubes across
@@ -9107,17 +9308,17 @@ function buildOuterWorld(){
      be affected" - and then the whole local-gravity-field question can wait,
      which is the simplification he offered and it is a good one.
      ------------------------------------------------------------------ */
-  const SEAY  = Math.max(4, Math.round(G.ny*0.30));   // the waterline
-  const ISLY  = Math.max(2, SEAY-3);                  // the beach, and the top face
-  const HULLT = 3;                                    // 8.4 m, past the 7 m bubble
-  const cx = G.nx/2, cz = G.nz/2;
-  /* SIZED FOR THE BOARD IT IS ON. At 0.26 the interior came out at two blocks
-     on an 18-wide grid - a five-block tube with three of them wall, and no
-     dungeon left inside it at all: nought mines and three safe blocks. The
-     hull is a fixed three deep, so the interior is what is left over, and it
-     is the interior that has to be worth playing. */
-  const RCYL = Math.max(HULLT+3, Math.min(G.nx,G.nz)*0.36);  // wall plus dungeon
-  const RISL = Math.min(G.nx,G.nz)*0.49;                     // how far the sand reaches
+  /* SIZED BY THE DUNGEON, NOT BY A FRACTION OF THE BOARD, and that inversion
+     is the fix. A fraction of the board gave an interior of about seven blocks
+     across on an 18-wide grid, so the generator's work was made and then thrown
+     away - nought mines on one seed and one on another. Now the interior is
+     whatever it takes to hold the dungeon and the WORLD is what is left over,
+     which is what the paged grid made affordable. One set of numbers, shared
+     with the generator, so the two cannot disagree about where the wall is. */
+  const GEO = dungeonGeom(G.nx, G.ny, G.nz);
+  const SEAY=GEO.SEAY, ISLY=GEO.ISLY, HULLT=GEO.HULLT;
+  const cx=GEO.cx, cz=GEO.cz;
+  const RCYL=GEO.RCYL, RISL=GEO.RISL;
   G.seaY = SEAY; G.rock0 = ISLY; G.islY = ISLY;
   const R = RISL;
   const ROCK0 = ISLY;
@@ -9534,6 +9735,7 @@ function oceanFill(){
     const x0=bx*S, y0=by*S, z0=bz*S;
     if(x0+S > w.W || y0+S > w.H || z0+S > w.D) continue;
     cFreeBlock(w, bx,by,bz, S_SALT);
+    if(LADB) LADB[bi] = S_SALT;                    // a block of sea IS a body of sea
     /* IT IS POURED ALREADY SETTLED, so it goes straight to the block rung.
        Making the census discover this at 48 blocks a tick would be four
        thousand ticks of finding out what we just wrote. */
@@ -12674,6 +12876,11 @@ window.__err=[];
 window.addEventListener('error',e=>window.__err.push('ERR '+e.message));
 setTimeout(()=>{ try{
   G.muted=true; try{ snd.setMute(true); }catch(e){}
+  /* THE SEVEN-METRE SPHERE IS OFF HERE. This builds a tank and ticks it with
+     nobody standing in it, so the scheduler would defer the whole thing; what
+     is under test is the ladder and the matter, not what the player can see.
+     h_ocean is where the sphere itself is measured. */
+  SIM_SPHERE = false;
   const R=[], f2=v=>(+v).toFixed(2);
   G.mode=MODE_SWEEP; seed=6; genWorld(0); G.state='play';
   const w=SAND;

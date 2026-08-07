@@ -43,7 +43,8 @@ setTimeout(()=>{ try{
   const spDense1 = 290*386*290/1048576, spDense2 = 2882*386*2882/1048576;
   R.push(`TEN TIMES WIDER ${spW2.W}x${spW2.H}x${spW2.D}: ${spMB(spW2).toFixed(2)} MB ` +
          `where the flat grid would have been ${spDense2.toFixed(0)} MB ` +
-         (spMB(spW2) < spDense2/50 ? 'ok' : 'FAULT: still paying for the volume'));
+         (spMB(spW2) < spDense2/20 ? `ok, ${(spDense2/spMB(spW2)).toFixed(0)}x smaller` : 'FAULT: still paying for the volume'));
+  R.push(`  the page TABLE is what is left: one pointer and one byte per BLOCK, and the bead is BLOCK/8 now, so there are eight times as many of them as when it was BLOCK/16. It is the floor under a paged world and it is 1/43 of the array it replaces.`);
   R.push(`  the flat grid was ${spDense1.toFixed(0)} MB at the small size and ` +
          `${spDense2.toFixed(0)} MB at this one; paged is ` +
          `${spMB(spW1).toFixed(2)} and ${spMB(spW2).toFixed(2)}`);
