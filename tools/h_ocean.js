@@ -131,10 +131,11 @@ setTimeout(()=>{ try{
         for(let by=0;by<G.ny;by++) for(let bzz=0;bzz<G.nz;bzz++) for(let bxx=0;bxx<G.nx;bxx++){
           if(seaSet.has(idx(bxx,by,bzz))) continue;
           const S=SAND_DIV, ox=bxx*S, oy=by*S, oz=bzz*S;
-          for(let cy=0;cy<S;cy++) for(let cz=0;cz<S;cz++){
-            const rr=(oy+cy+1)*w.SY + (oz+cz+1)*w.SZ + (ox+1);
-            for(let cx=0;cx<S;cx++) if(w.m[rr+cx]===S_SALT) n++;
-          }
+          /* one byte when the block is one thing, which is nearly always */
+          const bulk = cBlockBulk(w, bxx, by, bzz);
+          if(bulk >= 0){ if(bulk===S_SALT) n += S*S*S; continue; }
+          for(let cy=0;cy<S;cy++) for(let cz=0;cz<S;cz++)
+            for(let cx=0;cx<S;cx++) if(w.at(ox+cx,oy+cy,oz+cz)===S_SALT) n++;
         }
         return n;
       };

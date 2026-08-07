@@ -41,7 +41,7 @@ setTimeout(()=>{ try{
 
   /* clear it away again so the throw is measured in open air */
   for(let y=0;y<w.H;y++) for(let z=0;z<w.D;z++) for(let x=0;x<w.W;x++)
-    if(w.at(x,y,z)===S_POISON) w.m[w.idx(x,y,z)]=S_AIR;
+    if(w.at(x,y,z)===S_POISON) w.set(x,y,z,S_AIR);
   for(let c=0;c<w.nc;c++){ w.cl[c]=0; }
   P.mouth=S_POISON; P.mouthN=1;
 

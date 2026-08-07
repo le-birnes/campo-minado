@@ -7,7 +7,7 @@ setTimeout(()=>{ try{
   function box(W,H,D){
     const w=new SandWorld(W,H,D);
     for(let y=1;y<H;y++) for(let z=0;z<D;z++) for(let x=0;x<W;x++)
-      w.m[(y+1)*w.SY+(z+1)*w.SZ+(x+1)]=S_AIR;
+      w.set(x,y,z,S_AIR);
     return w;
   }
   for(const cells of [16, 48, 160]){

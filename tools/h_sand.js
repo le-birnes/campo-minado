@@ -11,7 +11,7 @@ setTimeout(()=>{ try{
   function box(W,H,D){
     const w = new SandWorld(W,H,D);
     for(let y=1;y<H;y++) for(let z=0;z<D;z++) for(let x=0;x<W;x++){
-      const r=(y+1)*w.SY+(z+1)*w.SZ+(x+1); w.m[r]=S_AIR;
+      w.set(x,y,z,S_AIR);
     }
     return w;                                    // y=0 is the floor, and stays rock
   }
@@ -127,7 +127,7 @@ setTimeout(()=>{ try{
 
   /* ================= 6. AND IT IS IN THE GAME ================= */
   G.mode=MODE_SWEEP; seed=9; genWorld(0); G.state='play';
-  R.push(`GRID: ${SAND.W}x${SAND.H}x${SAND.D} cells, ${(SAND.N/1048576).toFixed(1)} MB, ` +
+  R.push(`GRID: ${SAND.W}x${SAND.H}x${SAND.D} cells, ${(SAND.bytes()/1048576).toFixed(1)} MB, ` +
          `${SAND.nc} chunks, bead ${f2(CELL_M)} m`);
   let tgt=-1, air=-1;
   for(let y=0;y<G.ny&&tgt<0;y++) for(let z=0;z<G.nz&&tgt<0;z++) for(let x=0;x<G.nx&&tgt<0;x++){
@@ -162,7 +162,7 @@ setTimeout(()=>{ try{
 
   /* ================= 7. AND THE BIG ONE ================= */
   G.mode=MODE_DUNGEON; seed=11; genWorld(2, true); G.state='play';
-  R.push(`DUNGEON GRID: ${SAND.W}x${SAND.H}x${SAND.D}, ${(SAND.N/1048576).toFixed(0)} MB, ` +
+  R.push(`DUNGEON GRID: ${SAND.W}x${SAND.H}x${SAND.D}, ${(SAND.bytes()/1048576).toFixed(1)} MB, ` +
          `${SAND.nc} chunks, ${SAND.awake.length} awake at rest`);
   let t0=SAND.stats.scanned;
   for(let k=0;k<60;k++) sandStep(1/60);
