@@ -801,3 +801,50 @@ the edge was nearer than the island.
 NEXT, with his number: R = 600 km. The horizon is sqrt(2*R*h) away - 2.8 km
 from an eye 2 m up - and dips 0.0026 rad below level. Both go straight into
 FS_SKY, which already has the sea and the horizon line in it.
+
+
+### THE SQUARE IN THE SKY - measured 2026-08-07, and it is the last box
+
+From high above, the whole world is A SMALL FLAT BLUE SQUARE floating in dark
+blue. That is not a bug in anything I have fixed this week - it is the world
+being exactly what it is: 180 m x 180 m of stored blocks, seen from outside,
+with the sky shader's flat sea colour behind it.
+
+HIS LOG SAYS THE REST IS WORKING:
+
+    peak=5880 scan/s=11760      the physics DOES run - and the earlier
+                                scan=0 was my snapshot logger lying
+    peak well under 217,961     the seven-metre ceiling is holding
+    pages 154, MB 15.7          the paged grid is doing its job
+    119 fps throughout          no slowdown anywhere in the run
+    bead_inst 294 to 887        beads ARE drawn now, but only a few hundred
+
+SO WHAT IS LEFT IS THE ONE THING NEVER BUILT: THE PLANET.
+
+FS_SKY draws the sea as a COLOUR below the horizon line - uSea, with h =
+dot(dir, uWorldUp) as the only geometry. There is no surface, no distance and
+no curvature, so from 500 m up the ocean is a flat wash behind a square of
+real blocks, and no altitude will ever make a planet shrink.
+
+THE CHANGE, and it is contained to one shader:
+
+  a. two new uniforms: uR (600 km, his number) and uH (the camera's height
+     above sea level). Nothing else in the engine needs to know.
+  b. put the planet's centre at -uWorldUp * (uR + uH) relative to the camera
+     and INTERSECT THE RAY WITH IT. b = dot(dir,C), c = dot(C,C) - uR*uR,
+     t = b - sqrt(b*b - c). A hit is ocean at distance t; a miss is sky.
+  c. shade the hit as uSea faded toward uHoriz by exp(-t/k), so it goes to
+     the horizon colour at the horizon instead of stopping at a line
+  d. and the horizon then falls out of the arithmetic rather than being
+     drawn: sqrt(2*R*h) is 2.8 km from an eye 2 m up and 78 km from 500 m,
+     which is what makes going up feel like going up
+
+It also gives the atmosphere for free - fade the whole sky toward black as
+uH passes the scale height - and it is the last thing standing between this
+and 'the planet getting smaller and eventually enter space'.
+
+AND ONE MORE, SMALLER: bead_inst peaks at 887. The bead pass is drawing a
+few hundred where it has a budget of 22,000, so 'the beads are not showing'
+is still half true even though they are no longer struck off the list. The
+chunk candidate loop only considers chunks with cl set and within
+SAND_DRAW_R, and something in that path is still rejecting most of them.
