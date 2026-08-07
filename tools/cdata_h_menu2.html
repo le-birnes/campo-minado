@@ -2844,9 +2844,31 @@ function genWorld(d){
   syncPowHud();
   particles.length=0; sprites.length=0; pellets.length=0; debris.count=0;
   seedDust();
+  /* THE WORLD AROUND THE DUNGEON, built NOW rather than at the reveal.
+     A sun, a moon, an endless ocean at the horizon, and the dungeon submerged
+     in it - all of it standing before the first frame, so that nothing has to
+     change under the player later. */
+  if(G.mode===MODE_DUNGEON){
+    buildOuterWorld();
+    /* the spawn may have been in the part of the grid the sea took */
+    if(!inside(Math.floor(P.x/BLOCK), Math.floor(P.y/BLOCK), Math.floor(P.z/BLOCK)) ||
+       Math.floor(P.y/BLOCK) < G.rock0){
+      let best=-1;
+      for(let y=G.ny-2;y>=G.rock0;y--) for(let z=1;z<G.nz-1;z++) for(let x=1;x<G.nx-1;x++){
+        const i=idx(x,y,z);
+        if(G.st[i]===AIR && !(G.scenery&&G.scenery[i]) && G.st[idx(x,y+1,z)]!==AIR){ best=i; break; }
+      }
+      if(best>=0){
+        const c=cellXYZ(best);
+        P.x=(c[0]+0.5)*BLOCK; P.y=c[1]*BLOCK+0.05; P.z=(c[2]+0.5)*BLOCK;
+        P.vx=P.vy=P.vz=0; P.ground=true;
+      }
+    }
+  }
   /* AND THE GRID, last, because it is read off the finished board: everything
      is rock and only the air has to be written. */
   sandBuild();
+  if(G.mode===MODE_DUNGEON) oceanFill();
   G.dirty=true;
 }
 
@@ -5093,6 +5115,32 @@ function voxMatAt(bi, k){
    of 7,776 blocks costs 7,776 cubes and not 31 million cells of bookkeeping. */
 const VOXD = new Set();
 const SAND_DRAW_R = BLOCK*11;              // chunks past this are not drawn
+/* ==========================================================================
+   AND YOU CAN SEE THE RUNGS
+   --------------------------------------------------------------------------
+   Marcelo: "beads all seem to be the same size, I thought you implemented
+   bead - chunk - mass."
+
+   They were, and he could not see it, and he was right to say so. The ladder
+   was doing its work in the BOOKKEEPING - a promoted block is one record, is
+   not woken, is not scanned - and none of that reaches the eye. The drawing
+   only switched to block-sized cubes past thirty metres, which is most of the
+   way to the far side of the world, so everything he ever looked at was beads.
+
+   A rung you cannot see is a rung you have to take on trust. So the three of
+   them are now three distances:
+
+     BEAD   0.175 m cubes, out to ten metres. Every grain, individually.
+     BLOCK  2.8 m cubes, from ten to forty. One record, one cube - which is
+            what the record has always been.
+     MASS   one box for the whole body, past forty. The ocean at the horizon
+            is not two thousand cubes, it is the sea.
+
+   Loose material - a heap of sand, a spill - keeps the full bead radius,
+   because it has no rung above bead to go to. Only what has been PROMOTED
+   changes size, which means the size you see is the rung it is on. */
+const SAND_BEAD_R = BLOCK*3.6;             // promoted material past this is a cube
+const LAD_MASS_R  = BLOCK*15;              // and past this the whole body is one box
 const SAND_DRAW_MAX = 22000;               // instances the sand layer may spend
 const SAND_CHUNKS = 26;                    // chunks it may scan for them
 /* SIXTY, not thirty, and it is half of why falling was slow: a bead can only
@@ -5666,12 +5714,40 @@ const LAD_DRAW_MAX = 5000;
 const LAD_DRAW_R = BLOCK*80;
 function ladDraw(d, n){
   if(!LADM || !SAND) return n;
-  const R2 = SAND_DRAW_R*SAND_DRAW_R, F2 = LAD_DRAW_R*LAD_DRAW_R;
+  const R2 = SAND_BEAD_R*SAND_BEAD_R, F2 = LAD_DRAW_R*LAD_DRAW_R;
+  const M2 = LAD_MASS_R*LAD_MASS_R;
   const nx=G.nx, ny=G.ny, nz=G.nz, N=nx*ny*nz;
   const cap = Math.min(SAND_DRAW_MAX, n + LAD_DRAW_MAX);
   let drawn = 0;
+  /* THE TOP RUNG FIRST. A mass whose blocks fill most of its own bounding box
+     is a slab of a thing - the sea is - and a slab is ONE cube. Anything
+     raggeder falls back to its blocks, because a bounding box round an L is a
+     lie about where the material is. */
+  const boxed = new Set();
+  for(const m of MASSES){
+    if(!m || m.dead || m.n < LAD_MASS_MIN) continue;
+    const bw=m.x1-m.x0+1, bh=m.y1-m.y0+1, bd=m.z1-m.z0+1;
+    if(m.n < bw*bh*bd*0.55) continue;                    // too ragged to be one box
+    const cxm=(m.x0+bw*0.5)*BLOCK, cym=(m.y0+bh*0.5)*BLOCK, czm=(m.z0+bd*0.5)*BLOCK;
+    const ex=cxm-P.x, ey=cym-P.y, ez=czm-P.z;
+    /* the distance to the BOX, not to its middle: standing on the sea you are
+       inside it, and a body you are inside is not far away */
+    const gx=Math.max(0, Math.abs(ex)-bw*BLOCK*0.5);
+    const gy=Math.max(0, Math.abs(ey)-bh*BLOCK*0.5);
+    const gz=Math.max(0, Math.abs(ez)-bd*BLOCK*0.5);
+    if(gx*gx+gy*gy+gz*gz < M2) continue;                 // near enough to want blocks
+    if(n >= cap) break;
+    const o = n*CUBE_STRIDE;
+    composeAA(d,o, cxm,cym,czm, bw*BLOCK, bh*BLOCK, bd*BLOCK);
+    d[o+16]=SM_COL[m.mat*3]; d[o+17]=SM_COL[m.mat*3+1]; d[o+18]=SM_COL[m.mat*3+2];
+    d[o+19]=0.5; d[o+20]=SM_EMIS[m.mat];
+    d[o+21]=0; d[o+22]=0; d[o+23]=d[o+24]=d[o+25]=0;
+    n++; drawn++;
+    boxed.add(m.id);
+  }
   for(let bi=0; bi<N && n<cap; bi++){
     const mat = LADM[bi]; if(!mat) continue;
+    if(boxed.size && boxed.has(LADS[bi])) continue;      // its mass drew it
     const x = bi % nx, q = (bi/nx)|0, z = q % nz, y = (q/nz)|0;
     const px=(x+0.5)*BLOCK, py=(y+0.5)*BLOCK, pz=(z+0.5)*BLOCK;
     const ex=px-P.x, ey=py-P.y, ez=pz-P.z;
@@ -6079,7 +6155,7 @@ function sandDraw(){
   if(!w || G.state!=='play' && G.state!=='pause' && !G.island) return 0;
   const d=sandB.data;
   const CW=w.CW, CD=w.CD, CH=w.CH;
-  const R = SAND_DRAW_R, R2 = R*R, CM = SCS*CELL_M;
+  const R = SAND_DRAW_R, R2 = R*R, CM = SCS*CELL_M;   // CM: a chunk edge, in metres
   /* Nearest chunks first, and no sort: a fixed number of buckets by distance
      is enough to order them and costs one pass. */
   let ns=0;
@@ -6115,6 +6191,9 @@ function sandDraw(){
     const c = SAND_SEEN[s*2];
     const cx=c%CW, q=(c/CW)|0, cz=q%CD, cy=(q/CD)|0;
     const bx=cx*SCS, by=cy*SCS, bz=cz*SCS;
+    /* is this whole chunk far enough that its promoted blocks draw as cubes? */
+    const ccx=(cx+0.5)*CM-P.x, ccy=(cy+0.5)*CM-P.y, ccz=(cz+0.5)*CM-P.z;
+    const bulkFar = LADM && (ccx*ccx+ccy*ccy+ccz*ccz) > SAND_BEAD_R*SAND_BEAD_R;
     let found=0;
     for(let ly=0; ly<SCS && n<SAND_DRAW_MAX; ly++){
       const y=by+ly; if(y>=w.H) break;
@@ -6135,6 +6214,11 @@ function sandDraw(){
             const ex=(x+0.5)*CELL_M-P.x, ey=(y+0.5)*CELL_M-camEy, ez=(z+0.5)*CELL_M-P.z;
             if(ex*ex+ey*ey+ez*ez < SUB_NEAR2) continue;
           }
+          /* AND IF ITS BLOCK IS ON A HIGHER RUNG, THE HIGHER RUNG DRAWS IT.
+             One block lookup a cell, and it is what makes the ladder visible:
+             past ten metres a promoted block stops being four thousand beads
+             and becomes the one cube it has been all along in the bookkeeping. */
+          if(bulkFar && LADM[(((y/SAND_DIV)|0)*G.nz + ((z/SAND_DIV)|0))*G.nx + ((x/SAND_DIV)|0)]) continue;
           found++;
           /* ONLY WHAT HAS A FACE ON THE OPEN AIR. A cell packed on all six
              sides cannot be seen from anywhere a player can stand, and drawing
@@ -8756,7 +8840,7 @@ const EMERGE_T = 2.6;                   // seconds of falling upward
      y = ROCK0      the top of the chunk, and the dungeon is still inside it
      y = ny-1       the sea floor
    ========================================================================== */
-function buildIsland(){
+function buildOuterWorld(){
   const N = G.nx*G.ny*G.nz;
   if(!G.scenery || G.scenery.length !== N) G.scenery = new Uint8Array(N);
   G.scenery.fill(0);
@@ -8780,11 +8864,12 @@ function buildIsland(){
 
   /* 1. everything above the chunk goes, and what is left of the dungeon stops
         being a level and becomes scenery: a lump of rock with holes in it. */
+  /* THE DUNGEON KEEPS THE PART OF THE GRID IT IS IN, and everything above it
+     becomes sky, sea and island. Only the blocks that are being taken away
+     lose their mines - the ones left are still the board you are playing. */
   for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
     const i=idx(x,y,z);
-    G.mine[i]=0;
-    if(y < ROCK0){ G.st[i]=AIR; G.scenery[i]=0; }
-    else if(G.st[i]!==AIR){ G.scenery[i]=1; G.mat[i]=M_STONE; }
+    if(y < ROCK0){ G.mine[i]=0; G.st[i]=AIR; G.scenery[i]=0; }
   }
   /* 2. and the chunk is a LUMP. The dungeon fills its grid corner to corner,
         so left whole it is a slab with no water beside it - and a slab is not
@@ -8793,11 +8878,21 @@ function buildIsland(){
     const my=(ROCK0+G.ny-1)*0.5, ry=(G.ny-ROCK0)*0.5+1;
     for(let y=ROCK0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
       const dx=(x-cx)/RR, dz=(z-cz)/RR, dy=(y-my)/ry;
-      if(dx*dx+dz*dz+dy*dy > 1.0){ const i=idx(x,y,z); G.st[i]=AIR; G.scenery[i]=0; }
+      if(dx*dx+dz*dz+dy*dy > 1.0){ const i=idx(x,y,z); G.mine[i]=0; G.st[i]=AIR; G.scenery[i]=0; }
     }
   }
-  G.revealed=0; G.marked=0; G.mines=0; G.safeTotal=0; G.rockCount=0;
-  enemies.length=0; eshots.length=0; corpses.length=0;
+  /* AND THE BOARD IS COUNTED AGAIN, because it is a smaller board now. Taking
+     blocks away without recounting leaves a win condition nobody can reach. */
+  {
+    let mines=0, safeN=0, rock=0;
+    const NN=G.nx*G.ny*G.nz;
+    for(let i=0;i<NN;i++){
+      if(G.mine[i]) mines++;
+      if(G.st[i]===SOLID && !G.mine[i]) safeN++;
+      if(G.st[i]===ROCK && !(G.scenery && G.scenery[i])) rock++;
+    }
+    G.mines=mines; G.safeTotal=safeN; G.rockCount=rock;
+  }
 
   const set=(x,y,z,mat)=>{
     if(!inside(x,y,z)) return;
@@ -8838,6 +8933,9 @@ function buildIsland(){
   const hx=(G.holeX!==undefined?G.holeX:Math.round(cx+R*0.30));
   const hz=(G.holeZ!==undefined?G.holeZ:Math.round(cz-R*0.15));
   const hr=Math.max(2,Math.round(R*0.22));
+  /* AND IT IS REMEMBERED. The well is dug now and the boss opens its last few
+     blocks later, so both ends have to agree about where it is. */
+  G.holeX = hx; G.holeZ = hz; G.holeR = hr;
   {
     let tx=Math.round(cx-R*0.55), tz=Math.round(cz+R*0.35);
     if(Math.hypot(tx-hx,tz-hz) < hr+3){ tx = hx - (hr+4); tz = hz + (hr+3); }
@@ -8896,12 +8994,13 @@ function buildIsland(){
     if(!inside(x,y,z)) continue;
     /* the funnel: full width through the island and the water, opening out
        through the bottom third of the chunk */
-    let r = hr;
-    if(y > ROCK0){
-      const t = (y - ROCK0)/Math.max(1, G.ny-1-ROCK0);
-      r = hr + t*t*Math.max(3, hr*3);
-    }
-    if(Math.hypot(x-hx,z-hz) >= r) continue;
+    /* ONLY DOWN TO THE ROOF OF THE ROCK. The well through the island and the
+       water is dug now, so the sea fills it; the last blocks into the dungeon
+       are left SEALED, and the boss dying is what opens them. Which means the
+       water is already standing over your head the whole time you are down
+       there, and when the passage opens it comes down after you. */
+    if(y >= ROCK0) continue;
+    if(Math.hypot(x-hx,z-hz) >= hr) continue;
     const i=idx(x,y,z); G.st[i]=AIR; G.scenery[i]=0;
   }
 
@@ -8932,7 +9031,22 @@ function buildIsland(){
     for(let i=0;i<N;i++) if(seen[i]) seaB.push(i);
   }
 
-  /* 8. AND NOTHING MOVES YOU.
+  /* 8. AND NOTHING MOVES YOU, EVER.
+        Marcelo, testing it: "it is teleporting me after gravity reverses. I
+        don't stay where I am and keep moving, I am being teleported or THE
+        WHOLE SCENARIO IS CHANGING."
+
+        The second one, and it was the real fault. Deleting the placement was
+        not enough, because this function used to run AT THE MOMENT THE BOSS
+        DIED and replaced half the grid: blocks vanished, a sea appeared, and
+        you ended up somewhere else without having moved. Everything except you
+        moved, which is indistinguishable from being teleported.
+
+        So it runs ONCE, at world generation, and after that the world is the
+        world. The boss dying changes exactly two things: which way gravity
+        points, and whether the passage is open.
+
+        The old comment below is kept because it is still true:
         Marcelo: "I get TELEPORTED outside the tree/house/sand monstro, instead
         of CRAWLING OUT of the dungeon where I can finally see the scenery."
 
@@ -8958,15 +9072,20 @@ function buildIsland(){
     P.load = 0; P.imm = 0; P.immD = 0;
   }
 
-  G.island=true; G.dungeon=false; G.dirty=true;
-  skyStart();                       // the reveal begins in the middle of a morning
-  /* whatever the cave left lying about does not come with you */
-  GRIT.n=0; GRIT.next=0; GRIT.live.fill(0);
-  sandBuild();
-  /* and NOW the sea is poured, because sandBuild has just filled every air
-     block with air and would have washed it away */
+  /* the sky exists from the first frame; the cave simply cannot see it */
+  G.outer = true;
   G.seaB = seaB;
-  oceanFill();
+  G.dirty = true;
+  skyStart();
+}
+
+/* THE REVEAL, and it is now three lines because the world was always there.
+   Gravity lets go, the passage opens, and the light changes - nothing is
+   built, nothing is moved, and nothing under your feet turns into anything
+   else. That is the whole difference between a reveal and a teleport. */
+function revealIsland(){
+  G.island = true; G.dungeon = false; G.dirty = true;
+  toast('The sand lets you go. Something above you has opened.', 5200);
 }
 
 /* ==========================================================================
@@ -9188,7 +9307,12 @@ function bossBlows(x,y,z){
      ever wakes the whole grid — which is why it can afford to. */
   sandWakeLoose();
   for(let i=0;i<GRIT.n;i++) if(GRIT.live[i]) GRIT.vy[i] = 2+rnd()*6;
-  bossHole(x, z);
+  /* THE PASSAGE, and it is at the SHAFT, not under the boss. The well through
+     the island and the sea was dug when the world was made; this opens the
+     last blocks of it, into the room you are standing in. The water that has
+     been over your head the whole time comes down it. */
+  bossHole(G.holeX !== undefined ? (G.holeX+0.5)*BLOCK : x,
+           G.holeZ !== undefined ? (G.holeZ+0.5)*BLOCK : z);
 }
 
 /* THE HOLE, and it is one hole with two sides.
@@ -9209,7 +9333,11 @@ function bossHole(wx, wz){
   const bz = Math.max(1, Math.min(G.nz-2, Math.floor(wz/BLOCK)));
   const r = 2;
   G.holeX = bx; G.holeZ = bz; G.holeR = r;
-  for(let y=0;y<G.ny;y++) for(let dz=-r;dz<=r;dz++) for(let dx=-r;dx<=r;dx++){
+  /* ONLY THE SEALED LENGTH. Everything above the roof of the rock is already
+     a flooded well, and clearing it would empty the sea out of the one thing
+     that is supposed to come down after you. */
+  const y0 = (G.rock0 !== undefined) ? G.rock0 : 0;
+  for(let y=y0;y<G.ny;y++) for(let dz=-r;dz<=r;dz++) for(let dx=-r;dx<=r;dx++){
     if(dx*dx+dz*dz > r*r+1) continue;
     const x=bx+dx, z=bz+dz;
     if(!inside(x,y,z)) continue;
@@ -10227,6 +10355,8 @@ function darkNow(){
      and the island was being lit by it, so a blue sea at midday came out as a
      dark grey grid. On the island the light is the SUN's, which means it
      changes with the hour and goes down to starlight at night. */
+  /* and the DAYLIGHT only once you are out in it - the cave is still a cave
+     while the sky exists over it */
   if(G.island){
     const el = _sun[1]*gsign();                 // the sun's elevation, -1..1
     const day = Math.max(0, Math.min(1, el*2.6 + 0.10));
@@ -11099,8 +11229,7 @@ function frame(now){
     G.emerge -= dt;
     if(G.emerge <= 0){
       G.emerge = 0;                       // gravity does NOT go back
-      buildIsland();
-      toast('The sand let you go. You come up on a bank in open water.', 6000);
+      revealIsland();
     }
   }
   rollTick(dt);
@@ -11197,7 +11326,7 @@ function frame(now){
   /* OUTSIDE, THE FOG IS THE HORIZON. Every surface fades toward uFog with
      distance, so on the island it has to fade toward the sky it is standing
      against or the far shore hangs in front of it in cave-tan. */
-  const SKY = G.island ? skyNow() : null;
+  const SKY = (G.outer || G.island) ? skyNow() : null;
   if(SKY) FOGNOW = [SKY.hor[0]*0.86, SKY.hor[1]*0.86, SKY.hor[2]*0.90];
   /* UNDER THE SURFACE, EVERYTHING IS SEEN THROUGH IT.
      Marcelo: "glass and water beads around player when player immerses in

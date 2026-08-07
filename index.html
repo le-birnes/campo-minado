@@ -5093,6 +5093,32 @@ function voxMatAt(bi, k){
    of 7,776 blocks costs 7,776 cubes and not 31 million cells of bookkeeping. */
 const VOXD = new Set();
 const SAND_DRAW_R = BLOCK*11;              // chunks past this are not drawn
+/* ==========================================================================
+   AND YOU CAN SEE THE RUNGS
+   --------------------------------------------------------------------------
+   Marcelo: "beads all seem to be the same size, I thought you implemented
+   bead - chunk - mass."
+
+   They were, and he could not see it, and he was right to say so. The ladder
+   was doing its work in the BOOKKEEPING - a promoted block is one record, is
+   not woken, is not scanned - and none of that reaches the eye. The drawing
+   only switched to block-sized cubes past thirty metres, which is most of the
+   way to the far side of the world, so everything he ever looked at was beads.
+
+   A rung you cannot see is a rung you have to take on trust. So the three of
+   them are now three distances:
+
+     BEAD   0.175 m cubes, out to ten metres. Every grain, individually.
+     BLOCK  2.8 m cubes, from ten to forty. One record, one cube - which is
+            what the record has always been.
+     MASS   one box for the whole body, past forty. The ocean at the horizon
+            is not two thousand cubes, it is the sea.
+
+   Loose material - a heap of sand, a spill - keeps the full bead radius,
+   because it has no rung above bead to go to. Only what has been PROMOTED
+   changes size, which means the size you see is the rung it is on. */
+const SAND_BEAD_R = BLOCK*3.6;             // promoted material past this is a cube
+const LAD_MASS_R  = BLOCK*15;              // and past this the whole body is one box
 const SAND_DRAW_MAX = 22000;               // instances the sand layer may spend
 const SAND_CHUNKS = 26;                    // chunks it may scan for them
 /* SIXTY, not thirty, and it is half of why falling was slow: a bead can only
@@ -5666,12 +5692,40 @@ const LAD_DRAW_MAX = 5000;
 const LAD_DRAW_R = BLOCK*80;
 function ladDraw(d, n){
   if(!LADM || !SAND) return n;
-  const R2 = SAND_DRAW_R*SAND_DRAW_R, F2 = LAD_DRAW_R*LAD_DRAW_R;
+  const R2 = SAND_BEAD_R*SAND_BEAD_R, F2 = LAD_DRAW_R*LAD_DRAW_R;
+  const M2 = LAD_MASS_R*LAD_MASS_R;
   const nx=G.nx, ny=G.ny, nz=G.nz, N=nx*ny*nz;
   const cap = Math.min(SAND_DRAW_MAX, n + LAD_DRAW_MAX);
   let drawn = 0;
+  /* THE TOP RUNG FIRST. A mass whose blocks fill most of its own bounding box
+     is a slab of a thing - the sea is - and a slab is ONE cube. Anything
+     raggeder falls back to its blocks, because a bounding box round an L is a
+     lie about where the material is. */
+  const boxed = new Set();
+  for(const m of MASSES){
+    if(!m || m.dead || m.n < LAD_MASS_MIN) continue;
+    const bw=m.x1-m.x0+1, bh=m.y1-m.y0+1, bd=m.z1-m.z0+1;
+    if(m.n < bw*bh*bd*0.55) continue;                    // too ragged to be one box
+    const cxm=(m.x0+bw*0.5)*BLOCK, cym=(m.y0+bh*0.5)*BLOCK, czm=(m.z0+bd*0.5)*BLOCK;
+    const ex=cxm-P.x, ey=cym-P.y, ez=czm-P.z;
+    /* the distance to the BOX, not to its middle: standing on the sea you are
+       inside it, and a body you are inside is not far away */
+    const gx=Math.max(0, Math.abs(ex)-bw*BLOCK*0.5);
+    const gy=Math.max(0, Math.abs(ey)-bh*BLOCK*0.5);
+    const gz=Math.max(0, Math.abs(ez)-bd*BLOCK*0.5);
+    if(gx*gx+gy*gy+gz*gz < M2) continue;                 // near enough to want blocks
+    if(n >= cap) break;
+    const o = n*CUBE_STRIDE;
+    composeAA(d,o, cxm,cym,czm, bw*BLOCK, bh*BLOCK, bd*BLOCK);
+    d[o+16]=SM_COL[m.mat*3]; d[o+17]=SM_COL[m.mat*3+1]; d[o+18]=SM_COL[m.mat*3+2];
+    d[o+19]=0.5; d[o+20]=SM_EMIS[m.mat];
+    d[o+21]=0; d[o+22]=0; d[o+23]=d[o+24]=d[o+25]=0;
+    n++; drawn++;
+    boxed.add(m.id);
+  }
   for(let bi=0; bi<N && n<cap; bi++){
     const mat = LADM[bi]; if(!mat) continue;
+    if(boxed.size && boxed.has(LADS[bi])) continue;      // its mass drew it
     const x = bi % nx, q = (bi/nx)|0, z = q % nz, y = (q/nz)|0;
     const px=(x+0.5)*BLOCK, py=(y+0.5)*BLOCK, pz=(z+0.5)*BLOCK;
     const ex=px-P.x, ey=py-P.y, ez=pz-P.z;
@@ -6079,7 +6133,7 @@ function sandDraw(){
   if(!w || G.state!=='play' && G.state!=='pause' && !G.island) return 0;
   const d=sandB.data;
   const CW=w.CW, CD=w.CD, CH=w.CH;
-  const R = SAND_DRAW_R, R2 = R*R, CM = SCS*CELL_M;
+  const R = SAND_DRAW_R, R2 = R*R, CM = SCS*CELL_M;   // CM: a chunk edge, in metres
   /* Nearest chunks first, and no sort: a fixed number of buckets by distance
      is enough to order them and costs one pass. */
   let ns=0;
@@ -6115,6 +6169,9 @@ function sandDraw(){
     const c = SAND_SEEN[s*2];
     const cx=c%CW, q=(c/CW)|0, cz=q%CD, cy=(q/CD)|0;
     const bx=cx*SCS, by=cy*SCS, bz=cz*SCS;
+    /* is this whole chunk far enough that its promoted blocks draw as cubes? */
+    const ccx=(cx+0.5)*CM-P.x, ccy=(cy+0.5)*CM-P.y, ccz=(cz+0.5)*CM-P.z;
+    const bulkFar = LADM && (ccx*ccx+ccy*ccy+ccz*ccz) > SAND_BEAD_R*SAND_BEAD_R;
     let found=0;
     for(let ly=0; ly<SCS && n<SAND_DRAW_MAX; ly++){
       const y=by+ly; if(y>=w.H) break;
@@ -6135,6 +6192,11 @@ function sandDraw(){
             const ex=(x+0.5)*CELL_M-P.x, ey=(y+0.5)*CELL_M-camEy, ez=(z+0.5)*CELL_M-P.z;
             if(ex*ex+ey*ey+ez*ez < SUB_NEAR2) continue;
           }
+          /* AND IF ITS BLOCK IS ON A HIGHER RUNG, THE HIGHER RUNG DRAWS IT.
+             One block lookup a cell, and it is what makes the ladder visible:
+             past ten metres a promoted block stops being four thousand beads
+             and becomes the one cube it has been all along in the bookkeeping. */
+          if(bulkFar && LADM[(((y/SAND_DIV)|0)*G.nz + ((z/SAND_DIV)|0))*G.nx + ((x/SAND_DIV)|0)]) continue;
           found++;
           /* ONLY WHAT HAS A FACE ON THE OPEN AIR. A cell packed on all six
              sides cannot be seen from anywhere a player can stand, and drawing
