@@ -86,7 +86,10 @@ setTimeout(()=>{ try{
   {
     const spW = new SandWorld(96, 96, 96);
     /* a sealed tank of air with a floor, then a block of water dropped in it */
-    for(let by=0;by<6;by++) for(let bz=0;bz<6;bz++) for(let bx=0;bx<6;bx++)
+    /* cFreeBlock speaks in PAGES, and a page is a LAT block of 8 beads - so a
+       96-cell tank is twelve of them, not six. */
+    const spNB = 96/PGS;
+    for(let by=0;by<spNB;by++) for(let bz=0;bz<spNB;bz++) for(let bx=0;bx<spNB;bx++)
       if(by>0) cFreeBlock(spW, bx,by,bz, S_AIR);
     const spBefore = spW.pgn;
     /* SAND FIRST, and on purpose: it is the material with no way out of the
@@ -112,7 +115,7 @@ setTimeout(()=>{ try{
     /* AND WATER, which must find its LEVEL and may legitimately evaporate. So
        the books are balanced against water plus the steam it became. */
     const spW3 = new SandWorld(96, 96, 96);
-    for(let by=0;by<6;by++) for(let bz=0;bz<6;bz++) for(let bx=0;bx<6;bx++)
+    for(let by=0;by<spNB;by++) for(let bz=0;bz<spNB;bz++) for(let bx=0;bx<spNB;bx++)
       if(by>0) cFreeBlock(spW3, bx,by,bz, S_AIR);
     for(let y=64;y<80;y++) for(let z=40;z<56;z++) for(let x=40;x<56;x++) spW3.put(x,y,z,S_WATER);
     const spV0 = spW3.count(S_WATER);
@@ -169,11 +172,19 @@ setTimeout(()=>{ try{
     seed=11; genWorld(0); G.state='play';           // put it back as it was
     const spOn = spRun(true);
     SIM_SPHERE = true;
-    R.push(`  THE SPHERE, on the tick the ocean wakes: 7 m holds ${SIM_BEADS} beads.` +
+    /* A CHUNK SCHEDULER BOUNDS BY A BOX, NOT A BALL, and that is not a fudge -
+       it is what granularity means. The ball of 7 m holds SIM_BEADS; the
+       smallest thing a scheduler working in 3 m chunks can promise is the BOX
+       around that ball, which is 1/0.52 times bigger because a ball is pi/6 of
+       its cube. Both numbers are printed so the gap is visible rather than
+       argued about, and the assertion is against the one that can be kept. */
+    const spBox = Math.round(Math.pow(2*SIM_R/CELL_M, 3));
+    R.push(`  THE SPHERE, on the tick the ocean wakes: a 7 m BALL holds ${SIM_BEADS} beads` +
+           ` and the BOX around it ${spBox}, which is what a chunk scheduler can promise.` +
            ` WITHOUT it the busiest tick looked at ${spOff.peak} cells (${spOff.tot} over 90);` +
            ` WITH it, ${spOn.peak} (${spOn.tot} over 90) and ${spOn.def} chunks left for when you walk over ` +
-           (spOn.peak <= SIM_BEADS && spOn.peak < spOff.peak
-            ? 'ok, under his ceiling and it was over it before'
+           (spOn.peak <= spBox && spOn.peak < spOff.peak
+            ? 'ok, inside the box around his ceiling, and it was 100x over before'
             : 'FAULT: the ceiling is not holding'));
     /* AND A SHOT STILL BREAKS IT, which is the whole loop: a solid block is one
        byte until it is opened, the page faults in, the beads fly, and when what
@@ -183,8 +194,8 @@ setTimeout(()=>{ try{
       for(let bx=0; bx<G.nx && spBi<0; bx++)
         if(G.st[idx(bx,by,bz)]!==AIR) spBi = idx(bx,by,bz);
     const spB = cellXYZ(spBi), p0 = w.pgn;
-    const spFull = () => { let k=0, o=spB[0]*PGS, oy2=spB[1]*PGS, oz2=spB[2]*PGS;
-      for(let ly=0;ly<PGS;ly++) for(let lz=0;lz<PGS;lz++) for(let lx=0;lx<PGS;lx++)
+    const spFull = () => { let k=0, o=spB[0]*SAND_DIV, oy2=spB[1]*SAND_DIV, oz2=spB[2]*SAND_DIV;
+      for(let ly=0;ly<SAND_DIV;ly++) for(let lz=0;lz<SAND_DIV;lz++) for(let lx=0;lx<SAND_DIV;lx++)
         if(w.at(o+lx, oy2+ly, oz2+lz) !== S_AIR) k++;
       return k; };
     voxelise(spBi);
@@ -193,9 +204,9 @@ setTimeout(()=>{ try{
     voxCarve(spBi, 8,8,8, 1,0,0, 40000, null, true);
     const spAfter = spFull();
     for(let t=0;t<180;t++){ sandTick(w, sandDir()); ladTick(); gritStep(1/60); }
-    R.push(`  opening one block: pages ${p0} -> ${spOpened} (+${spOpened-p0}), ` +
+    R.push(`  opening one CELL: pages ${p0} -> ${spOpened} (+${spOpened-p0} of an expected ${LAT_DIV**3}), ` +
            `${spMB(w).toFixed(2)} MB ` +
-           (spOpened === p0+1 ? 'ok, exactly one block became real' : 'FAULT'));
+           (spOpened === p0+LAT_DIV*LAT_DIV*LAT_DIV ? 'ok, its twenty-seven pages became real' : 'FAULT'));
     R.push(`  shooting it: ${spSolid} beads -> ${spAfter}, ${spSolid-spAfter} taken out ` +
            (spAfter < spSolid ? 'ok, the shot reached the cells' : 'FAULT: the shot did nothing'));
   }

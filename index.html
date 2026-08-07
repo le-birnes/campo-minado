@@ -725,7 +725,7 @@ const P_H     = 2.0;    // altura do personagem
    a real refactor: the ladder is built on a chunk being exactly 2x2x2 of
    whatever the storage unit is, and 2 and 3 do not align. Written up in
    NEXT.md. This is 2x2x2 until then, and it is PLAYABLE, which 1.5 was not. */
-const BLOCK   = 3.0;
+const BLOCK   = 4.5;   // the minesweeper CELL: 3x3x3 lattice blocks of 1.5 m
 const P_R     = 0.52;   // collision radius
 const EYE     = 1.72;   // eye height
 /* WHICH END OF THE BODY THE EYES ARE AT. The body is always P.y .. P.y+P_H in
@@ -4250,7 +4250,24 @@ const hellB   = makeCubeBatch(6000);
        Without it piles come out flatter along the diagonals, which is the same
        artefact as before wearing a different hat.
    ========================================================================== */
-const SAND_DIV = 16;                       // beads per CELL edge: the bead is LAT/8
+/* THE THREE SCALES, and each number now answers only its own question.
+
+     CELL  = BLOCK   4.5 m   the minesweeper unit: a mine, a safe block, a
+                             number. Taller than the player, so a carved cell
+                             always holds him and the generator never has to
+                             think about fit.
+     LAT   = BLOCK/3 1.5 m   the world lattice, and THE PAGE. Terrain, walls,
+                             the promotion ladder, the storage unit.
+     BEAD  = LAT/8   0.1875 m   his number, exactly.
+
+   The page used to BE the cell, which is why 3x3x3 could not be done: 24 beads
+   to a cell edge is not a power of two. Making the PAGE the LAT block instead
+   costs one extra level of indexing and buys the whole thing - and it is where
+   promotion belonged anyway, because what settles into one record is a lump of
+   material, not a square of a puzzle. */
+const LAT_DIV  = 3;                        // lattice blocks per cell edge
+const LAT_M    = BLOCK/LAT_DIV;            // 1.5 m
+const SAND_DIV = 24;                       // beads per CELL edge (8 per LAT)
 const CELL_M   = BLOCK/SAND_DIV;           // 0.125 m — the bead, BLOCK/8
 /* A CHUNK IS STILL EXACTLY 2x2x2 BLOCKS, which is what the whole ladder hangs
    off, so it follows the divisor rather than being written down twice. */
@@ -4763,7 +4780,7 @@ let SIM_SPHERE = true;
    every side, which is what still makes every probe safe without a bounds test:
    the furthest anything reaches is the eight-cell column walk in the liquid
    rule, and the pad is thirty-two. */
-const PGS = SAND_DIV;              // page edge in cells — one block, on purpose
+const PGS = SAND_DIV/LAT_DIV;      // 8 — a page is one LAT block
 const PGSH = Math.round(Math.log2(PGS)), PGM = PGS-1;
 const PGC = PGS*PGS*PGS;           // cells in a block
 const PGB = PGC*2;                 // materials, then the age byte for each
@@ -5347,15 +5364,28 @@ function sandTick(w, gdir){
 
      Only the game's own world gets the sphere. A harness that builds a tank and
      ticks it has no player in it and must simulate all of what it built. */
-  const sphere = (w === SAND && SIM_SPHERE) ? SIM_R + SCS*CELL_M*0.87 : 0;
-  const sph2 = sphere*sphere;
+  /* TO THE CHUNK'S BOX, NOT ITS MIDDLE. Measuring to the centre and adding a
+     half-diagonal admits a ball of 9.6 m instead of 7 - and measured, that is
+     663,552 cells in a tick against a ceiling of 217,961, three times over.
+     The distance to the nearest point of the chunk is the honest test and it
+     costs three subtractions. */
+  const sphere = (w === SAND && SIM_SPHERE) ? SIM_R : 0;
+  const sph2 = sphere*sphere, CHM = SCS*CELL_M;
+  /* and the BOX around the ball, in cells, so a chunk that only clips its
+     corner is scanned only where it clips - otherwise the bound is "chunks
+     that touch it", which is a sixth again bigger than the thing it bounds */
+  const spx0 = Math.floor((P.x-SIM_R)/CELL_M), spx1 = Math.ceil((P.x+SIM_R)/CELL_M);
+  const spy0 = Math.floor((P.y-SIM_R)/CELL_M), spy1 = Math.ceil((P.y+SIM_R)/CELL_M);
+  const spz0 = Math.floor((P.z-SIM_R)/CELL_M), spz1 = Math.ceil((P.z+SIM_R)/CELL_M);
 
   for(let r=0; r<rect.length; r+=7){
     const c = rect[r];
     const cx = c % CW, q = (c/CW)|0, cz = q % CD, cy = (q/CD)|0;
     const bx = cx*SCS, by = cy*SCS, bz = cz*SCS;
     if(sph2){
-      const ex=(cx+0.5)*SCS*CELL_M-P.x, ey=(cy+0.5)*SCS*CELL_M-P.y, ez=(cz+0.5)*SCS*CELL_M-P.z;
+      const ex=Math.max(cx*CHM-P.x, 0, P.x-(cx+1)*CHM);
+      const ey=Math.max(cy*CHM-P.y, 0, P.y-(cy+1)*CHM);
+      const ez=Math.max(cz*CHM-P.z, 0, P.z-(cz+1)*CHM);
       if(ex*ex+ey*ey+ez*ez > sph2){
         /* put it back exactly as it was and spend nothing on it */
         const o=c*6, b=w.cb;
@@ -5366,8 +5396,14 @@ function sandTick(w, gdir){
         continue;
       }
     }
-    const x0=rect[r+1], y0=rect[r+2], z0=rect[r+3];
-    const x1=rect[r+4], y1=rect[r+5], z1=rect[r+6];
+    let x0=rect[r+1], y0=rect[r+2], z0=rect[r+3];
+    let x1=rect[r+4], y1=rect[r+5], z1=rect[r+6];
+    if(sph2){
+      if(spx0-bx > x0) x0 = spx0-bx;   if(spx1-bx < x1) x1 = spx1-bx;
+      if(spy0-by > y0) y0 = spy0-by;   if(spy1-by < y1) y1 = spy1-by;
+      if(spz0-bz > z0) z0 = spz0-bz;   if(spz1-bz < z1) z1 = spz1-bz;
+      if(x1<x0 || y1<y0 || z1<z0) continue;
+    }
     const span = x1-x0;
     for(let ny=y0; ny<=y1; ny++){
       /* Bottom-up when things fall, top-down when they do not: the ending
@@ -5867,8 +5903,8 @@ function ladBodyAt(w,x,y,z){
      rather than a coincidence. */
   if(!LADB || w !== SAND) return 0;
   const bx=(x>>PGSH), by=(y>>PGSH), bz=(z>>PGSH);
-  if(bx<0||by<0||bz<0||bx>=G.nx||by>=G.ny||bz>=G.nz) return 0;
-  return LADB[(by*G.nz + bz)*G.nx + bx];
+  if(bx<0||by<0||bz<0||bx>=LNX||by>=LNY||bz>=LNZ) return 0;
+  return LADB[(by*LNZ + bz)*LNX + bx];
 }
 let LADM  = null;      // Uint8Array, one per BLOCK: the material it is made of, 0 = not promoted
 let LADS  = null;      // Int32Array, one per block: which mass it belongs to, -1 = none
@@ -5888,8 +5924,14 @@ const LAD_BUDGET = 48;
 let LAD_MDIRTY = false, LAD_MWAIT = 0;
 const ladStats = {blocks:0, masses:0, census:0, promoted:0, demoted:0, drawn:0};
 
+/* HOW MANY LATTICE BLOCKS THE WORLD IS, which is what the ladder counts now.
+   It used to count CELLS, because a page was a cell; a page is a LAT block, so
+   promotion, demotion, masses and the body test all move down with it. */
+let LNX=0, LNY=0, LNZ=0;
+const latOf = bi => { const x=bi%LNX, q=(bi/LNX)|0; return [x, (q/LNZ)|0, q%LNZ]; };
 function ladInit(){
-  const N = G.nx*G.ny*G.nz;
+  LNX = G.nx*LAT_DIV; LNY = G.ny*LAT_DIV; LNZ = G.nz*LAT_DIV;
+  const N = LNX*LNY*LNZ;
   if(!LADM || LADM.length !== N){
     LADM = new Uint8Array(N); LADS = new Int32Array(N); LADQF = new Uint8Array(N);
     LADB = new Uint8Array(N);
@@ -5917,9 +5959,8 @@ function ladQueue(bi){
    question and it is asked separately, below. */
 function ladCensus(bi){
   const w = SAND; if(!w) return -1;
-  const bx = bi % G.nx, q = (bi/G.nx)|0, bz = q % G.nz, by = (q/G.nz)|0;
-  const S = SAND_DIV;
-  if((bx+1)*S > w.W || (by+1)*S > w.H || (bz+1)*S > w.D) return -1;
+  const [bx,by,bz] = latOf(bi);
+  if((bx+1)*PGS > w.W || (by+1)*PGS > w.H || (bz+1)*PGS > w.D) return -1;
   const b = ((by+PGP)*w.BD + (bz+PGP))*w.BW + (bx+PGP);
   const p = w.pg[b];
   if(p === null){
@@ -5963,7 +6004,7 @@ function ladPromotable(mat){
    different questions about the same fact. */
 function ladSettle(bi, mat){
   const w = SAND; if(!w || mat < 0) return false;
-  const bx = bi % G.nx, q = (bi/G.nx)|0, bz = q % G.nz, by = (q/G.nz)|0;
+  const [bx,by,bz] = latOf(bi);
   cFreeBlock(w, bx,by,bz, mat);
   return ladPromotable(mat) ? ladPromote(bi, mat) : false;
 }
@@ -5974,7 +6015,7 @@ function ladPromote(bi, mat){
   LADM[bi] = mat;
   ladStats.blocks++; ladStats.promoted++;
   LAD_MDIRTY = true;
-  const bx = bi % G.nx, q = (bi/G.nx)|0, bz = q % G.nz, by = (q/G.nz)|0;
+  const [bx,by,bz] = latOf(bi);
   const c = ladChunkOf(w, bx,by,bz);
   if(w.cbulk[c] < 8) w.cbulk[c]++;
   w.cl[c] = 1;                       // it holds something worth drawing
@@ -5989,8 +6030,8 @@ function ladPromote(bi, mat){
 function ladWakeBlock(w, bx,by,bz){
   const c = ladChunkOf(w, bx,by,bz), b = w.cb, o = c*6;
   if(!w.cf[c]){
-    const lx0=(bx&1)*SAND_DIV, ly0=(by&1)*SAND_DIV, lz0=(bz&1)*SAND_DIV;
-    const lx1=lx0+SAND_DIV-1, ly1=ly0+SAND_DIV-1, lz1=lz0+SAND_DIV-1;
+    const lx0=(bx&1)*PGS, ly0=(by&1)*PGS, lz0=(bz&1)*PGS;
+    const lx1=lx0+PGS-1, ly1=ly0+PGS-1, lz1=lz0+PGS-1;
     if(lx0<b[o])   b[o]=lx0;    if(lx1>b[o+3]) b[o+3]=lx1;
     if(ly0<b[o+1]) b[o+1]=ly0;  if(ly1>b[o+4]) b[o+4]=ly1;
     if(lz0<b[o+2]) b[o+2]=lz0;  if(lz1>b[o+5]) b[o+5]=lz1;
@@ -6013,7 +6054,7 @@ function ladDemote(bi){
   }
   const w = SAND;
   if(w){
-    const bx = bi % G.nx, q = (bi/G.nx)|0, bz = q % G.nz, by = (q/G.nz)|0;
+    const [bx,by,bz] = latOf(bi);
     const c = ladChunkOf(w, bx,by,bz);
     if(w.cbulk[c]) w.cbulk[c]--;
     /* IT GOES BACK TO BEING FOUR THOUSAND BEADS, and now that is literal: the
@@ -6030,8 +6071,8 @@ function ladBreak(w, c, lx,ly,lz){
   if(!LADM) return;
   const cx = c % w.CW, q = (c/w.CW)|0, cz = q % w.CD, cy = (q/w.CD)|0;
   const bx = cx*2 + (lx>>PGSH), by = cy*2 + (ly>>PGSH), bz = cz*2 + (lz>>PGSH);
-  if(bx<0||by<0||bz<0||bx>=G.nx||by>=G.ny||bz>=G.nz) return;
-  const bi = (by*G.nz + bz)*G.nx + bx;
+  if(bx<0||by<0||bz<0||bx>=LNX||by>=LNY||bz>=LNZ) return;
+  const bi = (by*LNZ + bz)*LNX + bx;
   if(LADM[bi]) ladDemote(bi);
 }
 
@@ -6043,7 +6084,7 @@ function ladQuiet(w, c){
   const cx = c % w.CW, q = (c/w.CW)|0, cz = q % w.CD, cy = (q/w.CD)|0;
   for(let dy=0;dy<2;dy++) for(let dz=0;dz<2;dz++) for(let dx=0;dx<2;dx++){
     const bx=cx*2+dx, by=cy*2+dy, bz=cz*2+dz;
-    if(bx<G.nx && by<G.ny && bz<G.nz) ladQueue((by*G.nz + bz)*G.nx + bx);
+    if(bx<LNX && by<LNY && bz<LNZ) ladQueue((by*LNZ + bz)*LNX + bx);
   }
 }
 
@@ -6056,7 +6097,7 @@ function ladQuiet(w, c){
 function ladRelabel(){
   MASSES.length = 0;
   LADS.fill(-1);
-  const nx=G.nx, ny=G.ny, nz=G.nz, N=nx*ny*nz;
+  const nx=LNX, ny=LNY, nz=LNZ, N=nx*ny*nz;
   const stack = [];
   for(let bi=0; bi<N; bi++){
     const mat = LADM[bi];
@@ -6094,8 +6135,11 @@ function massLevel(m){
 }
 function massAt(bx,by,bz){
   if(!LADM) return null;
-  if(bx<0||by<0||bz<0||bx>=G.nx||by>=G.ny||bz>=G.nz) return null;
-  const sid = LADS[(by*G.nz + bz)*G.nx + bx];
+  /* callers speak in CELLS; the ladder speaks in LAT blocks now, so this
+     samples the middle lattice block of the cell it was asked about */
+  const lx=bx*LAT_DIV+1, ly=by*LAT_DIV+1, lz=bz*LAT_DIV+1;
+  if(lx<0||ly<0||lz<0||lx>=LNX||ly>=LNY||lz>=LNZ) return null;
+  const sid = LADS[(ly*LNZ + lz)*LNX + lx];
   return sid >= 0 ? MASSES[sid] : null;
 }
 
@@ -6139,7 +6183,10 @@ function ladDraw(d, n){
   if(!LADM || !SAND) return n;
   const R2 = SAND_BEAD_R*SAND_BEAD_R, F2 = LAD_DRAW_R*LAD_DRAW_R;
   const M2 = LAD_MASS_R*LAD_MASS_R;
-  const nx=G.nx, ny=G.ny, nz=G.nz, N=nx*ny*nz;
+  /* THE MASS PASS DRAWS LATTICE BLOCKS NOW, not cells: the ladder moved down
+     to the storage unit, so a mass is a body of 1.5 m blocks and its bounding
+     box is measured in them. */
+  const nx=LNX, ny=LNY, nz=LNZ, N=nx*ny*nz;
   const cap = Math.min(SAND_DRAW_MAX, n + LAD_DRAW_MAX);
   let drawn = 0;
   /* THE TOP RUNG FIRST. A mass whose blocks fill most of its own bounding box
@@ -6151,17 +6198,17 @@ function ladDraw(d, n){
     if(!m || m.dead || m.n < LAD_MASS_MIN) continue;
     const bw=m.x1-m.x0+1, bh=m.y1-m.y0+1, bd=m.z1-m.z0+1;
     if(m.n < bw*bh*bd*0.55) continue;                    // too ragged to be one box
-    const cxm=(m.x0+bw*0.5)*BLOCK, cym=(m.y0+bh*0.5)*BLOCK, czm=(m.z0+bd*0.5)*BLOCK;
+    const cxm=(m.x0+bw*0.5)*LAT_M, cym=(m.y0+bh*0.5)*LAT_M, czm=(m.z0+bd*0.5)*LAT_M;
     const ex=cxm-P.x, ey=cym-P.y, ez=czm-P.z;
     /* the distance to the BOX, not to its middle: standing on the sea you are
        inside it, and a body you are inside is not far away */
-    const gx=Math.max(0, Math.abs(ex)-bw*BLOCK*0.5);
-    const gy=Math.max(0, Math.abs(ey)-bh*BLOCK*0.5);
-    const gz=Math.max(0, Math.abs(ez)-bd*BLOCK*0.5);
+    const gx=Math.max(0, Math.abs(ex)-bw*LAT_M*0.5);
+    const gy=Math.max(0, Math.abs(ey)-bh*LAT_M*0.5);
+    const gz=Math.max(0, Math.abs(ez)-bd*LAT_M*0.5);
     if(gx*gx+gy*gy+gz*gz < M2) continue;                 // near enough to want blocks
     if(n >= cap) break;
     const o = n*CUBE_STRIDE;
-    composeAA(d,o, cxm,cym,czm, bw*BLOCK, bh*BLOCK, bd*BLOCK);
+    composeAA(d,o, cxm,cym,czm, bw*LAT_M, bh*LAT_M, bd*LAT_M);
     d[o+16]=SM_COL[m.mat*3]; d[o+17]=SM_COL[m.mat*3+1]; d[o+18]=SM_COL[m.mat*3+2];
     d[o+19]=0.5; d[o+20]=SM_EMIS[m.mat];
     d[o+21]=0; d[o+22]=0; d[o+23]=d[o+24]=d[o+25]=0;
@@ -6172,7 +6219,7 @@ function ladDraw(d, n){
     const mat = LADM[bi]; if(!mat) continue;
     if(boxed.size && boxed.has(LADS[bi])) continue;      // its mass drew it
     const x = bi % nx, q = (bi/nx)|0, z = q % nz, y = (q/nz)|0;
-    const px=(x+0.5)*BLOCK, py=(y+0.5)*BLOCK, pz=(z+0.5)*BLOCK;
+    const px=(x+0.5)*LAT_M, py=(y+0.5)*LAT_M, pz=(z+0.5)*LAT_M;
     const ex=px-P.x, ey=py-P.y, ez=pz-P.z;
     const dd = ex*ex+ey*ey+ez*ez;
     if(dd < R2 || dd > F2) continue;
@@ -6184,17 +6231,24 @@ function ladDraw(d, n){
     }
     if(!open) continue;
     const o = n*CUBE_STRIDE;
-    composeAA(d,o, px,py,pz, BLOCK,BLOCK,BLOCK);
+    composeAA(d,o, px,py,pz, LAT_M,LAT_M,LAT_M);
     let c0=SM_COL[mat*3], c1=SM_COL[mat*3+1], c2=SM_COL[mat*3+2];
     if(SM_K[mat] === K_LIQUID){
-      /* a block of it is 2.8 m thick, so anything with more than one block
+      /* a lattice block of it is 1.5 m thick, so anything with more than one
          under it is already opaque - but a single block over the seabed is
          not, and that is the shelf you can see the sand through */
       let dn=0, yy=y, gd=sandDir();
       while(dn<6 && LADM[((yy+gd)*nz + z)*nx + x] === mat && yy+gd>=0 && yy+gd<ny){ yy+=gd; dn++; }
-      const a = Math.max(0.34, 1 - Math.exp(-SM_OPAC[mat]*(dn+1)*BLOCK));
-      const bi2 = (yy+gd>=0 && yy+gd<ny) ? ((yy+gd)*nz + z)*nx + x : -1;
-      const bm = (bi2>=0 && G.st[bi2]!==AIR) ? MATS[G.mat[bi2]].c : [0.20,0.18,0.16];
+      const a = Math.max(0.34, 1 - Math.exp(-SM_OPAC[mat]*(dn+1)*LAT_M));
+      /* WHAT IS UNDER IT IS A CELL, NOT A LATTICE BLOCK. x, y and z count
+         lattice blocks now and G.st counts minesweeper cells, so the seabed
+         has to be asked for in its own units or the lookup runs off the end
+         of the array - which it did, loudly, on the first frame. */
+      const uy = yy+gd;
+      const bi2 = (uy>=0 && uy<ny)
+        ? (((uy/LAT_DIV)|0)*G.nz + ((z/LAT_DIV)|0))*G.nx + ((x/LAT_DIV)|0) : -1;
+      const bm = (bi2>=0 && bi2<G.st.length && G.st[bi2]!==AIR)
+        ? MATS[G.mat[bi2]].c : [0.20,0.18,0.16];
       c0 = bm[0]*0.75 + (c0-bm[0]*0.75)*a;
       c1 = bm[1]*0.75 + (c1-bm[1]*0.75)*a;
       c2 = bm[2]*0.75 + (c2-bm[2]*0.75)*a;
@@ -6233,7 +6287,11 @@ function sandFill(bx,by,bz, mat, wake){
   const w=SAND; if(!w) return;
   const x0=bx*SAND_DIV, y0=by*SAND_DIV, z0=bz*SAND_DIV, S=SAND_DIV;
   if(x0<0||y0<0||z0<0||x0+S>w.W||y0+S>w.H||z0+S>w.D) return;
-  cFreeBlock(w, bx,by,bz, mat);
+  /* A CELL IS 3x3x3 PAGES, so a cell of one thing is twenty-seven records of
+     one thing - still no cells allocated, just twenty-seven bytes instead of
+     one. This is the whole cost of the split and it is paid here. */
+  for(let ay=0;ay<LAT_DIV;ay++) for(let az=0;az<LAT_DIV;az++) for(let ax=0;ax<LAT_DIV;ax++)
+    cFreeBlock(w, bx*LAT_DIV+ax, by*LAT_DIV+ay, bz*LAT_DIV+az, mat);
   if(wake) w.wakeShell(x0-1,y0-1,z0-1, x0+S, y0+S, z0+S);
 }
 /* Open a block into its material: 4,096 cells of sand, rubble and water where
@@ -6249,8 +6307,15 @@ function voxelise(bi){
   /* THE PAGE IS THE BLOCK, so opening one is one allocation and 4,096 writes
      straight into it - the local offset and voxMatAt's index are the same
      ordering, x fastest then z then y, which is not a coincidence. */
-  const p = cBlockPage(w, bx,by,bz);
-  for(let k=0;k<PGC;k++) p[k] = voxMatAt(bi, k);
+  /* twenty-seven pages, and voxMatAt's index is still over the whole CELL so
+     the recipe is unchanged - only where the bytes land is */
+  for(let ay=0;ay<LAT_DIV;ay++) for(let az=0;az<LAT_DIV;az++) for(let ax=0;ax<LAT_DIV;ax++){
+    const pg2 = cBlockPage(w, bx*LAT_DIV+ax, by*LAT_DIV+ay, bz*LAT_DIV+az);
+    for(let py=0;py<PGS;py++) for(let pz=0;pz<PGS;pz++) for(let px=0;px<PGS;px++){
+      const k = ((ay*PGS+py)*S + (az*PGS+pz))*S + (ax*PGS+px);
+      pg2[(py<<(PGSH*2))|(pz<<PGSH)|px] = voxMatAt(bi, k);
+    }
+  }
   w.wakeShell(x0,y0,z0, x0+S-1, y0+S-1, z0+S-1);
   G.dirty = true;
 }
@@ -6273,8 +6338,8 @@ function voxCarve(bi, fx0,fy0,fz0, dx,dy,dz, budgetJ, thrower, wide){
      with the cone opened out, because what is wanted is a hole you can swim
      through rather than a bore you can see through. */
   const r0 = wide ? 3.6 : 2.0, tan = Math.tan((wide?22:7)*Math.PI/180), RMAX = S/2;
-  /* it is all inside ONE block, so it is all inside one page */
-  const pg = cBlockPage(w, bx,by,bz);
+  /* it spans a CELL, which is twenty-seven pages now, so it goes through the
+     addressed write rather than straight into one array */
   for(let step=0; step<S && left>=COST; step++){
     const rad = Math.min(r0 + step*tan, RMAX);
     const cx = fx0 + dx*step, cy = fy0 + dy*step, cz = fz0 + dz*step;
@@ -6284,10 +6349,9 @@ function voxCarve(bi, fx0,fy0,fz0, dx,dy,dz, budgetJ, thrower, wide){
       if(left < COST) break;
       const ex=x-cx, ey=y-cy, ez=z-cz;
       if(ex*ex+ey*ey+ez*ez > rad*rad) continue;
-      const i = (y<<(PGSH*2)) | (z<<PGSH) | x;
-      const mt = pg[i];
+      const mt = cGet(w, ox+x, oy+y, oz+z);
       if(mt===S_AIR) continue;
-      pg[i]=S_AIR; out++; left -= COST;
+      cSet(w, ox+x, oy+y, oz+z, S_AIR); out++; left -= COST;
       /* WHAT WAS THERE GOES SOMEWHERE. A sample of it is thrown as grit and
          the rest is gone — NEXT.md rule 3, visible debris is a budget and not
          a consequence. Everything that lands rejoins the grid, so the pile at
@@ -6637,7 +6701,7 @@ function sandDraw(){
       /* AND IF THE BLOCK IS ON A HIGHER RUNG, THE HIGHER RUNG DRAWS IT. Past
          ten metres a promoted block stops being four thousand beads and becomes
          the one cube it has been all along in the bookkeeping. */
-      if(bulkFar && LADM[(bby*G.nz + bbz)*G.nx + bbx]) continue;
+      if(bulkFar && LADM[(bby*LNZ + bbz)*LNX + bbx]) continue;
       for(let ly=0; ly<PGS && n<SAND_DRAW_MAX; ly++){
         const y=oy+ly; if(y>=w.H) break;
         for(let lz=0; lz<PGS && n<SAND_DRAW_MAX; lz++){
@@ -9761,12 +9825,16 @@ function oceanFill(){
     const bx = bi % G.nx, q = (bi/G.nx)|0, bz = q % G.nz, by = (q/G.nz)|0;
     const x0=bx*S, y0=by*S, z0=bz*S;
     if(x0+S > w.W || y0+S > w.H || z0+S > w.D) continue;
-    cFreeBlock(w, bx,by,bz, S_SALT);
-    if(LADB) LADB[bi] = S_SALT;                    // a block of sea IS a body of sea
+    for(let ay=0;ay<LAT_DIV;ay++) for(let az=0;az<LAT_DIV;az++) for(let ax=0;ax<LAT_DIV;ax++){
+      const lx=bx*LAT_DIV+ax, ly=by*LAT_DIV+ay, lz=bz*LAT_DIV+az;
+      cFreeBlock(w, lx,ly,lz, S_SALT);
+      const li = (ly*LNZ + lz)*LNX + lx;
+      if(LADB) LADB[li] = S_SALT;                  // a block of sea IS a body of sea
+      ladPromote(li, S_SALT);
+    }
     /* IT IS POURED ALREADY SETTLED, so it goes straight to the block rung.
        Making the census discover this at 48 blocks a tick would be four
        thousand ticks of finding out what we just wrote. */
-    ladPromote(bi, S_SALT);
     n++;
   }
   /* AND THE SURFACE IS NOT DEMOTED, which was the first thing tried and it

@@ -75,10 +75,12 @@ and accumulated thickness for transparency.
 > empty-number-containing) are actually 3x3x3 blocks."
 
     LAT    1.5 m    the world lattice. Terrain, the island, the house, walls.
-    CELL   4.5 m    3x3x3 LAT.  <- WANTED, NOT YET BUILT. See the note below.
-                    Shipping today is CELL 3.0 m = 2x2x2 LAT, because 24 beads
-                    to a cell edge is not a power of two and the page still has
-                    to BE the cell. The bead is LAT/8 = 0.1875 m either way. The minesweeper cell: a mine, a safe block, a
+    CELL   4.5 m    3x3x3 LAT. BUILT 2026-08-07. The page is the LAT block now,
+                    not the cell, which is what let the cell edge stop having to
+                    be a power of two beads - and it is where promotion belonged
+                    anyway, because what settles into one record is a lump of
+                    material and not a square of a puzzle. LADM, LADB and LADS
+                    count LAT blocks; a cell is 27 pages. The minesweeper cell: a mine, a safe block, a
                     number. Comfortably taller than the 2 m player, so a carved
                     cell is ALWAYS passable and the generator never has to think
                     about fit again.
@@ -741,3 +743,13 @@ impossible to tell which change caused what.
 Then, in order: 26-neighbour liquids, the 500 m sphere and its three tiers,
 wind + MORTAL, celestial records, the spit.
 ```
+
+
+### HARNESS UNIT DRIFT, owed 2026-08-07
+
+h_ladder and h_sparse's tank sections build their tanks in CELLS and hand
+those numbers to cFreeBlock, which speaks in PAGES - so h_ladder promotes 9
+of a "25 block" tank and h_sparse's heap is poured into rock and cannot
+fall. Neither is an engine fault: h_sand is the independent bench and it
+passes on every count (pile round at 0.94, sand heaps 9 across and 30 tall,
+water spreads 14.75, a settled world scans zero). Update their units.
