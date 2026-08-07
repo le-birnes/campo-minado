@@ -135,6 +135,43 @@ setTimeout(()=>{ try{
               : 'FAULT: it is invisible and still in your way'));
     }
   }
+
+  /* ---- 6. AND A SHOT AT A WALL, THE WAY THE GAME FIRES IT ---------------
+     Not a pre-opened block: an intact wall, S_ROCK in the grid, exactly what he
+     is standing in front of. His log said "blast: 2 caught" where the tank said
+     8,813, and the difference was that nothing had opened the wall first. */
+  document.body.dataset.r='STAGE wall';
+  {
+    G.mode=MODE_DUNGEON; seed=5; genWorld(0); G.state='play';
+    let moA=-1, moB2=-1;
+    for(let y=1;y<G.ny-1 && moA<0;y++) for(let z=1;z<G.nz-1 && moA<0;z++)
+      for(let x=1;x<G.nx-2 && moA<0;x++){
+        const a=idx(x,y,z), b=idx(x+1,y,z);
+        if(G.st[a]===AIR && G.st[b]!==AIR && !(G.hull&&G.hull[b])){ moA=a; moB2=b; }
+      }
+    if(moB2<0) R.push('WALL: nothing to shoot at');
+    else {
+      const c = cellXYZ(moB2);
+      const wasSolid = solidAtWorld((c[0]+0.5)*BLOCK,(c[1]+0.5)*BLOCK,(c[2]+0.5)*BLOCK);
+      const before = LOG.length;
+      /* stand in the air block and fire into the wall, six times */
+      for(let k=0;k<6;k++){
+        sandBlast((c[0]+0.1)*BLOCK,(c[1]+0.5)*BLOCK,(c[2]+0.5)*BLOCK, 1,0,0, 1.0);
+        for(let t=0;t<30;t++){ gritStep(1/60); sandTick(SAND, sandDir()); ladTick(); }
+      }
+      const rep = LOG.slice(before).filter(l=>/blast:/.test(l));
+      R.push('A SHOT AT AN INTACT WALL: ' + (rep[0]||'nothing logged'));
+      R.push('  and the last of six: ' + (rep[rep.length-1]||'-'));
+      const nowSolid = solidAtWorld((c[0]+0.5)*BLOCK,(c[1]+0.5)*BLOCK,(c[2]+0.5)*BLOCK);
+      let air=0;
+      for(let ly=0;ly<SAND_DIV;ly++) for(let lz=0;lz<SAND_DIV;lz++) for(let lx=0;lx<SAND_DIV;lx++)
+        if(SAND.at(c[0]*SAND_DIV+lx, c[1]*SAND_DIV+ly, c[2]*SAND_DIV+lz)===S_AIR) air++;
+      R.push('  the block is ' + (air*100/(SAND_DIV*SAND_DIV*SAND_DIV)).toFixed(0) +
+             '% air, solid before ' + wasSolid + ' after ' + nowSolid + ' ' +
+             (wasSolid && !nowSolid ? 'ok, YOU CAN WALK THROUGH IT NOW'
+                                    : 'FAULT: still in your way'));
+    }
+  }
   R.push(window.__err.length ? ('FAULT '+window.__err.join(' | ')) : 'no errors');
   document.body.dataset.r=R.join(' ~ ');
 }catch(err){ document.body.dataset.r='THREW at '+(document.body.dataset.r||'?')+
