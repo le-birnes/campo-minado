@@ -666,6 +666,14 @@ const P_H     = 2.0;    // altura do personagem
 const BLOCK   = P_H * 1.4;   // 2.8 m
 const P_R     = 0.52;   // collision radius
 const EYE     = 1.72;   // eye height
+/* WHICH END OF THE BODY THE EYES ARE AT. The body is always P.y .. P.y+P_H in
+   world coordinates, whichever way gravity points - so under reversed gravity
+   the end that rests on the ground is P.y+P_H, and the eyes are 1.72 m from
+   THAT end rather than from P.y. Using P.y+EYE regardless put the camera 1.44 m
+   underground on the island and is half of why the reveal read as being stuck
+   inside something. */
+function eyeOff(){ return gsign() > 0 ? EYE : P_H - EYE; }
+function eyeY(){ return P.y + eyeOff(); }
 const GRAV    = 20.0;   // m/s^2 (heavy, so jumps do not float)
 /* GRAVITY IS NO LONGER A CONSTANT, it is a constant times something you can
    change. Not yet a vector — down is still -Y everywhere — but the MAGNITUDE
@@ -1492,9 +1500,10 @@ const MATS = [
   {c:[0.44,0.37,0.26]}, // 6 wet sand
   {c:[0.13,0.34,0.62]}, // 7 salt water
   {c:[0.36,0.24,0.13]}, // 8 wood
-  {c:[0.22,0.45,0.16]}  // 9 leaf
+  {c:[0.22,0.45,0.16]}, // 9 leaf
+  {c:[0.34,0.33,0.31]}  // 10 sea stone - the seamount you were inside
 ];
-const M_DRYSAND=5, M_WETSAND=6, M_SALT=7, M_WOOD=8, M_LEAF=9;
+const M_DRYSAND=5, M_WETSAND=6, M_SALT=7, M_WOOD=8, M_LEAF=9, M_STONE=10;
 /* Structure is grey stone and the puzzle is warm sand, at the source rather
    than only per-face. In a dungeon corridor every surface you can see is
    structure, so shading alone left floor, wall and ceiling the same brown
@@ -4416,6 +4425,17 @@ function voxMatAt(bi, k){
     if(gm===M_SALT)    return S_SALT;
     if(gm===M_WETSAND) return S_WETSND;
     if(gm===M_DRYSAND) return S_SAND;
+    /* THE SEAMOUNT IS RUBBLE WHEN IT BREAKS, not the world's own stone: S_ROCK
+       is the byte that means "geometry, not material" and the sand layer never
+       draws it, so a wall made of it would come apart into nothing visible. */
+    if(gm===M_STONE)   return S_RUBBLE;
+    /* AND A VIAL IS A THOUSAND GRAMS OF WHAT IT SAYS ON THE PLAQUE. Shoot one
+       and that is what comes out of it, because the block IS the material -
+       the vial was never a container with a lookup, it is a lattice slot. */
+    if(VIAL_BASE >= 0 && gm >= VIAL_BASE){
+      if(gm < VIAL_BASE + SMAT.length) return gm - VIAL_BASE;
+      return S_WOOD;                                   // the plaque
+    }
   }
   const rec = voxRecipe(bi);
   let s = (bi*40503 + 7 + k*2246822519) >>> 0;
@@ -4914,7 +4934,7 @@ function voxelise(bi){
    voxel/round.js's jet with its lateral clamp, which is what stops one shot
    spending itself on the block behind. Returns how many cells it freed, and
    what it freed goes into the air as GRIT rather than simply ceasing. */
-function voxCarve(bi, fx0,fy0,fz0, dx,dy,dz, budgetJ, thrower){
+function voxCarve(bi, fx0,fy0,fz0, dx,dy,dz, budgetJ, thrower, wide){
   voxelise(bi);
   const w=SAND; if(!w) return 0;
   const [bx,by,bz] = cellXYZ(bi);
@@ -4923,7 +4943,12 @@ function voxCarve(bi, fx0,fy0,fz0, dx,dy,dz, budgetJ, thrower){
      measured. Averaged here rather than tracked per cell, for now. */
   const COST = 20;
   let left = budgetJ, out = 0;
-  const r0 = 2.0, tan = Math.tan(7*Math.PI/180), RMAX = S/2;
+  /* HOW WIDE THE JET IS. A shot into a block face is a narrow cone - that is
+     voxel/round.js's measurement and it is what makes cinderstone take five
+     shots and show each one. A shot meant to BREACH a wall is the same shot
+     with the cone opened out, because what is wanted is a hole you can swim
+     through rather than a bore you can see through. */
+  const r0 = wide ? 3.6 : 2.0, tan = Math.tan((wide?22:7)*Math.PI/180), RMAX = S/2;
   for(let step=0; step<S && left>=COST; step++){
     const rad = Math.min(r0 + step*tan, RMAX);
     const cx = fx0 + dx*step, cy = fy0 + dy*step, cz = fz0 + dz*step;
@@ -4944,7 +4969,13 @@ function voxCarve(bi, fx0,fy0,fz0, dx,dy,dz, budgetJ, thrower){
       if(thrower && (out&3)===0) thrower((ox+x+0.5)*CELL_M, (oy+y+0.5)*CELL_M, (oz+z+0.5)*CELL_M, mt);
     }
   }
-  if(out) w.wakeShell(ox,oy,oz, ox+S-1, oy+S-1, oz+S-1);
+  /* ONE CELL WIDER THAN THE BLOCK, and it is what makes a breach a breach.
+     wakeShell over the block's own extent marks cells that belong to the block,
+     so a promoted neighbour - the ocean, pressed against the far side of the
+     wall you just shot through - is never told that the wall has a hole in it,
+     and the sea sits there politely. Reaching one cell out names the
+     neighbouring blocks, they come back down to beads, and the water comes in. */
+  if(out) w.wakeShell(ox-1,oy-1,oz-1, ox+S, oy+S, oz+S);
   G.dirty = true;
   return out;
 }
@@ -5585,11 +5616,23 @@ function physics(dt){
   P.vx += (wx*target - P.vx) * Math.min(1, accel*dt);
   P.vz += (wz*target - P.vz) * Math.min(1, accel*dt);
   if(ln===0 && P.ground){ const f=Math.min(1,16*dt); P.vx-=P.vx*f; P.vz-=P.vz*f; }
-  P.vy -= gnow()*dt;
-  /* and it holds you up as well as holding you back: a body in a fluid falls
+  /* BUOYANCY, and it is one ratio and no tuning. A person is very close to a
+     tonne a cubic metre, so in fresh water they are neutral, in brine they
+     float a little, in wet sand at 2,000 they float like a cork and in air they
+     do not float at all. How much of you is under decides how much of that you
+     get. */
+  const buoy = P.imm > 0.05 ? Math.min(1.3, P.imm*(P.immD/1000)) : 0;
+  P.vy -= gnow()*dt*(1 - buoy);
+  /* and it holds you back as well as holding you up: a body in a fluid falls
      slower, and a body in wet sand hardly falls at all */
   if(P.imm > 0.02) P.vy -= P.vy*Math.min(0.9, P.imm*(P.immD/2000))*Math.min(1, dt*9);
+  /* AND YOU CAN SWIM. There is nothing to push off, so holding jump in water is
+     a force applied for as long as you hold it rather than the impulse that
+     jumping off the ground is. */
+  if(P.imm > 0.30 && P.immD > 400 && IN.jumpHeld)
+    P.vy += 11.0*gsign()*dt*Math.min(1, P.imm*1.6);
   if(P.vy < -60) P.vy = -60;
+  if(P.vy >  60) P.vy =  60;
 
   // substeps so we cannot tunnel through a block
   const dist = Math.hypot(P.vx+P.kx, P.vy, P.vz+P.kz)*dt;
@@ -5626,7 +5669,7 @@ function physics(dt){
    ========================================================================== */
 function aimRay(){
   const cy=Math.cos(P.yaw), sy=Math.sin(P.yaw), cp=Math.cos(P.pitch), sp=Math.sin(P.pitch);
-  return {ox:P.x, oy:P.y+EYE, oz:P.z, dx:-sy*cp, dy:sp, dz:-cy*cp};
+  return {ox:P.x, oy:eyeY(), oz:P.z, dx:-sy*cp, dy:sp, dz:-cy*cp};
 }
 let hover = {hit:false};
 
@@ -5674,7 +5717,7 @@ function shoot(){
        forward is the aim itself, and camera -Z is in front, hence the minus */
   const cyw = Math.cos(P.yaw), syw = Math.sin(P.yaw), cpw = Math.cos(P.pitch);
   const mx = P.x       + cyw*MUZZLE[0] + syw*r.dy*MUZZLE[1] - r.dx*MUZZLE[2];
-  const my = P.y + EYE +                     cpw*MUZZLE[1] - r.dy*MUZZLE[2];
+  const my = eyeY() +                        cpw*MUZZLE[1] - r.dy*MUZZLE[2];
   const mz = P.z       - syw*MUZZLE[0] + cyw*r.dy*MUZZLE[1] - r.dz*MUZZLE[2];
   addS(mx,my,mz, 0,0,0, 0.52, 0.07, [1.0,0.86,0.45], T_GLOW, 0.55);
   /* Just a bit of it, and slow: smoke that keeps pace with the pellets reads
@@ -5690,7 +5733,7 @@ function shoot(){
      ray does. A barrel sitting off to one side of your eye and firing exactly
      parallel to it is what a real gun does and it looks like a miss. */
   {
-    const tx = P.x + r.dx*dist, ty = P.y+EYE + r.dy*dist, tz = P.z + r.dz*dist;
+    const tx = P.x + r.dx*dist, ty = eyeY() + r.dy*dist, tz = P.z + r.dz*dist;
     let px = tx-mx, py = ty-my, pz = tz-mz;
     const pl = Math.hypot(px,py,pz) || 1;
     addPellets(mx,my,mz, px/pl, py/pl, pz/pl, pl);
@@ -5762,6 +5805,60 @@ function shoot(){
   if(!hit.hit) return;
 
   if(hit.kind==='bedrock'){
+    /* --- THE CONTAINER IS BREACHABLE, and this is the third thing under the
+       name "bedrock". Marcelo: "fix not just gravity but the dungeon being a
+       BREACHABLE CONTAINER INSIDE THE OCEAN."
+
+       Scenery on the island is not the edge of the world and never was - it is
+       the seamount, the house, the tree, the vials. It is made of something, so
+       a shot takes some of it away, and when enough is gone the block opens.
+       On the wall between the dungeon and the sea, that is the sea coming in. */
+    if(inside(hit.x,hit.y,hit.z)){
+      const bi = idx(hit.x,hit.y,hit.z);
+      if(G.scenery && G.scenery[bi] && G.st[bi]===ROCK){
+        const wx=(hit.x+0.5)*BLOCK, wy=(hit.y+0.5)*BLOCK, wz=(hit.z+0.5)*BLOCK;
+        const D=SAND_DIV;
+        const nx=Math.sign(hit.nx||0), ny=Math.sign(hit.ny||0), nz=Math.sign(hit.nz||0);
+        /* START AT THE FACE THE SHOT ARRIVES AT, not at the middle of the
+           block. raycast does not hand back a normal, so the entry point is
+           the centre walked half a block BACK along the shot - which is the
+           near face whichever way you are looking. */
+        const ex = (D>>1) - r.dx*(D>>1), ey = (D>>1) - r.dy*(D>>1), ez = (D>>1) - r.dz*(D>>1);
+        voxCarve(bi, ex,ey,ez, r.dx,r.dy,r.dz, 40000, (gx,gy,gz,mt)=>{
+          const sp = 3.5 + wrnd()*7.0;
+          gritAdd(gx,gy,gz, -r.dx*sp*0.55 + (wrnd()-.5)*sp,
+                  (wrnd()*0.7)*sp*gsign() + 1.4*gsign(), -r.dz*sp*0.55 + (wrnd()-.5)*sp, mt);
+        }, true);
+        /* WHEN IS IT THROUGH? When most of it is gone - counted, not guessed,
+           because a jet down the middle of a block can take a quarter of it and
+           leave a wall you cannot see through and cannot walk past. */
+        {
+          const wgd=SAND, S=D, bx=hit.x*S, by=hit.y*S, bz=hit.z*S;
+          let air=0;
+          for(let y=0;y<S;y++) for(let z=0;z<S;z++){
+            const rr=(by+y+1)*wgd.SY + (bz+z+1)*wgd.SZ + (bx+1);
+            for(let x=0;x<S;x++) if(wgd.m[rr+x]===S_AIR) air++;
+          }
+          /* Two fifths, measured rather than guessed: a jet this wide takes
+             about a fifth of a block a shot, so a wall opens on the third and
+             what is left of it is still standing round the hole. */
+          if(air > S*S*S*0.4){
+            /* it opens, and what is LEFT of it stays: the point of breaching a
+               wall is the hole, not the disappearance of the wall */
+            G.st[bi]=AIR; G.scenery[bi]=0;
+            wgd.wakeShell(bx-1,by-1,bz-1, bx+S, by+S, bz+S);
+            snd.crumble(); G.shake=Math.max(G.shake,0.10);
+          } else snd.crumble();
+        }
+        for(let k=0;k<14;k++)
+          addP(wx+(wrnd()-.5)*BLOCK*0.8, wy+(wrnd()-.5)*BLOCK*0.8, wz+(wrnd()-.5)*BLOCK*0.8,
+               -r.dx*4+(wrnd()-.5)*6, (1.4+wrnd()*3)*gsign(), -r.dz*4+(wrnd()-.5)*6,
+               BLOCK*(0.012+wrnd()*0.016), 0.9+wrnd()*0.8,
+               [0.42+wrnd()*0.18, 0.36+wrnd()*0.14, 0.30+wrnd()*0.10], 0, 1);
+        G.dirty = true;
+        return;
+      }
+    }
     /* raycast calls everything unopenable "bedrock", but there are two very
        different things under that name: cinderstone walls INSIDE the grid,
        which break, and the shell outside it, which is the edge of the world.
@@ -6438,7 +6535,7 @@ function spawnEnemy(fam, tier, cell){
   const [bx,by,bz] = cellXYZ(cell);
   const cx=(bx+0.5)*BLOCK, cy=(by+0.5)*BLOCK, cz=(bz+0.5)*BLOCK;
   // come out of the face pointing at the player, so you see it arrive
-  let nx=P.x-cx, ny=(P.y+EYE)-cy, nz=P.z-cz;
+  let nx=P.x-cx, ny=eyeY()-cy, nz=P.z-cz;
   const ax=Math.abs(nx), ay=Math.abs(ny), az=Math.abs(nz);
   let f=[0,0,0];
   if(ax>=ay&&ax>=az) f=[Math.sign(nx)||1,0,0];
@@ -7193,7 +7290,7 @@ function maybeSpawn(cell, x,y,z){
 }
 
 function canSee(e){
-  const ty=P.y+EYE*0.62;
+  const ty=P.y+eyeOff()*0.62;
   let dx=P.x-e.x, dy=ty-e.y, dz=P.z-e.z;
   const d=Math.hypot(dx,dy,dz);
   if(d<0.6) return true;
@@ -7331,7 +7428,7 @@ function hurtPlayer(dmg){
     snd.boom();
     for(let k=0;k<120;k++){
       const a=rnd()*6.283, b=Math.acos(2*rnd()-1), sp=8+rnd()*24;
-      addS(P.x, P.y+EYE, P.z, Math.sin(b)*Math.cos(a)*sp, Math.cos(b)*sp, Math.sin(b)*Math.sin(a)*sp,
+      addS(P.x, eyeY(), P.z, Math.sin(b)*Math.cos(a)*sp, Math.cos(b)*sp, Math.sin(b)*Math.sin(a)*sp,
            0.9+rnd()*1.4, 0.9+rnd()*1.1, [1.0,0.28,0.20], T_GLOW, 0.5);
     }
     flashScreen();
@@ -7440,7 +7537,7 @@ function moveSlug(e, dt, T){
 
 function moveFinal(e, dt, T){
   // holds a distance and circles: never lands, never touches you
-  let dx=P.x-e.x, dy=(P.y+EYE)-e.y, dz=P.z-e.z;
+  let dx=P.x-e.x, dy=eyeY()-e.y, dz=P.z-e.z;
   const d=Math.hypot(dx,dy,dz)||1;
   const want = 9.0;
   const push = (d-want)/want;
@@ -7528,7 +7625,7 @@ function updateEnemies(dt){
 
     // ---- face the player (around its own up axis) ----
     if(T.fam!==FAM_SLUG){
-      let dx=P.x-e.x, dy=(P.y+EYE)-e.y, dz=P.z-e.z;
+      let dx=P.x-e.x, dy=eyeY()-e.y, dz=P.z-e.z;
       const d=Math.hypot(dx,dy,dz)||1;
       dx/=d; dy/=d; dz/=d;
       const k = Math.min(1, dt*(T.fam===FAM_FLAG?3.2:5.0));
@@ -7563,7 +7660,7 @@ function updateEnemies(dt){
         e.lock = e.lockMax;
         const flight = Math.hypot(P.x-e.x, P.y-e.y, P.z-e.z)/ESHOT_SPD;
         const lead = e.lockMax + flight;
-        e.aim = [P.x + P.vx*lead, P.y+EYE*0.62 + P.vy*lead*0.5, P.z + P.vz*lead];
+        e.aim = [P.x + P.vx*lead, P.y+eyeOff()*0.62 + P.vy*lead*0.5, P.z + P.vz*lead];
         e.ant = !e.ant;
         e.charge = snd.elock(e.lockMax);
       }
@@ -7709,184 +7806,306 @@ function syncPowHud(){
    else. */
 const EMERGE_T = 2.6;                   // seconds of falling upward
 
+/* ==========================================================================
+   THE REVEAL - what you were inside all along
+   --------------------------------------------------------------------------
+   Marcelo, and this is the whole brief:
+
+     "We start with reversed gravity at the bottom of the dungeon, so we think
+      we are going down. When the boss dies the gravity flips and we discover
+      the dungeon was a chunk of rock inside the ocean the whole time, with an
+      island with a wooden house and a vial containing each 1000 grams of all
+      registered materials, and a plaque with their name above."
+
+   WHICH WAY IS UP, and getting this wrong is what he was actually reporting.
+   Gravity has reversed and stays reversed, so DOWN IS +Y: things fall toward
+   larger y and you land on top of whatever is below you in y. The world
+   therefore has the SKY AT SMALL y and the SEA FLOOR AT LARGE y.
+
+   The previous version built the island mirrored - island at large y, rock
+   chunk at small y - which put the lump of stone you had just climbed out of
+   directly overhead like a lid, with the tree underneath it. Reported, exactly:
+   "I'm being teleported somewhere I can see a big tree contained in a box of
+   wall/lava/stone, not the scenery I asked for." It was a box because it was
+   a box.
+
+   AND IT IS A SEAMOUNT. The island is the tip of the same rock the dungeon was
+   inside, which is the story told in geology: you were never under the seabed,
+   you were inside the mountain whose peak this is, and the shaft the boss blew
+   open runs from one to the other.
+
+     y = 0          open sky
+     y = SEAY       the waterline. Everything below is brine, in the grid.
+     y = ROCK0      the top of the chunk, and the dungeon is still inside it
+     y = ny-1       the sea floor
+   ========================================================================== */
 function buildIsland(){
   const N = G.nx*G.ny*G.nz;
   if(!G.scenery || G.scenery.length !== N) G.scenery = new Uint8Array(N);
   G.scenery.fill(0);
-  /* THE ROCK STAYS. It was wiped before - the island REPLACED the dungeon, so
-     there was never anything above anything and the reveal had nothing to
-     reveal. What you were inside is a chunk of rock, and it is still there
-     under you, with your shaft through it.
+  /* THE CAVE'S HELL LIGHTING DOES NOT COME WITH YOU. G.lava repaints every
+     block in the world as hellstone and nothing ever cleared it, so the reveal
+     arrived with the sea and the sky the colour of a furnace. */
+  G.lava = 0; G.finale = false; G.fuse = 0; G.boomCell = null;
 
-     Everything the island writes is MIRRORED in y, because down is +Y now: the
-     surface you are about to stand on has to be at the TOP of the grid, which
-     is the direction you now fall. So the island is built by the same code as
-     before and simply lands the other way up. */
-  const ISL = Math.max(4, Math.ceil(G.ny*0.42));      // levels the island gets
-  const ROCKTOP = G.ny - ISL - 1;                     // the chunk ends here
+  /* MORE THAN HALF OF IT IS ABOVE THE WATER, and that is not an aesthetic
+     choice. A house is five blocks tall and it has to stand on ground that is
+     itself above the sea, so the distance from the peak of the island to y=0
+     is the budget everything above the waterline has to fit inside. At 0.30 it
+     was seven blocks for the whole world above the sea and the house could not
+     be built at all - the vial census came back empty, which is how it showed. */
+  const SEAY  = Math.max(3, Math.round(G.ny*0.54));        // the waterline
+  const ROCK0 = Math.max(SEAY+2, Math.round(G.ny*0.62));   // the top of the chunk
+  const cx = G.nx/2, cz = G.nz/2;
+  const R  = Math.min(G.nx,G.nz)*0.30;                     // the island
+  const RR = Math.min(G.nx,G.nz)*0.44;                     // the chunk
+  G.seaY = SEAY; G.rock0 = ROCK0;
+
+  /* 1. everything above the chunk goes, and what is left of the dungeon stops
+        being a level and becomes scenery: a lump of rock with holes in it. */
   for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
     const i=idx(x,y,z);
     G.mine[i]=0;
-    if(y > ROCKTOP) G.st[i]=AIR;                      // clear the sky/island band
-    else if(G.st[i]!==AIR) G.scenery[i]=1;            // and the rock is scenery now
+    if(y < ROCK0){ G.st[i]=AIR; G.scenery[i]=0; }
+    else if(G.st[i]!==AIR){ G.scenery[i]=1; G.mat[i]=M_STONE; }
   }
-  /* AND IT IS TRIMMED TO A CHUNK. The dungeon fills its grid corner to corner,
-     so leaving it whole leaves a slab with no room for water beside it - and a
-     slab is not what you are meant to discover you were inside. Rounded off,
-     there is ocean on every side of it. */
+  /* 2. and the chunk is a LUMP. The dungeon fills its grid corner to corner,
+        so left whole it is a slab with no water beside it - and a slab is not
+        what you are meant to discover you were inside. */
   {
-    const mx=G.nx/2, mz=G.nz/2, my=ROCKTOP*0.5;
-    const rr=Math.min(G.nx,G.nz)*0.40;
-    for(let y=0;y<=ROCKTOP;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
-      const dx=(x-mx)/rr, dz=(z-mz)/rr, dy=(y-my)/(ROCKTOP*0.62+1);
-      if(dx*dx+dz*dz+dy*dy > 1.0) G.st[idx(x,y,z)]=AIR;
+    const my=(ROCK0+G.ny-1)*0.5, ry=(G.ny-ROCK0)*0.5+1;
+    for(let y=ROCK0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
+      const dx=(x-cx)/RR, dz=(z-cz)/RR, dy=(y-my)/ry;
+      if(dx*dx+dz*dz+dy*dy > 1.0){ const i=idx(x,y,z); G.st[i]=AIR; G.scenery[i]=0; }
     }
   }
   G.revealed=0; G.marked=0; G.mines=0; G.safeTotal=0; G.rockCount=0;
   enemies.length=0; eshots.length=0; corpses.length=0;
 
-  const cx=G.nx/2, cz=G.nz/2, SEA=Math.max(2, (G.ny*0.30)|0);
-  const R = Math.min(G.nx,G.nz)*0.34;
   const set=(x,y,z,mat)=>{
-    const Y = G.ny-1-y;                               // mirrored: down is +Y
-    if(!inside(x,Y,z)) return;
-    const i=idx(x,Y,z);
+    if(!inside(x,y,z)) return;
+    const i=idx(x,y,z);
     G.st[i]=ROCK; G.mat[i]=mat; G.scenery[i]=1;
   };
-  /* AND THE OCEAN BETWEEN THEM. Open water from under the island all the way
-     down to the rock, which is what makes it a chunk of rock IN an ocean
-     rather than an island with a cave under it. */
-  const fillSea=()=>{
-    for(let y=ROCKTOP+1;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
-      const i=idx(x,y,z);
-      if(G.st[i]===AIR){ G.st[i]=ROCK; G.mat[i]=M_SALT; G.scenery[i]=1; }
-    }
-  };
-  /* salt water to the sea line, everywhere */
-  for(let y=0;y<SEA;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++) set(x,y,z,M_SALT);
-  fillSea();
-  /* the bank: sand, wet where the sea reaches it and a little above, because a
-     beach is damp above the tide from capillary rise rather than from splash */
-  const top=(x,z)=>{
+  /* The surface of the land at (x,z) as a grid y, and SMALL IS HIGH. -1 means
+     open water there. */
+  const landY=(x,z)=>{
     const dx=(x-cx)/R, dz=(z-cz)/R, d=Math.hypot(dx,dz);
-    if(d>1.15) return -1;
-    const rough = Math.sin(x*0.9)*Math.cos(z*0.7)*0.8 + Math.sin(z*1.7)*0.5;
-    return Math.round(SEA + Math.cos(Math.min(d,1)*Math.PI/2)*G.ny*0.28 + rough - (d>1?(d-1)*G.ny:0));
+    if(d > 1.30) return -1;
+    const rough = Math.sin(x*0.9)*Math.cos(z*0.7)*0.9 + Math.sin(z*1.7)*0.6;
+    const h = Math.cos(Math.min(d,1)*Math.PI/2)*G.ny*0.30 + rough;
+    const y = Math.round(SEAY - h + (d>1 ? (d-1)*G.ny*0.6 : 0));
+    return y >= ROCK0 ? -1 : Math.max(0, y);
   };
+  /* 3. the seamount: stone up from the chunk, sand where you can see it, and
+        the wet band exactly where the sea reaches. A beach is damp above the
+        tide from capillary rise rather than from splash. */
   for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
-    const t=top(x,z); if(t<0) continue;
-    for(let y=0;y<=t;y++) set(x,y,z, y < SEA+1 ? M_WETSAND : M_DRYSAND);
+    const t = landY(x,z); if(t<0) continue;
+    for(let y=t; y<ROCK0; y++)
+      set(x,y,z, y > t+2 ? M_STONE : (y >= SEAY-1 ? M_WETSAND : M_DRYSAND));
   }
-  /* THE HOUSE, THE RACK AND THE VIALS.
-     Marcelo: "an island with a wooden house and a sample - a vial, occupies a
-     lattice slot, contains 50 to 1000 grams of dust/liquid - containing each
-     1000 grams of all registered materials, and a plaque with their name above."
 
-     A vial IS a lattice slot, which is the neat part: it needs no new kind of
-     thing, only a block whose material is one of the grid's. The rack is
-     therefore a census of the engine - every material that exists, standing in
-     a row, in its own colour. Add a material anywhere and a vial for it appears
-     here without anyone writing one. */
-  buildVials(set, cx, cz, top);
+  /* 4. THE HOUSE, THE RACK AND THE VIALS, on the high ground.
+        A vial IS a lattice slot, which is the neat part: it needs no new kind
+        of thing, only a block whose material is one of the grid's. The rack is
+        therefore a census of the engine - every material that exists, standing
+        in a row in its own colour. Add a material anywhere and a vial for it
+        appears here without anyone writing one. */
+  const house = buildVials(set, cx, cz, landY, ROCK0);
 
-  /* THE HOLE IN THE GROUND — the way you came up */
-  /* OVER THE SHAFT YOU CAME UP, not wherever looked nice. One hole, two sides:
-     bossHole punched it through the dungeon floor and this is the same hole
-     from the other end. */
+  /* 5. THE TREE, attached to the bank. A trunk, real BRANCHES going out and
+        up, and a leaf CLUSTER hung on each branch tip - because a canopy is a
+        set of separable handfuls and not one green sphere, which is also what
+        lets wind take one clump and leave the next. */
   const hx=(G.holeX!==undefined?G.holeX:Math.round(cx+R*0.30));
   const hz=(G.holeZ!==undefined?G.holeZ:Math.round(cz-R*0.15));
   const hr=Math.max(2,Math.round(R*0.22));
-  /* STRAIGHT THROUGH, every level. Carving only around the island's surface
-     left the shaft open on 11 levels of 24 - the terrain above simply filled it
-     back in, so the two ends of the one hole did not meet. */
+  {
+    let tx=Math.round(cx-R*0.55), tz=Math.round(cz+R*0.35);
+    if(Math.hypot(tx-hx,tz-hz) < hr+3){ tx = hx - (hr+4); tz = hz + (hr+3); }
+    if(house && Math.abs(tx-house.x)<house.w+2 && Math.abs(tz-house.z)<house.d+2){
+      tx = house.x - house.w - 3; tz = house.z + 1;
+    }
+    const tb = landY(tx,tz);
+    if(tb >= 0){
+      /* and it has to FIT: up is -y, so a tree grows toward zero and set()
+         drops anything past it without saying so. */
+      const th = Math.max(4, Math.min((G.ny*0.28)|0, tb-1));
+      for(let k=1;k<=th;k++){
+        const y=tb-k;
+        set(tx,y,tz,M_WOOD);
+        if(k>2 && k<th-1 && (k&1)===0){ set(tx+1,y,tz,M_WOOD); set(tx,y,tz+1,M_WOOD); }
+      }
+      const tips=[];
+      for(let b=0;b<7;b++){
+        const a=(b/7)*Math.PI*2 + 0.4, len=2+(b%3);
+        const y0=tb-th+(b%4);
+        let bx=tx, by=y0, bz=tz;
+        for(let t=1;t<=len;t++){
+          bx=Math.round(tx+Math.cos(a)*t); bz=Math.round(tz+Math.sin(a)*t);
+          by=y0-Math.round(t*0.55);
+          set(bx,by,bz,M_WOOD);
+        }
+        tips.push([bx,by,bz]);
+      }
+      tips.push([tx, tb-th-1, tz]);
+      for(const [lx,ly,lz] of tips)
+        for(let dy=-2;dy<=1;dy++) for(let dz=-2;dz<=2;dz++) for(let dx=-2;dx<=2;dx++){
+          if(dx*dx+dy*dy*1.6+dz*dz > 4.4) continue;
+          set(lx+dx, ly+dy, lz+dz, M_LEAF);
+        }
+    }
+  }
+
+  /* 6. THE SEA, and it is not a floor you stand on any more.
+        It is found by FLOODING IN FROM THE EDGE OF THE WORLD rather than by
+        filling everything below a line, and that one choice is what makes the
+        rest work: a sealed pocket inside the rock stays dry because the water
+        cannot reach it, and a pocket you have already breached floods without
+        anybody deciding that it should. */
+  const seaB = [];
+  {
+    const seen = new Uint8Array(N), q = [];
+    const push=(x,y,z)=>{
+      if(x<0||z<0||y<SEAY||x>=G.nx||z>=G.nz||y>=G.ny) return;
+      const i=idx(x,y,z);
+      if(seen[i] || G.st[i]!==AIR) return;
+      seen[i]=1; q.push(i);
+    };
+    for(let y=SEAY;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
+      if(x>0 && z>0 && x<G.nx-1 && z<G.nz-1 && y<G.ny-1) continue;
+      push(x,y,z);
+    }
+    for(let h=0; h<q.length; h++){
+      const i=q[h], x=i%G.nx, r=(i/G.nx)|0, z=r%G.nz, y=(r/G.nz)|0;
+      push(x+1,y,z); push(x-1,y,z); push(x,y,z+1); push(x,y,z-1);
+      push(x,y+1,z); push(x,y-1,z);
+    }
+    for(let i=0;i<N;i++) if(seen[i]) seaB.push(i);
+  }
+
+  /* 7. THE SHAFT - one hole with two ends, and it is carved AFTER the sea is
+        decided so that it stays dry. It is a well through the seamount: you
+        came up it, and from up here it is something that burst open from
+        underneath, which is what it did. */
   for(let y=0;y<G.ny;y++) for(let z=hz-hr;z<=hz+hr;z++) for(let x=hx-hr;x<=hx+hr;x++){
     if(!inside(x,y,z)) continue;
     if(Math.hypot(x-hx,z-hz) >= hr) continue;
     const i=idx(x,y,z); G.st[i]=AIR; G.scenery[i]=0;
   }
-  /* AND YOU ARE PUT ON IT, which is the difference between a reveal and being
-     buried alive. Nothing moved the player: gravity reversed, so you fell
-     TOWARD the new down - the top of the grid - while the island was being
-     built there, and you ended up inside it. Reported as "stuck in a dungeon"
-     and it was exactly that.
 
-     You arrive standing beside the shaft you came up, on the surface, facing
-     it. G.holeX/holeZ is the same hole from both ends, so this is the mouth of
-     the one you just climbed. */
+  /* 8. AND YOU ARE PUT ON THE BEACH, WITH THE HOUSE IN FRONT OF YOU, which is
+        the difference between a reveal and being buried alive.
+        The old code placed you twice and the second placement read a MIRRORED
+        height as an unmirrored one, so you were dropped inside the terrain -
+        "it appears I'm stuck in a dungeon". One placement now, and it is
+        arithmetic in one space. */
   {
-    const sx = Math.max(1, Math.min(G.nx-2, hx + hr + 2));
-    const sz = Math.max(1, Math.min(G.nz-2, hz));
-    const st = top(sx,sz);
-    const sy = G.ny-1-(st<0 ? SEA+1 : st);            // mirrored, like everything
+    /* IN FRONT OF THE DOOR, far enough back to see the whole house. Walking
+       outward from the doorway until there is open sand under your feet finds
+       a spot that is on the island by construction, rather than one that is
+       computed and hoped for. */
+    let sx = Math.round(cx), sz = Math.round(cz), ty = -1;
+    if(house){
+      const dx0 = house.x + ((house.w/2)|0);
+      for(let k=3;k<=9;k++){
+        const zz = house.z + house.d + k;
+        const t = landY(dx0, zz);
+        if(t >= 0 && t < SEAY){ sx=dx0; sz=zz; ty=t; }
+        else if(ty >= 0) break;
+      }
+    }
+    if(ty < 0){
+      /* no door to stand in front of: walk out from the peak instead */
+      const px=Math.round(cx), pz=Math.round(cz);
+      for(let k=0;k<G.nz;k++){
+        const t = landY(px, pz+k);
+        if(t >= 0 && t < SEAY){ sx=px; sz=pz+k; ty=t; }
+        else if(ty >= 0) break;
+      }
+    }
+    if(ty < 0){ sx = Math.round(cx); sz = Math.round(cz); ty = Math.max(1, landY(sx,sz)); }
     P.x=(sx+0.5)*BLOCK; P.z=(sz+0.5)*BLOCK;
-    /* down is +Y, so standing ON that block means being just under it */
-    P.y=(sy-1)*BLOCK - P_H*0.02;
+    /* down is +Y, so the ground is BELOW in y and the body hangs off its top
+       face: the end of the body that rests on it is P.y+P_H. */
+    P.y = ty*BLOCK - P_H - 0.02;
     P.vx=P.vy=P.vz=0; P.kx=P.kz=0; P.ground=true; P.coyote=COYOTE;
-    P.load=0;
-    const ax=(hx+0.5)*BLOCK-P.x, az=(hz+0.5)*BLOCK-P.z;
+    P.load=0; P.imm=0; P.immD=0;
+    /* facing the house if there is one, the peak if there is not */
+    const ax=(house?house.x+house.w*0.5:cx)*BLOCK - P.x;
+    const az=(house?house.z+house.d*0.5:cz)*BLOCK - P.z;
     P.yaw=Math.atan2(-ax,-az); P.pitch=0;
-    /* and clear the two blocks you are standing in, or you arrive inside sand */
-    for(let dy=-2;dy<=2;dy++){
-      const yy=sy-1+dy;
+    /* and the space you occupy is open, or you arrive inside the sand */
+    for(let k=1;k<=3;k++){
+      const yy=ty-k;
       if(!inside(sx,yy,sz)) continue;
-      const i=idx(sx,yy,sz);
-      if(dy<0){ G.st[i]=AIR; G.scenery[i]=0; }
+      const i=idx(sx,yy,sz); G.st[i]=AIR; G.scenery[i]=0;
+      for(const [ox,oz] of [[1,0],[-1,0],[0,1],[0,-1]]){
+        if(!inside(sx+ox,yy,sz+oz)) continue;
+        const j=idx(sx+ox,yy,sz+oz); G.st[j]=AIR; G.scenery[j]=0;
+      }
     }
   }
 
-  /* THE TREE, attached to the bank. Five wood blocks and a ball of leaves was
-     not a tree, it was a lollipop. A trunk, real BRANCHES going out and up,
-     and a leaf CLUSTER hung on each branch tip — because a canopy is a set of
-     separable handfuls and not one green sphere, which is also what lets wind
-     take one clump and leave the next.
-
-     MORTAL: leaf clusters carry the flag that says a thing is allowed to stop
-     existing. Nothing else in the world does yet. */
-  /* AND THE TREE STANDS CLEAR OF IT. It was placed by its own rule with no
-     idea where the hole was, so it grew inside the shaft. */
-  let tx=Math.round(cx-R*0.4), tz=Math.round(cz+R*0.25);
-  if(Math.hypot(tx-hx,tz-hz) < hr+3){ tx = hx - (hr+4); tz = hz + (hr+3); }
-  const tb=top(tx,tz);
-  /* and it has to FIT. The first branchy version reported 8 wood blocks for a
-     trunk meant to be a dozen: it was growing through the ceiling and set()
-     was silently dropping everything past it. A tree is as tall as the room
-     allows, less the crown. */
-  const th=Math.max(4, Math.min((G.ny*0.30)|0, G.ny-tb-4));
-  for(let y=tb+1;y<=tb+th;y++){
-    set(tx,y,tz,M_WOOD);
-    if(y>tb+2 && y<tb+th-1 && ((y-tb)&1)===0){   // a slight taper of buttress
-      set(tx+1,y,tz,M_WOOD); set(tx,y,tz+1,M_WOOD);
-    }
-  }
-  /* branches: out and up from the top third, then a cluster at each tip */
-  const tips=[];
-  for(let b=0;b<7;b++){
-    const a=(b/7)*Math.PI*2 + 0.4;
-    const len=2+((b%3));
-    const y0=tb+th-Math.round((b%4));
-    let bx=tx, by=y0, bz=tz;
-    for(let t=1;t<=len;t++){
-      bx=Math.round(tx+Math.cos(a)*t); bz=Math.round(tz+Math.sin(a)*t);
-      by=y0+Math.round(t*0.55);
-      set(bx,by,bz,M_WOOD);
-    }
-    tips.push([bx,by,bz]);
-  }
-  tips.push([tx, tb+th+1, tz]);
-  for(const [lx,ly,lz] of tips)
-    for(let dy=-1;dy<=2;dy++) for(let dz=-2;dz<=2;dz++) for(let dx=-2;dx<=2;dx++){
-      if(dx*dx+dy*dy*1.6+dz*dz > 4.4) continue;
-      set(lx+dx, ly+dy, lz+dz, M_LEAF);
-    }
-  /* stand on the bank beside the hole */
-  const sx=hx-hr-1, sz=hz, sy=top(sx,sz);
-  P.x=(sx+0.5)*BLOCK; P.y=(sy+1)*BLOCK+0.05; P.z=(sz+0.5)*BLOCK;
-  P.vx=P.vy=P.vz=0; P.pitch=0;
-  P.yaw=Math.atan2(-((hx-sx)), -((hz-sz)));
   G.island=true; G.dungeon=false; G.dirty=true;
   /* whatever the cave left lying about does not come with you */
   GRIT.n=0; GRIT.next=0; GRIT.live.fill(0);
   sandBuild();
+  /* and NOW the sea is poured, because sandBuild has just filled every air
+     block with air and would have washed it away */
+  G.seaB = seaB;
+  oceanFill();
+}
+
+/* ==========================================================================
+   THE OCEAN
+   --------------------------------------------------------------------------
+   Marcelo has asked for this more times than for anything else: "fix not just
+   gravity but the dungeon being a BREACHABLE CONTAINER INSIDE THE OCEAN", and
+   "I want to be able to see the damn beads on the water of the ocean".
+
+   So the sea is not blocks. It is brine in the grid - real S_SALT, the same
+   material a bead of it is made of - and it is promoted to block records the
+   instant it is poured, because it is poured settled and the builder already
+   knows the answer. Millions of cells, one rung up, and the tick never looks
+   at any of them.
+
+   Near you it is beads, because the bead pass draws whatever is inside the
+   draw radius and the cells are all still there. Past that it is one cube a
+   block. Both are the same water; which one you get is how far away it is. */
+function oceanFill(){
+  if(!SAND || !G.seaB || !G.seaB.length) return 0;
+  const w = SAND, S = SAND_DIV;
+  let n = 0;
+  for(const bi of G.seaB){
+    const bx = bi % G.nx, q = (bi/G.nx)|0, bz = q % G.nz, by = (q/G.nz)|0;
+    const x0=bx*S, y0=by*S, z0=bz*S;
+    if(x0+S > w.W || y0+S > w.H || z0+S > w.D) continue;
+    for(let y=y0;y<y0+S;y++) for(let z=z0;z<z0+S;z++){
+      const r = (y+1)*w.SY + (z+1)*w.SZ + (x0+1);
+      w.m.fill(S_SALT, r, r+S);
+    }
+    /* IT IS POURED ALREADY SETTLED, so it goes straight to the block rung.
+       Making the census discover this at 48 blocks a tick would be four
+       thousand ticks of finding out what we just wrote. */
+    ladPromote(bi, S_SALT);
+    n++;
+  }
+  /* AND THE SURFACE IS NOT DEMOTED, which was the first thing tried and it
+     was wrong twice over. The test was "is the block above it air", and in a
+     sea every block above a block of sea IS air - sea blocks are air in the
+     block world, that is the whole point - so it demoted the entire ocean:
+     3,075 of 3,286 blocks came straight back down to beads and ninety ticks
+     scanned twenty-five million cells.
+
+     And it was not needed anyway. A promoted block keeps every one of its
+     cells, and promoting sets the chunk's drawable flag, so the bead pass
+     already draws the water as BEADS inside the draw radius and the mass pass
+     draws it as blocks past it. Marcelo gets to see the beads on the water
+     without the water being beads. */
+  ladRelabel();
+  return n;
 }
 
 /* Block materials for the vials, one per grid material, made once and kept:
@@ -7894,7 +8113,7 @@ function buildIsland(){
    whose colour came from SMAT. */
 let VIAL_BASE = -1;
 const VIALS = [];                 // {i, name, grams}
-function buildVials(set, cx, cz, top){
+function buildVials(set, cx, cz, landY, rock0){
   if(VIAL_BASE < 0){
     VIAL_BASE = MATS.length;
     for(let m=0;m<SMAT.length;m++)
@@ -7903,45 +8122,94 @@ function buildVials(set, cx, cz, top){
   }
   const PLAQUE = VIAL_BASE + SMAT.length;
   VIALS.length = 0;
-  /* stand it on the high ground, away from the shore */
-  const hx = Math.round(cx - 3), hz = Math.round(cz + 2);
-  const gy = Math.max(1, top(hx,hz));
-  if(gy < 1) return;
   /* BIG ENOUGH FOR ALL OF THEM. Seven by three held ten vials and there are
      eighteen materials, so the census was silently short - and a census that
-     drops the last eight is worse than no census. Sized off SMAT so adding a
-     material widens the house rather than falling off the end of it. */
+     drops the last eight is worse than no census. Everything here is sized off
+     SMAT, so adding a material widens the house rather than falling off the
+     end of it. */
   const NEED = SMAT.length - 1;
-  /* AND IT HAS TO FIT THE WORLD IT IS IN. set() drops anything outside the grid
-     without saying so, so a house taller than the board is a floor and some
-     litter - which is exactly what it was on a three-block world. Height is
-     what the room above the ground allows; the shelves it cannot stack go
-     sideways instead. */
-  const room = Math.max(2, G.ny - gy - 1);
-  const H = Math.max(2, Math.min(6, Math.min(room, Math.ceil(Math.sqrt(NEED*2))+1)));
-  const W = Math.max(7, Math.ceil(NEED/Math.max(1,(H-1))) + 2);
   const D = 5;
-  /* a wooden box with a doorway, which is all a house has to be to be one */
-  for(let dz=0;dz<D;dz++) for(let dx=0;dx<W;dx++) for(let dy=0;dy<=H;dy++){
-    const edge = dx===0||dx===W-1||dz===0||dz===D-1;
-    const roof = dy===H;
-    if(!edge && !roof) continue;
-    if(dz===D-1 && dx===((W/2)|0) && dy<2) continue;      // the door
-    set(hx+dx, gy+dy, hz+dz, M_WOOD);
+  let H=0, W=0, best=null;
+  /* AS TALL AS THE ISLAND ALLOWS, AND THEN AS LONG AS IT NEEDS TO BE. Up is
+     -y, so a house of H levels standing on ground at gy needs gy >= H+1 or its
+     roof goes through the top of the world - and set() drops what goes past it
+     without saying so, which is how a six-block house on a three-block island
+     became a floor and some litter. Try tall first and give height up before
+     giving up vials. */
+  for(H=5; H>=3 && !best; H--){
+    const shelves = Math.max(1, Math.floor((H-1)/2));
+    W = Math.max(7, Math.ceil(NEED/shelves)+2);
+    for(let hz=1; hz<G.nz-D-1; hz++) for(let hx=1; hx<G.nx-W-1; hx++){
+      let lo=1e9, hi=-1, ok=true;
+      for(let dz=0;dz<D && ok;dz++) for(let dx=0;dx<W;dx++){
+        const t=landY(hx+dx,hz+dz);
+        if(t<0){ ok=false; break; }
+        if(t<lo) lo=t;
+        if(t>hi) hi=t;
+      }
+      if(!ok || hi < H+1) continue;
+      /* flat wins, and among flat ones the one that is not right at the water */
+      const sc = (hi-lo)*10 + Math.abs(hi-(H+2));
+      if(!best || sc < best.sc) best={hx,hz,gy:hi,sc};
+    }
+    if(best) break;
+  }
+  if(!best){
+    /* nowhere flat enough: stand it on the peak and CUT THE GROUND to fit,
+       which is what anybody building a house on a hill does */
+    H = 4; const shelves = Math.max(1, Math.floor((H-1)/2));
+    W = Math.max(7, Math.ceil(NEED/shelves)+2);
+    const hx = Math.max(1, Math.min(G.nx-W-1, Math.round(cx-W/2)));
+    const hz = Math.max(1, Math.min(G.nz-D-1, Math.round(cz-D/2)));
+    let gy = landY(Math.round(cx), Math.round(cz));
+    if(gy < 0) gy = H+2;
+    best = {hx, hz, gy: Math.max(H+1, gy), sc:0};
+  }
+  const {hx, hz, gy} = best;
+  /* LEVEL THE GROUND. Fill under the footprint so it is not standing on stilts
+     and carve above it so it is not full of hillside. */
+  for(let dz=0;dz<D;dz++) for(let dx=0;dx<W;dx++){
+    for(let y=gy; y<rock0; y++) set(hx+dx, y, hz+dz, y>gy+1 ? M_STONE : M_DRYSAND);
+    for(let y=gy-H; y<gy; y++){
+      const i = inside(hx+dx,y,hz+dz) ? idx(hx+dx,y,hz+dz) : -1;
+      if(i>=0){ G.st[i]=AIR; G.scenery[i]=0; }
+    }
+  }
+  /* a wooden box with a floor, a doorway and windows - which is what a house
+     has to have to read as one rather than as a crate */
+  const doorX = (W/2)|0;
+  for(let dz=0;dz<D;dz++) for(let dx=0;dx<W;dx++){
+    set(hx+dx, gy, hz+dz, M_WOOD);                                  // the floor
+    for(let dy=1; dy<=H; dy++){
+      const edge = dx===0||dx===W-1||dz===0||dz===D-1;
+      const roof = dy===H;
+      if(!edge && !roof) continue;
+      if(dz===D-1 && dx===doorX && dy<=2) continue;                 // the door
+      /* WINDOWS, at the height of a face, on all four walls. A wall with a
+         hole at eye level is most of the difference between a house and a
+         crate, and it is also how what is inside gets seen from outside. */
+      if(!roof && dy===2){
+        if((dz===0||dz===D-1) && (dx===1||dx===W-2||dx===((W/2)|0)+2)) continue;
+        if((dx===0||dx===W-1) && dz===2) continue;
+      }
+      set(hx+dx, gy-dy, hz+dz, M_WOOD);
+    }
   }
   /* THE RACK. One vial a material, along the back wall and up the shelves, and
      a plaque directly above each one. */
+  const cols = W-2, shelves = Math.max(1, Math.floor((H-1)/2));
   let k = 0;
   for(let m=0;m<SMAT.length;m++){
     if(m===S_AIR) continue;
-    const shelf = (k/(W-2))|0, col = k%(W-2);
-    if(shelf >= H-1) break;
-    const vx = hx+1+col, vy = gy+shelf*2, vz = hz+1;
+    const shelf = (k/cols)|0, col = k%cols;
+    if(shelf >= shelves) break;
+    const vx = hx+1+col, vy = gy-1-shelf*2, vz = hz+1;
     set(vx, vy,   vz, VIAL_BASE+m);
-    set(vx, vy+1, vz, PLAQUE);
+    set(vx, vy-1, vz, PLAQUE);
     VIALS.push({i:idx(vx,vy,vz), x:vx, y:vy, z:vz, name:SMAT[m].n, grams:1000});
     k++;
   }
+  return {x:hx, y:gy, z:hz, w:W, h:H, d:D, door:[hx+doorX, gy-1, hz+D-1]};
 }
 /* Walk up to one and it tells you what it holds. A block cannot carry text -
    the glyph batch draws digits and arrows and nothing else - so the name
@@ -7953,7 +8221,7 @@ function tickVials(){
   let best=-1, bd=2.6*2.6;
   for(let k=0;k<VIALS.length;k++){
     const v=VIALS[k];
-    const dx=(v.x+0.5)*BLOCK-P.x, dy=(v.y+0.5)*BLOCK-(P.y+EYE), dz=(v.z+0.5)*BLOCK-P.z;
+    const dx=(v.x+0.5)*BLOCK-P.x, dy=(v.y+0.5)*BLOCK-eyeY(), dz=(v.z+0.5)*BLOCK-P.z;
     const d=dx*dx+dy*dy+dz*dz;
     if(d<bd){ bd=d; best=k; }
   }
@@ -7987,7 +8255,10 @@ function bossBlows(x,y,z){
      time and the boss dying is when you find that out, so from here on down is
      +Y and it never goes back. */
   G.gravK = -1;
-  P.vy = Math.max(P.vy, 6.5);
+  /* AND YOU GO THE WAY THAT IS NOW UP. A positive vy under reversed gravity is
+     DOWNWARD - it drove you into the floor at the moment the floor became the
+     ceiling. Up is the direction gravity is not pulling, and that is one sign. */
+  P.vy = 6.5 * gsign();
   /* AND EVERYTHING SETTLED HAS TO BE TOLD. Settled material costs nothing
      precisely because nobody looks at it, so a world where gravity has just
      reversed is a world full of sand that does not know. Every chunk holding
@@ -8087,7 +8358,7 @@ function checkWin(){
      So the ending is triggered HERE, where completion is actually decided,
      and killEnemy's call is now merely the usual way of arriving. */
   if(done && G.dungeon){
-    if(!G.noWin) bossBlows(P.x, P.y+EYE, P.z);
+    if(!G.noWin) bossBlows(P.x, eyeY(), P.z);
     return;
   }
   if(done){
@@ -8838,11 +9109,11 @@ function blinkMine(e){
     const side = (rnd()-0.5)*10;
     const rise = (rnd()-0.5)*7;
     const nx = P.x + r.dx*dist + rx*side;
-    const ny = P.y + EYE + r.dy*dist + rise;
+    const ny = eyeY() + r.dy*dist + rise;
     const nz = P.z + r.dz*dist + rz*side;
     if(solidAtWorld(nx,ny,nz)) continue;
     // and it has to be able to see you from there, or the blink is a cheat
-    const bx=P.x-nx, by=(P.y+EYE)-ny, bz=P.z-nz;
+    const bx=P.x-nx, by=eyeY()-ny, bz=P.z-nz;
     const bd=Math.hypot(bx,by,bz)||1;
     const h=raycast(nx,ny,nz, bx/bd,by/bd,bz/bd, bd, false);
     if(h.hit && h.t < bd-1.0) continue;
@@ -8881,7 +9152,7 @@ function startFinale(){
   for(let k=0;k<40;k++){
     const dd = 14 + rnd()*8;
     const nx = P.x + r.dx*dd + (rnd()-0.5)*8;
-    const ny = P.y + EYE + r.dy*dd + (rnd()-0.5)*4;
+    const ny = eyeY() + r.dy*dd + (rnd()-0.5)*4;
     const nz = P.z + r.dz*dd + (rnd()-0.5)*8;
     if(solidAtWorld(nx,ny,nz)) continue;
     e.x=nx; e.y=ny; e.z=nz; break;
@@ -8898,7 +9169,7 @@ function toggleLock(){
   const r=aimRay();
   let best=null;
   for(const e of enemies){
-    const vx=e.x-P.x, vy=e.y-(P.y+EYE), vz=e.z-P.z;
+    const vx=e.x-P.x, vy=e.y-eyeY(), vz=e.z-P.z;
     const d=Math.hypot(vx,vy,vz)||1;
     if(d > REACH) continue;
     const dot = (vx*r.dx + vy*r.dy + vz*r.dz)/d;
@@ -8913,7 +9184,7 @@ function updateLock(dt){
   if(!G.lockOn) return;
   if(G.state!=='play' || enemies.indexOf(G.lockOn)<0){ G.lockOn=null; return; }
   const e=G.lockOn;
-  const dx=e.x-P.x, dy=e.y-(P.y+EYE), dz=e.z-P.z;
+  const dx=e.x-P.x, dy=e.y-eyeY(), dz=e.z-P.z;
   if(Math.hypot(dx,dy,dz) > REACH*1.3){ G.lockOn=null; return; }
   const wantYaw = Math.atan2(-dx,-dz);
   const wantPitch = Math.atan2(dy, Math.hypot(dx,dz));
@@ -9909,7 +10180,7 @@ function frame(now){
      without the world coming off its hinges. */
   const shk = G.shake*G.shake;
   const camX = P.x + (Math.random()-0.5)*shk*0.42;
-  const camY = P.y + EYE + Math.sin(P.bob*2)*0.035 + (Math.random()-0.5)*shk*0.42;
+  const camY = eyeY() + Math.sin(P.bob*2)*0.035 + (Math.random()-0.5)*shk*0.42;
   const camZ = P.z + (Math.random()-0.5)*shk*0.42;
   const yaw = P.yaw, us = gsign();
   /* and the pitch inverts with the roll, or looking up would look down */
