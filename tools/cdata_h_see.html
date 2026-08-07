@@ -12963,88 +12963,51 @@ setScreen('menu');
 })();
 requestAnimationFrame(frame);
 
-window.requestAnimationFrame = function(){ return 0; };
-/* IS THERE A DUNGEON IN THERE AT ALL?
+/* LOOK AT THE THING. The island has never once been photographed from outside,
+   and every picture that tried put the camera inside the sand.
 
-   Marcelo: "proceed to build world and functioning dungeon (it is being
-   generated with 1 or 4 mines sometimes)."
-
-   One mine is not a minesweeper. The cause is not the generator - it lays out a
-   whole board - it is buildOuterWorld cropping that board to a cylinder whose
-   INTERIOR is what is left after a three-block shell, and on an 18-wide grid
-   that is a tube about seven blocks across. So this counts what actually
-   survives, over several seeds, and says whether it is a game.
-
-   Everything is prefixed du: the game already declares mark, set, landY, idx
-   and a duplicate const is a SyntaxError that runs nothing at all. */
-window.__err=[];
-window.addEventListener('error',e=>window.__err.push('ERR '+e.message));
-document.body.dataset.r='STAGE start';
+   Down is +Y after the boss, so the SKY is at small y and the sea floor is at
+   large y. The camera goes well above the waterline, well outside the island's
+   radius, and looks back down at it. Prefixed se. */
 setTimeout(()=>{ try{
   G.muted=true; try{ snd.setMute(true); }catch(e){}
-  const R=[];
-  let duMinT=1e9, duMaxT=0, duMinS=1e9, duBad=0, duCut=0;
+  G.mode=MODE_DUNGEON; seed=5; genWorld(0); G.state='play';
+  G.noWin=true; G.gravK=-1; rollReset();
+  revealIsland();
+  bossHole((G.holeX+0.5)*BLOCK, (G.holeZ+0.5)*BLOCK);
 
-  for(const duSeed of [3,7,11,19,23,31]){
-    document.body.dataset.r='STAGE seed '+duSeed;
-    G.mode=MODE_DUNGEON; seed=duSeed; genWorld(0); G.state='play';
-
-    /* ONLY WHAT IS INSIDE THE SHELL IS THE DUNGEON. G.lump is the playable
-       volume the shell encloses; everything outside it is seamount, beach and
-       sea, and counting those was the first thing that made this look fine. */
-    const L=G.lump, duIn=(x,y,z)=>L && y>=L.y0 && y<=L.y1 &&
-      Math.hypot(x-L.cx, z-L.cz) <= L.r;
-    let duMines=0, duSafe=0;
-    const duOpen = new Set();
-    for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
-      if(!duIn(x,y,z)) continue;
-      const i=idx(x,y,z);
-      if(G.hull && G.hull[i]) continue;
-      if(G.mine[i]) duMines++;
-      else if(G.st[i]!==AIR) duSafe++;
-      else duOpen.add(i);
-    }
-    /* CAN YOU GET ANYWHERE FROM WHERE YOU STAND. Flood the open blocks from the
-       player's own block and compare with how many open blocks there are: a
-       dungeon you cannot walk around is not a dungeon however many mines it
-       has. Only the blocks BELOW the beach count - above it is sky and sea. */
-    const duPx=Math.floor(P.x/BLOCK), duPy=Math.floor(P.y/BLOCK), duPz=Math.floor(P.z/BLOCK);
-    let duReach=0;
-    {
-      const st=[idx(duPx,duPy,duPz)], seen=new Set(st);
-      if(!duOpen.has(st[0])) st.length=0;
-      while(st.length){
-        const c=cellXYZ(st.pop()); duReach++;
-        for(let k=0;k<6;k++){
-          const ax=c[0]+NB26X[k], ay=c[1]+NB26Y[k], az=c[2]+NB26Z[k];
-          if(!inside(ax,ay,az)) continue;
-          const j=idx(ax,ay,az);
-          if(!duOpen.has(j) || seen.has(j)) continue;
-          seen.add(j); st.push(j);
-        }
-      }
-    }
-    const duCon = duOpen.size ? duReach/duOpen.size : 0;
-    if(duMines < 20) duBad++;
-    if(duCon < 0.999) duCut++;
-    if(duMines<duMinT) duMinT=duMines;
-    if(duMines>duMaxT) duMaxT=duMines;
-    if(duSafe<duMinS) duMinS=duSafe;
-    R.push(`seed ${duSeed}: grid ${G.nx}x${G.ny}x${G.nz}, ${duMines} mines, ${duSafe} safe, ` +
-           `${duOpen.size} open blocks, you reach ${duReach} (${(duCon*100).toFixed(0)}%), ` +
-           `${G.pockets} pockets, spawn ${duPx},${duPy},${duPz}` +
-           (duMines<20 ? '  <- NOT A GAME' : ''));
-  }
-  R.push(`ACROSS 6 SEEDS: ${duMinT} to ${duMaxT} mines, fewest safe blocks ${duMinS}, ` +
-         `${duBad} of 6 under twenty mines ` +
-         (duBad===0 ? 'ok, every one of them is a minesweeper' : 'FAULT: it is not a game'));
-  R.push(`connectivity: ${duCut} of 6 seeds have somewhere you cannot walk to ` +
-         (duCut===0 ? 'ok, one connected dungeon every time' : 'FAULT'));
-  R.push(`the grid costs ${SAND ? (SAND.bytes()/1048576).toFixed(2) : '?'} MB of beads`);
-  R.push(window.__err.length ? ('FAULT '+window.__err.join(' | ')) : 'no errors');
-  document.body.dataset.r=R.join(' ~ ');
-}catch(err){ document.body.dataset.r='THREW at '+(document.body.dataset.r||'?')+
-  ': '+err.message+' @ '+((err.stack||'').split('\n')[1]||''); }}, 300);
+  const seCx=(G.nx*0.5)*BLOCK, seCz=(G.nz*0.5)*BLOCK;
+  const seQ = (k,d) => { const m=new RegExp('[?&]'+k+'=([-\\d.]+)').exec(location.search);
+                         return m ? parseFloat(m[1]) : d; };
+  /* how far out, and how high above the waterline, as fractions of the world */
+  const seOut = seQ('out', 1.15), seUp = seQ('up', 0.55);
+  const seA   = seQ('ang', 0.7) * Math.PI;
+  P.x = seCx + Math.cos(seA)*G.nx*BLOCK*seOut*0.5;
+  P.z = seCz + Math.sin(seA)*G.nz*BLOCK*seOut*0.5;
+  /* small y is UP: the waterline is G.seaY, so go above it */
+  P.y = (G.seaY - G.ny*seUp*0.5) * BLOCK;
+  const vx=seCx-P.x, vz=seCz-P.z, vy=(G.seaY+2)*BLOCK - P.y;
+  P.yaw = Math.atan2(-vx,-vz);
+  P.pitch = seQ("ps",1) * Math.atan2(vy, Math.hypot(vx,vz)); // sign flips with gravity
+  P.vx=P.vy=P.vz=0; P.fx.fill(0); P.hp=P.hpMax=HP_START;
+  G.dirty=true; rebuildWorld();
+  /* FREEZE IT. Left in play the physics runs for the whole virtual budget and
+     the player is buried alive before the shutter opens - the first attempt
+     photographed a game-over screen reading YOU ARE SAND NOW. */
+  G.state='pause'; P.vx=P.vy=P.vz=0;
+  /* AND IT HAS TO BE DAYLIGHT. darkNow() only gives the sun's light when
+     G.island is set, and the sun's elevation is read through gsign(), so a
+     paused world with a cold clock comes out as a cave at midnight - which is
+     what the second attempt photographed. */
+  G.island = true; try{ skyNow(); }catch(e){}
+  G.dirty=true; rebuildWorld();
+  try{ document.getElementById('menu').classList.remove('on'); }catch(e){}
+  document.body.dataset.r = `camera ${P.x.toFixed(0)},${P.y.toFixed(0)},${P.z.toFixed(0)} ` +
+    `yaw ${P.yaw.toFixed(2)} pitch ${P.pitch.toFixed(2)} | waterline y ${G.seaY} beach y ${G.rock0} ` +
+    `| world ${G.nx}x${G.ny}x${G.nz} cells of ${BLOCK} m | light ${darkNow().toFixed(2)} `+
+    `sunY ${_sun?_sun[1].toFixed(2):'?'} | inside stone: ` +
+    (solidAtWorld(P.x,P.y,P.z) ? 'YES - THE CAMERA IS BURIED' : 'no');
+}catch(err){ document.body.dataset.r='THREW: '+err.message; }}, 300);
 
 })();
 </script>

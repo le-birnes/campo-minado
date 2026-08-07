@@ -775,3 +775,29 @@ Four things the camera had to learn, all facts about this world:
     with a cold clock renders as a cave at midnight
 
 SEEN AND NOT CHASED: the end screen reads 'You opened 443 of 247 blocks'.
+
+
+### THE ISLAND WAS WIDER THAN THE WORLD - found 2026-08-07
+
+RISL, how far the island's sand reaches, came out at 14 on a 26-wide grid
+whose half-width is 13. So the island ran to the edge of the array in every
+direction and THERE WAS NO OCEAN IN THE WORLD AT ALL. The sky shader has
+been drawing an endless sea below the horizon since the day it was written -
+uSea, with the horizon as a LINE rather than a fade - and none of it could
+ever be seen, because a slab of rock stood in front of it everywhere.
+
+The fill also ran to y < G.ny, so the island was a slab down to the last row
+of the array rather than a mountain with its foot on a seabed.
+
+Fixed: world 40x40x38, six cells of open water outside the island, fill
+stops at a sea floor. 54-63 mines over six seeds, connected every time, and
+a body fits everywhere in both modes.
+
+THE LESSON, AND IT IS THE SAME ONE AS THE PAGED GRID: the endless sea was
+never the hard part. It is a RECORD and it always was. What was hard was
+that I kept trying to STORE the ground, and a stored thing has an edge, and
+the edge was nearer than the island.
+
+NEXT, with his number: R = 600 km. The horizon is sqrt(2*R*h) away - 2.8 km
+from an eye 2 m up - and dips 0.0026 rad below level. Both go straight into
+FS_SKY, which already has the sea and the horizon line in it.

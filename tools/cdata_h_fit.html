@@ -939,7 +939,14 @@ const CUSTOM = 3;
    footprint still allocates a page only where something has actually moved.
    The block arrays grow with it and they are bytes - about 1.3 MB for all of
    them together. */
-const DUNGEON = {nx:26, nz:26, ny:38, dungeon:true};
+/* WIDE ENOUGH TO HAVE A SEA IN IT. RISL - how far the island's sand reaches -
+   came out at 14 on a 26-wide grid whose half-width is 13, so THE ISLAND WAS
+   WIDER THAN THE WORLD. There was no ocean anywhere in the array: the island
+   ran to the edge in every direction, and that is why every photograph from
+   outside is a cube. The sky shader has drawn an endless sea below the horizon
+   the whole time and nothing could ever be seen of it, because a slab of rock
+   was standing in front of it. */
+const DUNGEON = {nx:40, nz:40, ny:38, dungeon:true};
 /* HOW WIDE THE PLAYABLE DUNGEON IS, in blocks - the old whole board, which is
    what a difficulty used to mean. The WORLD around it is sized from this
    rather than the other way round. */
@@ -5364,15 +5371,28 @@ function sandTick(w, gdir){
 
      Only the game's own world gets the sphere. A harness that builds a tank and
      ticks it has no player in it and must simulate all of what it built. */
-  const sphere = (w === SAND && SIM_SPHERE) ? SIM_R + SCS*CELL_M*0.87 : 0;
-  const sph2 = sphere*sphere;
+  /* TO THE CHUNK'S BOX, NOT ITS MIDDLE. Measuring to the centre and adding a
+     half-diagonal admits a ball of 9.6 m instead of 7 - and measured, that is
+     663,552 cells in a tick against a ceiling of 217,961, three times over.
+     The distance to the nearest point of the chunk is the honest test and it
+     costs three subtractions. */
+  const sphere = (w === SAND && SIM_SPHERE) ? SIM_R : 0;
+  const sph2 = sphere*sphere, CHM = SCS*CELL_M;
+  /* and the BOX around the ball, in cells, so a chunk that only clips its
+     corner is scanned only where it clips - otherwise the bound is "chunks
+     that touch it", which is a sixth again bigger than the thing it bounds */
+  const spx0 = Math.floor((P.x-SIM_R)/CELL_M), spx1 = Math.ceil((P.x+SIM_R)/CELL_M);
+  const spy0 = Math.floor((P.y-SIM_R)/CELL_M), spy1 = Math.ceil((P.y+SIM_R)/CELL_M);
+  const spz0 = Math.floor((P.z-SIM_R)/CELL_M), spz1 = Math.ceil((P.z+SIM_R)/CELL_M);
 
   for(let r=0; r<rect.length; r+=7){
     const c = rect[r];
     const cx = c % CW, q = (c/CW)|0, cz = q % CD, cy = (q/CD)|0;
     const bx = cx*SCS, by = cy*SCS, bz = cz*SCS;
     if(sph2){
-      const ex=(cx+0.5)*SCS*CELL_M-P.x, ey=(cy+0.5)*SCS*CELL_M-P.y, ez=(cz+0.5)*SCS*CELL_M-P.z;
+      const ex=Math.max(cx*CHM-P.x, 0, P.x-(cx+1)*CHM);
+      const ey=Math.max(cy*CHM-P.y, 0, P.y-(cy+1)*CHM);
+      const ez=Math.max(cz*CHM-P.z, 0, P.z-(cz+1)*CHM);
       if(ex*ex+ey*ey+ez*ez > sph2){
         /* put it back exactly as it was and spend nothing on it */
         const o=c*6, b=w.cb;
@@ -5383,8 +5403,14 @@ function sandTick(w, gdir){
         continue;
       }
     }
-    const x0=rect[r+1], y0=rect[r+2], z0=rect[r+3];
-    const x1=rect[r+4], y1=rect[r+5], z1=rect[r+6];
+    let x0=rect[r+1], y0=rect[r+2], z0=rect[r+3];
+    let x1=rect[r+4], y1=rect[r+5], z1=rect[r+6];
+    if(sph2){
+      if(spx0-bx > x0) x0 = spx0-bx;   if(spx1-bx < x1) x1 = spx1-bx;
+      if(spy0-by > y0) y0 = spy0-by;   if(spy1-by < y1) y1 = spy1-by;
+      if(spz0-bz > z0) z0 = spz0-bz;   if(spz1-bz < z1) z1 = spz1-bz;
+      if(x1<x0 || y1<y0 || z1<z0) continue;
+    }
     const span = x1-x0;
     for(let ny=y0; ny<=y1; ny++){
       /* Bottom-up when things fall, top-down when they do not: the ending
@@ -6164,7 +6190,10 @@ function ladDraw(d, n){
   if(!LADM || !SAND) return n;
   const R2 = SAND_BEAD_R*SAND_BEAD_R, F2 = LAD_DRAW_R*LAD_DRAW_R;
   const M2 = LAD_MASS_R*LAD_MASS_R;
-  const nx=G.nx, ny=G.ny, nz=G.nz, N=nx*ny*nz;
+  /* THE MASS PASS DRAWS LATTICE BLOCKS NOW, not cells: the ladder moved down
+     to the storage unit, so a mass is a body of 1.5 m blocks and its bounding
+     box is measured in them. */
+  const nx=LNX, ny=LNY, nz=LNZ, N=nx*ny*nz;
   const cap = Math.min(SAND_DRAW_MAX, n + LAD_DRAW_MAX);
   let drawn = 0;
   /* THE TOP RUNG FIRST. A mass whose blocks fill most of its own bounding box
@@ -6176,17 +6205,17 @@ function ladDraw(d, n){
     if(!m || m.dead || m.n < LAD_MASS_MIN) continue;
     const bw=m.x1-m.x0+1, bh=m.y1-m.y0+1, bd=m.z1-m.z0+1;
     if(m.n < bw*bh*bd*0.55) continue;                    // too ragged to be one box
-    const cxm=(m.x0+bw*0.5)*BLOCK, cym=(m.y0+bh*0.5)*BLOCK, czm=(m.z0+bd*0.5)*BLOCK;
+    const cxm=(m.x0+bw*0.5)*LAT_M, cym=(m.y0+bh*0.5)*LAT_M, czm=(m.z0+bd*0.5)*LAT_M;
     const ex=cxm-P.x, ey=cym-P.y, ez=czm-P.z;
     /* the distance to the BOX, not to its middle: standing on the sea you are
        inside it, and a body you are inside is not far away */
-    const gx=Math.max(0, Math.abs(ex)-bw*BLOCK*0.5);
-    const gy=Math.max(0, Math.abs(ey)-bh*BLOCK*0.5);
-    const gz=Math.max(0, Math.abs(ez)-bd*BLOCK*0.5);
+    const gx=Math.max(0, Math.abs(ex)-bw*LAT_M*0.5);
+    const gy=Math.max(0, Math.abs(ey)-bh*LAT_M*0.5);
+    const gz=Math.max(0, Math.abs(ez)-bd*LAT_M*0.5);
     if(gx*gx+gy*gy+gz*gz < M2) continue;                 // near enough to want blocks
     if(n >= cap) break;
     const o = n*CUBE_STRIDE;
-    composeAA(d,o, cxm,cym,czm, bw*BLOCK, bh*BLOCK, bd*BLOCK);
+    composeAA(d,o, cxm,cym,czm, bw*LAT_M, bh*LAT_M, bd*LAT_M);
     d[o+16]=SM_COL[m.mat*3]; d[o+17]=SM_COL[m.mat*3+1]; d[o+18]=SM_COL[m.mat*3+2];
     d[o+19]=0.5; d[o+20]=SM_EMIS[m.mat];
     d[o+21]=0; d[o+22]=0; d[o+23]=d[o+24]=d[o+25]=0;
@@ -6197,7 +6226,7 @@ function ladDraw(d, n){
     const mat = LADM[bi]; if(!mat) continue;
     if(boxed.size && boxed.has(LADS[bi])) continue;      // its mass drew it
     const x = bi % nx, q = (bi/nx)|0, z = q % nz, y = (q/nz)|0;
-    const px=(x+0.5)*BLOCK, py=(y+0.5)*BLOCK, pz=(z+0.5)*BLOCK;
+    const px=(x+0.5)*LAT_M, py=(y+0.5)*LAT_M, pz=(z+0.5)*LAT_M;
     const ex=px-P.x, ey=py-P.y, ez=pz-P.z;
     const dd = ex*ex+ey*ey+ez*ez;
     if(dd < R2 || dd > F2) continue;
@@ -6209,17 +6238,24 @@ function ladDraw(d, n){
     }
     if(!open) continue;
     const o = n*CUBE_STRIDE;
-    composeAA(d,o, px,py,pz, BLOCK,BLOCK,BLOCK);
+    composeAA(d,o, px,py,pz, LAT_M,LAT_M,LAT_M);
     let c0=SM_COL[mat*3], c1=SM_COL[mat*3+1], c2=SM_COL[mat*3+2];
     if(SM_K[mat] === K_LIQUID){
-      /* a block of it is 2.8 m thick, so anything with more than one block
+      /* a lattice block of it is 1.5 m thick, so anything with more than one
          under it is already opaque - but a single block over the seabed is
          not, and that is the shelf you can see the sand through */
       let dn=0, yy=y, gd=sandDir();
       while(dn<6 && LADM[((yy+gd)*nz + z)*nx + x] === mat && yy+gd>=0 && yy+gd<ny){ yy+=gd; dn++; }
-      const a = Math.max(0.34, 1 - Math.exp(-SM_OPAC[mat]*(dn+1)*BLOCK));
-      const bi2 = (yy+gd>=0 && yy+gd<ny) ? ((yy+gd)*nz + z)*nx + x : -1;
-      const bm = (bi2>=0 && G.st[bi2]!==AIR) ? MATS[G.mat[bi2]].c : [0.20,0.18,0.16];
+      const a = Math.max(0.34, 1 - Math.exp(-SM_OPAC[mat]*(dn+1)*LAT_M));
+      /* WHAT IS UNDER IT IS A CELL, NOT A LATTICE BLOCK. x, y and z count
+         lattice blocks now and G.st counts minesweeper cells, so the seabed
+         has to be asked for in its own units or the lookup runs off the end
+         of the array - which it did, loudly, on the first frame. */
+      const uy = yy+gd;
+      const bi2 = (uy>=0 && uy<ny)
+        ? (((uy/LAT_DIV)|0)*G.nz + ((z/LAT_DIV)|0))*G.nx + ((x/LAT_DIV)|0) : -1;
+      const bm = (bi2>=0 && bi2<G.st.length && G.st[bi2]!==AIR)
+        ? MATS[G.mat[bi2]].c : [0.20,0.18,0.16];
       c0 = bm[0]*0.75 + (c0-bm[0]*0.75)*a;
       c1 = bm[1]*0.75 + (c1-bm[1]*0.75)*a;
       c2 = bm[2]*0.75 + (c2-bm[2]*0.75)*a;
@@ -9525,10 +9561,17 @@ function buildOuterWorld(){
     const rough = Math.sin(x*0.9)*Math.cos(z*0.7)*0.7 + Math.sin(z*1.7)*0.5;
     return Math.round(ISLY + t*t*(SEAY+4-ISLY) + rough*t);
   };
+  /* AND IT STANDS ON A SEA FLOOR RATHER THAN FILLING THE WORLD TO ITS BOTTOM.
+     Running the fill to y < G.ny made the island a SLAB - surface on top,
+     solid rock all the way down to the last row of the array - so from outside
+     it read as a block of stone rather than as a mountain with water round it.
+     A seamount narrows as it goes up and its foot is on the seabed; below the
+     seabed there is nothing to draw and nothing to store. */
+  const SEAB = G.ny - 2;                        // the ocean floor
   for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
     if(dist(x,z) <= RCYL) continue;             // the cylinder is not sand
     const t = landY(x,z); if(t<0) continue;
-    for(let y=Math.max(0,t); y<G.ny; y++)
+    for(let y=Math.max(0,t); y<=SEAB; y++)
       set(x,y,z, y > t+2 ? M_STONE : (y >= SEAY-1 ? M_WETSAND : M_DRYSAND));
   }
 
