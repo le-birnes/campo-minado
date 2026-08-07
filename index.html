@@ -4022,6 +4022,12 @@ class SandWorld {
     this.cw = new Uint8Array(this.nc);      // awake: scan me next tick
     this.cf = new Uint8Array(this.nc);      // the rect is ALREADY the whole chunk
     this.cl = new Uint8Array(this.nc);      // might hold something the sand layer draws
+    /* HOW MANY OF ITS EIGHT BLOCKS ARE PROMOTED. A chunk is 32 cells and a
+       block is 16, so a chunk is exactly 2x2x2 blocks - which is why the
+       ladder can hang off the same bookkeeping the dirty rect already keeps.
+       Zero here means mark() has nothing to check, and that is the common
+       case in a world with no body of fluid in it. */
+    this.cbulk = new Uint8Array(this.nc);
     this.awake = [];
     for(let c=0;c<this.nc;c++) this.reset(c);
     this.tick = 0;
@@ -4046,6 +4052,11 @@ class SandWorld {
      the world is quiet, because a quiet chunk never saturates. */
   mark(c, lx,ly,lz){
     this.cl[c]=1;
+    /* SOMETHING CHANGED IN A PROMOTED BLOCK, so it stops being one record and
+       goes back to being four thousand beads - and ONLY it does. The local
+       coordinates say which of the eight it was, so a bead landing on the sea
+       liquefies the block it landed in and not the ocean. */
+    if(this.cbulk[c]) ladBreak(this, c, lx,ly,lz);
     if(this.cf[c]) return;
     const b=this.cb, o=c*6;
     const x0 = lx>0?lx-1:0, x1 = lx<SCS-1?lx+1:SCS-1;
@@ -4363,6 +4374,12 @@ function sandTick(w, gdir){
       }
     }
   }
+  /* AND WHATEVER WENT QUIET IS A CANDIDATE FOR THE LADDER. A chunk that was
+     awake and did not get marked again during the tick has settled, so its
+     eight blocks are worth asking "are you all one thing now". This is the
+     only place a census is ever queued, which is what keeps the ladder free
+     in a world where nothing is moving. */
+  if(LADM) for(let k=0;k<was.length;k++){ const c=was[k]; if(!w.cw[c]) ladQuiet(w, c); }
   w.stats.scanned = SSCAN;
   w.stats.moves = SMOV;
   w.tick++;
@@ -4510,13 +4527,342 @@ function sandShed(k){ if(P.load) P.load = Math.max(0, P.load*(1-k)); }
    under is looking at all of it again. */
 function sandWakeLoose(){
   const w=SAND; if(!w) return;
+  /* THE INSIDE OF A BODY OF WATER DOES NOT CARE WHICH WAY DOWN IS. Every
+     neighbour of an interior cell is the same water, so it has nowhere to go
+     under any gravity, and waking it is a million cells finding that out one
+     at a time. Only the SURFACE of a mass is demoted - a block with a face on
+     something that is not more of itself - and the physics spreads inward from
+     there if it turns out it needs to. */
+  if(LADM){
+    const nx=G.nx, ny=G.ny, nz=G.nz;
+    const surf = [];
+    for(let bi=0; bi<LADM.length; bi++){
+      const mat = LADM[bi]; if(!mat) continue;
+      const x=bi%nx, q=(bi/nx)|0, z=q%nz, y=(q/nz)|0;
+      for(let k=0;k<6;k++){
+        const ax=x+NB26X[k], ay=y+NB26Y[k], az=z+NB26Z[k];
+        if(ax<0||ay<0||az<0||ax>=nx||ay>=ny||az>=nz){ surf.push(bi); break; }
+        if(LADM[(ay*nz + az)*nx + ax] !== mat){ surf.push(bi); break; }
+      }
+    }
+    for(const bi of surf) ladDemote(bi);
+  }
   for(let c=0;c<w.nc;c++){
     if(!w.cl[c]) continue;
+    /* and a chunk that is still all mass stays asleep */
+    if(w.cbulk[c] === 8) continue;
     const b=w.cb, o=c*6;
     b[o]=0; b[o+1]=0; b[o+2]=0; b[o+3]=SCS-1; b[o+4]=SCS-1; b[o+5]=SCS-1;
     w.cf[c]=1;
     if(!w.cw[c]){ w.cw[c]=1; w.awake.push(c); }
   }
+}
+
+
+/* ==========================================================================
+   THE PROMOTION LADDER - bead, block, mass
+   --------------------------------------------------------------------------
+   Marcelo's design, in his words:
+
+     "If enough water/fluid spreads across a place enough to fill a BLOCK, it
+      becomes a block of fluid instead of a bead of fluid, and x blocks make a
+      mass of fluid instead of a block, etc etc, each time adding parameters
+      and qualities and discarding fine-processing events."
+
+   It is the same idea as NEXT.md rule 1 - a whole block is ONE record until
+   something breaks it - applied to what is INSIDE a block rather than to the
+   block itself, and it is what makes an ocean affordable. Not because a
+   settled cell costs a tick (it does not; the dirty rect already sees to
+   that) but because of the three things that DO cost:
+
+     * WAKING. Gravity reversing wakes every chunk holding anything loose. An
+       ocean of beads is millions of cells that all wake at once and all
+       discover, one at a time, that they cannot move. A mass wakes at its
+       surface only, because the inside of a body of water has nowhere to go
+       whichever way down is pointing.
+     * DRAWING. The bead layer emits one cube per exposed cell. A block of
+       water is 1,352 of them from three metres away and one of them from
+       thirty, and past the point where a 17 cm bead is a subpixel the
+       difference is invisible - which is the whole justification for the rung.
+     * ASKING. "Where is the sea surface", "how much water is there", "is this
+       one body or two" are questions about a mass, and a mass can answer them
+       from six numbers instead of from a search.
+
+   THE RUNGS
+
+     BEAD    a cell. What everything is by default, and what everything goes
+             back to the moment it is disturbed.
+     BLOCK   16x16x16 cells that are all the same fluid or powder, settled.
+             One byte in LADM. Its cells STAY IN THE GRID - this is a promotion
+             of bookkeeping, not a deletion of matter, so the player still
+             wades through it, beads still sink into it, and standing next to
+             it still shows you beads.
+     MASS    blocks of the same material that touch, flood-labelled. Carries
+             material, count, bounding box and surface level, and that set is
+             deliberately small: a rung is worth having only if it discards
+             more than it adds.
+
+   AND IT ONLY EVER GOES ONE STEP DOWN. The trigger for demotion is mark() -
+   the same call the dirty rect already makes for every change - and it carries
+   the chunk-local cell, so it can name the single block that was touched. Note
+   what it must NOT do: waking a demoted block through touch() would mark its
+   neighbours, which would demote those, which would mark theirs. A whole ocean
+   would liquefy because one bead fell in it. So a demoted block wakes its own
+   cells DIRECTLY, by widening its chunk's rect, and the spread from there is
+   whatever the physics actually does - which is the correct answer and also
+   the cheap one.
+   ========================================================================== */
+let LADM  = null;      // Uint8Array, one per BLOCK: the material it is made of, 0 = not promoted
+let LADS  = null;      // Int32Array, one per block: which mass it belongs to, -1 = none
+let LADQF = null;      // Uint8Array: is it already in the census queue?
+let LADQ  = [];        // blocks waiting to be censused
+const MASSES = [];     // {id, mat, n, x0..z1, dead}
+let LAD_ON = true;
+/* HOW MANY BLOCKS MAKE A MASS. "x blocks make a mass of fluid instead of a
+   block" - eight is a 2x2x2, the smallest arrangement that is a body rather
+   than a stack. */
+const LAD_MASS_MIN = 8;
+/* Blocks censused per tick. A census is 4,096 byte reads at worst and one at
+   best (the first cell that differs ends it), so this is a ceiling nobody
+   reaches: a settling ocean queues thousands of blocks and drains them over a
+   few seconds, which is exactly how long it takes to settle anyway. */
+const LAD_BUDGET = 48;
+let LAD_MDIRTY = false, LAD_MWAIT = 0;
+const ladStats = {blocks:0, masses:0, census:0, promoted:0, demoted:0, drawn:0};
+
+function ladInit(){
+  const N = G.nx*G.ny*G.nz;
+  if(!LADM || LADM.length !== N){
+    LADM = new Uint8Array(N); LADS = new Int32Array(N); LADQF = new Uint8Array(N);
+  }
+  LADM.fill(0); LADS.fill(-1); LADQF.fill(0);
+  LADQ.length = 0; MASSES.length = 0;
+  LAD_MDIRTY = false; LAD_MWAIT = 0;
+  ladStats.blocks = ladStats.masses = ladStats.census = 0;
+  ladStats.promoted = ladStats.demoted = ladStats.drawn = 0;
+  if(SAND) SAND.cbulk.fill(0);
+}
+/* A chunk is 2x2x2 blocks, so this is a shift and not a division. */
+function ladChunkOf(w, bx,by,bz){ return (((by>>1)*w.CD) + (bz>>1))*w.CW + (bx>>1); }
+
+function ladQueue(bi){
+  if(!LADM || bi < 0 || bi >= LADM.length || LADQF[bi]) return;
+  LADQF[bi] = 1; LADQ.push(bi);
+}
+
+/* Is this block entirely one thing? Returns the material or 0. Static never
+   promotes - the world's own stone is already one record - and neither does a
+   gas, which is going somewhere by definition. */
+function ladCensus(bi){
+  const w = SAND; if(!w) return 0;
+  const bx = bi % G.nx, q = (bi/G.nx)|0, bz = q % G.nz, by = (q/G.nz)|0;
+  const S = SAND_DIV, x0 = bx*S, y0 = by*S, z0 = bz*S;
+  if(x0+S > w.W || y0+S > w.H || z0+S > w.D) return 0;
+  const M = w.m, first = M[w.idx(x0,y0,z0)];
+  if(first === S_AIR || first === S_ROCK) return 0;
+  const K = SM_K[first];
+  if(K === K_STATIC || K === K_GAS) return 0;
+  for(let y=y0;y<y0+S;y++) for(let z=z0;z<z0+S;z++){
+    const r = (y+1)*w.SY + (z+1)*w.SZ + (x0+1);
+    for(let x=0;x<S;x++) if(M[r+x] !== first) return 0;
+  }
+  return first;
+}
+
+function ladPromote(bi, mat){
+  if(!LADM || LADM[bi] || !mat) return false;
+  const w = SAND; if(!w) return false;
+  LADM[bi] = mat;
+  ladStats.blocks++; ladStats.promoted++;
+  LAD_MDIRTY = true;
+  const bx = bi % G.nx, q = (bi/G.nx)|0, bz = q % G.nz, by = (q/G.nz)|0;
+  const c = ladChunkOf(w, bx,by,bz);
+  if(w.cbulk[c] < 8) w.cbulk[c]++;
+  w.cl[c] = 1;                       // it holds something worth drawing
+  return true;
+}
+
+/* Wake a block's own cells WITHOUT touching them, which is the whole trick.
+   touch() marks the neighbours too, and neighbours of a demoted block are
+   usually more promoted blocks - so going through it would demote the ocean
+   one ring at a time until it had all gone. This widens one chunk's rect to
+   cover the block and stops. */
+function ladWakeBlock(w, bx,by,bz){
+  const c = ladChunkOf(w, bx,by,bz), b = w.cb, o = c*6;
+  if(!w.cf[c]){
+    const lx0=(bx&1)*SAND_DIV, ly0=(by&1)*SAND_DIV, lz0=(bz&1)*SAND_DIV;
+    const lx1=lx0+SAND_DIV-1, ly1=ly0+SAND_DIV-1, lz1=lz0+SAND_DIV-1;
+    if(lx0<b[o])   b[o]=lx0;    if(lx1>b[o+3]) b[o+3]=lx1;
+    if(ly0<b[o+1]) b[o+1]=ly0;  if(ly1>b[o+4]) b[o+4]=ly1;
+    if(lz0<b[o+2]) b[o+2]=lz0;  if(lz1>b[o+5]) b[o+5]=lz1;
+  }
+  w.cl[c] = 1;
+  if(!w.cw[c]){ w.cw[c]=1; w.awake.push(c); }
+}
+
+function ladDemote(bi){
+  if(!LADM) return;
+  const mat = LADM[bi]; if(!mat) return;
+  LADM[bi] = 0;
+  ladStats.blocks--; ladStats.demoted++;
+  LAD_MDIRTY = true;
+  const sid = LADS[bi];
+  if(sid >= 0){
+    const m = MASSES[sid];
+    if(m && --m.n <= 0) m.dead = true;
+    LADS[bi] = -1;
+  }
+  const w = SAND;
+  if(w){
+    const bx = bi % G.nx, q = (bi/G.nx)|0, bz = q % G.nz, by = (q/G.nz)|0;
+    const c = ladChunkOf(w, bx,by,bz);
+    if(w.cbulk[c]) w.cbulk[c]--;
+    ladWakeBlock(w, bx,by,bz);
+  }
+  ladQueue(bi);                      // and it may settle again in a moment
+}
+
+/* The hook in mark(): name the one block of the eight the change was in. */
+function ladBreak(w, c, lx,ly,lz){
+  if(!LADM) return;
+  const cx = c % w.CW, q = (c/w.CW)|0, cz = q % w.CD, cy = (q/w.CD)|0;
+  const bx = cx*2 + (lx>>4), by = cy*2 + (ly>>4), bz = cz*2 + (lz>>4);
+  if(bx<0||by<0||bz<0||bx>=G.nx||by>=G.ny||bz>=G.nz) return;
+  const bi = (by*G.nz + bz)*G.nx + bx;
+  if(LADM[bi]) ladDemote(bi);
+}
+
+/* A chunk that was awake and is not any more has settled, so its eight blocks
+   are worth asking about. This is the only thing that ever queues a census,
+   and it means the ladder costs nothing at all in a world where nothing moves. */
+function ladQuiet(w, c){
+  if(!LADM) return;
+  const cx = c % w.CW, q = (c/w.CW)|0, cz = q % w.CD, cy = (q/w.CD)|0;
+  for(let dy=0;dy<2;dy++) for(let dz=0;dz<2;dz++) for(let dx=0;dx<2;dx++){
+    const bx=cx*2+dx, by=cy*2+dy, bz=cz*2+dz;
+    if(bx<G.nx && by<G.ny && bz<G.nz) ladQueue((by*G.nz + bz)*G.nx + bx);
+  }
+}
+
+/* WHICH BLOCKS ARE ONE BODY. A full relabel over every block in the world -
+   13,824 of them on a dungeon - is a flood fill costing well under a
+   millisecond, so it is done whole rather than maintained incrementally, and
+   only when the set has changed and not more than twice a second. Union-find
+   would be cleverer and would have to be right about deletion, which is the
+   part that is hard. */
+function ladRelabel(){
+  MASSES.length = 0;
+  LADS.fill(-1);
+  const nx=G.nx, ny=G.ny, nz=G.nz, N=nx*ny*nz;
+  const stack = [];
+  for(let bi=0; bi<N; bi++){
+    const mat = LADM[bi];
+    if(!mat || LADS[bi] >= 0) continue;
+    const id = MASSES.length;
+    const m = {id, mat, n:0, x0:1e9,y0:1e9,z0:1e9, x1:-1,y1:-1,z1:-1, dead:false};
+    MASSES.push(m);
+    stack.length = 0; stack.push(bi); LADS[bi] = id;
+    while(stack.length){
+      const b = stack.pop();
+      const x = b % nx, q = (b/nx)|0, z = q % nz, y = (q/nz)|0;
+      m.n++;
+      if(x<m.x0)m.x0=x; if(x>m.x1)m.x1=x;
+      if(y<m.y0)m.y0=y; if(y>m.y1)m.y1=y;
+      if(z<m.z0)m.z0=z; if(z>m.z1)m.z1=z;
+      for(let k=0;k<6;k++){
+        const ax=x+NB26X[k], ay=y+NB26Y[k], az=z+NB26Z[k];
+        if(ax<0||ay<0||az<0||ax>=nx||ay>=ny||az>=nz) continue;
+        const nb = (ay*nz + az)*nx + ax;
+        if(LADM[nb] === mat && LADS[nb] < 0){ LADS[nb] = id; stack.push(nb); }
+      }
+    }
+  }
+  let big = 0;
+  for(const m of MASSES) if(m.n >= LAD_MASS_MIN) big++;
+  ladStats.masses = big;
+}
+
+/* THE SURFACE OF A BODY OF WATER, which is the one parameter a mass carries
+   that a pile of blocks could not answer cheaply. Down is a sign, so the
+   surface is the smallest y under normal gravity and the largest under
+   reversed - the same six numbers read the other way round. */
+function massLevel(m){
+  return gsign() > 0 ? m.y1 + 1 : m.y0;
+}
+function massAt(bx,by,bz){
+  if(!LADM) return null;
+  if(bx<0||by<0||bz<0||bx>=G.nx||by>=G.ny||bz>=G.nz) return null;
+  const sid = LADS[(by*G.nz + bz)*G.nx + bx];
+  return sid >= 0 ? MASSES[sid] : null;
+}
+
+function ladTick(){
+  if(!LAD_ON || !LADM || !SAND) return;
+  let n = 0;
+  while(LADQ.length && n < LAD_BUDGET){
+    const bi = LADQ.pop();
+    LADQF[bi] = 0; n++;
+    if(LADM[bi]) continue;
+    ladStats.census++;
+    const mat = ladCensus(bi);
+    if(mat) ladPromote(bi, mat);
+  }
+  if(LAD_MDIRTY && --LAD_MWAIT <= 0){ LAD_MWAIT = 30; LAD_MDIRTY = false; ladRelabel(); }
+}
+
+/* Promote everything that can be, right now, with no budget. For the world
+   builder: it has just written a cubic kilometre of sea and it already knows
+   the answer, so making it discover that at 48 blocks a tick would be four
+   thousand ticks of finding out what it wrote. */
+function ladSweep(){
+  if(!LADM || !SAND) return 0;
+  let n = 0;
+  for(let bi=0; bi<LADM.length; bi++){
+    if(LADM[bi]) continue;
+    const mat = ladCensus(bi);
+    if(mat && ladPromote(bi, mat)) n++;
+  }
+  LADQ.length = 0; LADQF.fill(0);
+  ladRelabel(); LAD_MDIRTY = false;
+  return n;
+}
+
+/* WHAT A MASS LOOKS LIKE FROM A DISTANCE. One cube a block instead of 1,352
+   beads, and only the blocks with a face on something that is not more of the
+   same. The near field is left to the bead pass on purpose: Marcelo asked to
+   "see the damn beads on the water", so within the bead radius the ocean is
+   beads and past it the ocean is water. */
+const LAD_DRAW_MAX = 5000;
+const LAD_DRAW_R = BLOCK*80;
+function ladDraw(d, n){
+  if(!LADM || !SAND) return n;
+  const R2 = SAND_DRAW_R*SAND_DRAW_R, F2 = LAD_DRAW_R*LAD_DRAW_R;
+  const nx=G.nx, ny=G.ny, nz=G.nz, N=nx*ny*nz;
+  const cap = Math.min(SAND_DRAW_MAX, n + LAD_DRAW_MAX);
+  let drawn = 0;
+  for(let bi=0; bi<N && n<cap; bi++){
+    const mat = LADM[bi]; if(!mat) continue;
+    const x = bi % nx, q = (bi/nx)|0, z = q % nz, y = (q/nz)|0;
+    const px=(x+0.5)*BLOCK, py=(y+0.5)*BLOCK, pz=(z+0.5)*BLOCK;
+    const ex=px-P.x, ey=py-P.y, ez=pz-P.z;
+    const dd = ex*ex+ey*ey+ez*ez;
+    if(dd < R2 || dd > F2) continue;
+    let open = 0;
+    for(let k=0;k<6;k++){
+      const ax=x+NB26X[k], ay=y+NB26Y[k], az=z+NB26Z[k];
+      if(ax<0||ay<0||az<0||ax>=nx||ay>=ny||az>=nz){ open=1; break; }
+      if(LADM[(ay*nz + az)*nx + ax] !== mat){ open=1; break; }
+    }
+    if(!open) continue;
+    const o = n*CUBE_STRIDE;
+    composeAA(d,o, px,py,pz, BLOCK,BLOCK,BLOCK);
+    d[o+16]=SM_COL[mat*3]; d[o+17]=SM_COL[mat*3+1]; d[o+18]=SM_COL[mat*3+2];
+    d[o+19]=((x*7+y*13+z*29)%1000)/1000; d[o+20]=SM_EMIS[mat];
+    d[o+21]=0; d[o+22]=0; d[o+23]=d[o+24]=d[o+25]=0;
+    n++; drawn++;
+  }
+  ladStats.drawn = drawn;
+  return n;
 }
 
 /* Build the grid for the world that genWorld just made: everything is rock,
@@ -4531,6 +4877,7 @@ function sandBuild(){
     SAND.tick=0; SAND.stats.moves=0; SAND.stats.rx=0;
   }
   VOXD.clear();
+  ladInit();
   for(let y=0;y<G.ny;y++) for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++)
     if(G.st[idx(x,y,z)]===AIR) sandFill(x,y,z, S_AIR, false);
   sandCells = 0;
@@ -4804,7 +5151,7 @@ function sandStep(dt){
   const period = 1/SAND_HZ;
   let budget = 3;                        // never more than three ticks in a frame
   const gd = sandDir();
-  while(sandAcc >= period && budget-- > 0){ sandAcc -= period; sandTick(SAND, gd); }
+  while(sandAcc >= period && budget-- > 0){ sandAcc -= period; sandTick(SAND, gd); ladTick(); }
   if(sandAcc > period) sandAcc = period;
   if(SAND.awake.length) G.dirty = true;
 }
@@ -4861,7 +5208,9 @@ function sandDraw(){
     }
   }
   const M=w.m, SY=w.SY, SZ=w.SZ;
-  let n=0;
+  /* THE FAR FIELD FIRST, and it gets its own budget so a wall of sand three
+     metres away cannot spend the whole batch and leave the ocean invisible. */
+  let n = ladDraw(d, 0);
   for(let s=0; s<nsel && n<SAND_DRAW_MAX; s++){
     const c = SAND_SEEN[s*2];
     const cx=c%CW, q=(c/CW)|0, cz=q%CD, cy=(q/CD)|0;
