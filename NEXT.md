@@ -753,3 +753,25 @@ of a "25 block" tank and h_sparse's heap is poured into rock and cannot
 fall. Neither is an engine fault: h_sand is the independent bench and it
 passes on every count (pile round at 0.94, sand heaps 9 across and 30 tall,
 water spreads 14.75, a settled world scans zero). Update their units.
+
+
+### THE ISLAND, PHOTOGRAPHED AT LAST - 2026-08-07
+
+tools/h_see.js, and the picture is A GIANT BLACK CUBE STANDING IN THE SEA:
+sharp square corners, a flat top with a few lit tiles on it, dark water
+around it, sky above. That is his 'big box around the tree', measured.
+
+THE ISLAND IS NOT AN ISLAND. buildOuterWorld fills the whole array below
+the beach line as seamount instead of shaping a bump, so the seamount IS
+the board and a board is a cube. The sand slope, the beach, the tree and
+the house have all been hung on the outside of it.
+
+Four things the camera had to learn, all facts about this world:
+  - down is +Y after the boss, so the SKY is at small y
+  - the pitch sign flips with gravity; the obvious sign photographs sky
+  - the world has to be PAUSED or the physics buries the photographer
+    (the second attempt photographed a game over reading YOU ARE SAND NOW)
+  - darkNow() only gives daylight when G.island is set, so a paused world
+    with a cold clock renders as a cave at midnight
+
+SEEN AND NOT CHASED: the end screen reads 'You opened 443 of 247 blocks'.
