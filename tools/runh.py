@@ -28,6 +28,17 @@ def main():
     if "--cap" in a:    cap = int(a[a.index("--cap") + 1])
     if "--q" in a:      query = a[a.index("--q") + 1]
 
+    # A HARNESS THAT DOES NOT PARSE RUNS NOTHING AT ALL, and Chrome then sits
+    # out its whole virtual-time budget in silence - which reads as a hang and
+    # has cost this project two debugging passes and, once, a revert of correct
+    # code. node checks it in twenty milliseconds. Do it before Chrome starts.
+    import subprocess
+    chk = subprocess.run(["node", "--check", harness], capture_output=True, text=True)
+    if chk.returncode != 0:
+        print("HARNESS DOES NOT PARSE - nothing would have run:")
+        print(chk.stderr.strip()[:800])
+        sys.exit(2)
+
     prof = os.path.join(R.HERE, "cdata_" + tag)
     out = os.path.join(R.HERE, "cdata_%s.html" % tag)
     R.build(os.path.join(R.HERE, os.path.basename(harness)), out, render=bool(shot))

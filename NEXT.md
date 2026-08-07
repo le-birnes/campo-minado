@@ -899,3 +899,46 @@ NEXT, AND IN THIS ORDER:
      and nothing removes them when the block collapses.
   4. and the two still open from before: swimming down (0b) and shooting
      underwater (sandRayHit returns the cell at your own face).
+
+
+## THE BOX, MEASURED AT LAST - 2026-08-07
+
+tools/h_highup.js puts the camera at four altitudes and asks each draw pass
+what it emitted and WHERE - the bounding box of the instances, in metres.
+
+    60 m up    BLOCK pass 13,292 instances spanning 185 x 176 x 185 m
+    200 m up   BLOCK pass 13,292 instances spanning 185 x 176 x 185 m
+    1200 m up  BLOCK pass 13,292 instances spanning 185 x 176 x 185 m
+               BEAD+MASS  nothing, at any of them
+
+IDENTICAL AT EVERY HEIGHT. So the square he photographs from altitude is the
+world's own surface - 13,292 blocks, correctly drawn - and at 1,200 m those
+blocks are subpixel and average into ONE FLAT LIGHT-BLUE SQUARE with the
+array's square footprint. The stepped edges are the block boundary at the
+world's edge.
+
+THAT IS NOT A RENDERING BUG. THE WORLD IS 180 m ACROSS AND 180 m SEEN FROM
+1.2 km IS A SMALL SQUARE. No shader fixes it. Three real options:
+
+  a. MAKE THE ISLAND LOOK LIKE A COAST rather than a plate: the seabed should
+     rise to it from outside the array, so the block world's edge is UNDER
+     water and the shader's ocean covers the seam. Cheapest by far, and it is
+     what a real island looks like from the air.
+  b. TERRAIN AS A FUNCTION past the array - height(x,z) sampled by the shader,
+     so land continues beyond what is stored. This is the world redesign.
+  c. DON'T LET HIM GET THAT FAR without something else to look at. Weakest.
+
+(a) first. It is a change to buildOuterWorld, not to the renderer.
+
+AND THE CEILING HE IS TOUCHING IS THE HOUSE. Layer by layer above the beach
+(down is +Y, so small y is UP, and the beach is y 8):
+
+    y 0-3   59, 50, 32, 22 blocks of mat9   the tree's canopy
+    y 4     182 blocks of mat8              A FLAT SLAB OF WOOD
+    y 5-7   72, 102, 105 of mat8            more of it
+
+461 wooden blocks stacked over the beach in a slab a hundred and eighty metres
+wide. The house was authored in BLOCKS when a block was 2.8 m; at 4.5 m it is
+1.6 times bigger in every axis, and its roof now spans the whole air gap above
+the island. That is the ceiling with the orange panels - they are its lit
+faces. buildVials sizes the house in blocks and needs to size it in METRES.
