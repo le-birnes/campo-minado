@@ -819,7 +819,8 @@ function worldBodies(){
      numbers - on a circular orbit at sixty planet-radii, which is where ours
      is. Its position comes from the same clock the sky already turns it by, so
      what you see and what pulls you are the same object. */
-  const MOON_R = PLANET_R*0.27, MOON_G = GRAV*0.17, MOON_D = PLANET_R*12;
+  const gg = geoOf();
+  const MOON_R = PLANET_R*gg.moonR, MOON_G = GRAV*gg.moonG, MOON_D = PLANET_R*gg.moonD;
   const th = (typeof tGlobal==='number' ? tGlobal : 0) / (SKY_LUN||600) * 6.28318;
   BODIES.push({ n:'moon',
                 x: cx + Math.cos(th)*MOON_D,
@@ -857,45 +858,89 @@ function worldBodies(){
    An array can then be filled from this anywhere, at any time, and it will
    always agree with itself - which is the whole of "I can't build stuff on a
    changing world". Same seed, same ground, for ever. */
-const GEO_DIRT   = 40;              // metres of soil over the rock
-const GEO_CORE   = 0.55;            // lava inside this fraction of the radius
-const ISLE_R     = 90;              // the donut's hole: the island
-const ISLE_H     = 16;              // how far it stands out of the water
-const BEACH_R    = 400;             // where the beach has finished falling
-const DONUT_R    = 10000;           // his ten kilometres of sea
-const DONUT_D    = 60;              // how deep the depression is
-const PLAIN_H    = 8;               // the mainland, past the water
+/* EVERY RUN IS A DIFFERENT PLANET. Marcelo: "same seed, same ground, for ever
+   -> that's not cool for now, since I can't save the game. I want randomness
+   each RUN, not a fixed game. You can make small variations on what you built -
+   shape and layers of materials building the bodies."
 
-/* HOW HIGH THE GROUND IS, relative to sea level, d metres from the island. */
-function geoH(d){
-  if(d < ISLE_R){                       // the island, domed
-    const t = d/ISLE_R;
-    return ISLE_H*(1 - t*t);
-  }
-  if(d < BEACH_R){                      // the beach, into the water
-    const t = (d-ISLE_R)/(BEACH_R-ISLE_R);
-    return ISLE_H*(1-t)*(1-t) - DONUT_D*t*t;
-  }
-  if(d < DONUT_R){                      // the donut floor, rising at its rim
-    const t = (d-BEACH_R)/(DONUT_R-BEACH_R);
-    return -DONUT_D + (DONUT_D+PLAIN_H)*t*t*t*t;
-  }
-  return PLAIN_H;                       // and the mainland goes on
+   So the geoid's shape and its layers are ROLLED ONCE per world, off the run's
+   own seed, and then they are constant for that run. Both halves matter: it is
+   a different island every time you press start, and it is the SAME island for
+   as long as you are standing on it - which is what "I can't build stuff on a
+   changing world" needed. The determinism was never about the seed being
+   fixed; it was about the ground not moving while you are on it.
+
+   And when saving exists, the save is these fifteen numbers. */
+let GEO = null;
+function rollGeo(){
+  const R = (a,b) => a + rnd()*(b-a);
+  const island = R(70,145);
+  GEO = {
+    isleR : island,
+    isleH : R(9,27),                      // how far it stands out of the water
+    beachR: island + R(180,520),          // where the beach finishes falling
+    donutR: R(6500,14000),                // HIS TEN KILOMETRES, give or take
+    donutD: R(34,92),                     // how deep the sea gets
+    plainH: R(3,17),                      // and the mainland beyond it
+    coreF : R(0.44,0.66),                 // where the lava starts, as a fraction
+    /* THE LAYERS, from the surface down. A crust is not one thing: some worlds
+       have a deep soil, some are bare rock a metre down, some have a band of
+       sand or of rubble under the topsoil. Depths are metres of that material
+       before the next begins, and whatever is left over is rock down to the
+       core. */
+    layers: (() => {
+      const L = [{m:S_DIRT, d:R(8,55)}];
+      const roll = rnd();
+      if(roll < 0.34)      L.push({m:S_SAND,   d:R(4,26)});
+      else if(roll < 0.62) L.push({m:S_RUBBLE, d:R(6,34)});
+      else if(roll < 0.78) L.push({m:S_WETSND, d:R(5,20)});   // a clay band
+      if(rnd() < 0.30) L.push({m:S_SAND, d:R(3,14)});
+      return L;
+    })(),
+    /* and the moon is a body too, so it varies with the rest of them */
+    moonR : R(0.18,0.34), moonG: R(0.11,0.24), moonD: R(9,17)
+  };
+  BODIES.length = 0;                       // they are rebuilt from the new roll
+  return GEO;
 }
-/* WHAT IS AT A POINT, from nothing else but where it is. */
+function geoOf(){ return GEO || rollGeo(); }
+
+/* HOW HIGH THE GROUND IS above sea level, d metres from the island along the
+   surface. The island is the donut's hole; the donut is the sea; past its rim
+   the mainland goes on to the horizon. */
+function geoH(d){
+  const g = geoOf();
+  if(d < g.isleR){                      // the island, domed
+    const t = d/g.isleR;
+    return g.isleH*(1 - t*t);
+  }
+  if(d < g.beachR){                     // the beach, into the water
+    const t = (d-g.isleR)/(g.beachR-g.isleR);
+    return g.isleH*(1-t)*(1-t) - g.donutD*t*t;
+  }
+  if(d < g.donutR){                     // the donut floor, rising at its rim
+    const t = (d-g.beachR)/(g.donutR-g.beachR);
+    return -g.donutD + (g.donutD+g.plainH)*t*t*t*t;
+  }
+  return g.plainH;                      // and the mainland goes on
+}
+/* WHAT IS AT A POINT, from nothing but where it is: air above the ground,
+   water in the dent, then this run's own crust, then rock, then the core. */
 function geoMat(x,y,z){
   const b = bodyPlanet() || (worldBodies(), bodyPlanet());
   const dx=x-b.x, dy=y-b.y, dz=z-b.z;
   const r = Math.hypot(dx,dy,dz);
-  /* distance along the ground from the island, which sits at the point of the
-     sphere nearest the sky above the world's middle */
   const cx=(G.nx||1)*BLOCK*0.5, cz=(G.nz||1)*BLOCK*0.5;
   const d = Math.hypot(x-cx, z-cz);
   const surf = b.R + geoH(d);           // the solid surface, as a radius
-  const sea  = b.R;                     // sea level IS the radius
-  if(r > surf) return r > sea ? S_AIR : S_WATER;
-  if(r > surf - GEO_DIRT)   return S_DIRT;
-  if(r > b.R*GEO_CORE)      return S_ROCK;
+  if(r > surf) return r > b.R ? S_AIR : S_WATER;
+  const g = geoOf();
+  let dep = surf - r;
+  for(let i=0;i<g.layers.length;i++){
+    if(dep < g.layers[i].d) return g.layers[i].m;
+    dep -= g.layers[i].d;
+  }
+  if(r > b.R*g.coreF) return S_ROCK;
   return S_LAVA;
 }
 const _GV = [0,0,0];
@@ -3062,6 +3107,9 @@ function genWorld(d){
   rollDensExp();
   for(let i=0;i<N;i++) G.mat[i] = (rnd()<0.055) ? 4 : (rnd()*4)|0;
 
+  /* A NEW PLANET EVERY RUN. Its shape and its layers are rolled here, off the
+     run's own seed, and then they hold for as long as the run does. */
+  rollGeo();
   G.dungeon = dung;
   /* WHERE TO DIG. The plain puzzle has no box: there the board IS the world
      and the generator may use all of it. */
@@ -13961,7 +14009,7 @@ setTimeout(()=>{ try{
 
   R.push('OUTWARD ALONG THE GROUND from the island (height above sea level,');
   R.push('  and what is one metre under the surface):');
-  for(const d of [0, 50, 90, 200, 400, 1000, 5000, 9000, 10000, 12000, 40000]){
+  for(const d of [0, 50, 90, 200, 400, 1000, 5000, 9000, 11000, 14000, 40000]){
     const h = geoH(d);
     /* A METRE UNDER THE SURFACE, MEASURED RADIALLY. Sampling "d metres
        sideways at the same y" is what a flat world would do, and on a sphere
@@ -13975,8 +14023,9 @@ setTimeout(()=>{ try{
            (h>=0?'+':'') + h.toFixed(1) + ' m, ' +
            (h < 0 ? 'UNDER WATER' : 'dry') + ', made of ' + nm(m));
   }
-  R.push('  so: island to ' + ISLE_R + ' m, beach to ' + BEACH_R +
-         ', a donut of sea ' + DONUT_D + ' m deep out to ' + (DONUT_R/1000) +
+  const gg = geoOf();
+  R.push('  so: island to ' + gg.isleR.toFixed(0) + ' m, beach to ' + gg.beachR.toFixed(0) +
+         ', a donut of sea ' + gg.donutD.toFixed(0) + ' m deep out to ' + (gg.donutR/1000).toFixed(1) +
          ' km, then plain dirt for ever ' +
          (geoH(0)>0 && geoH(5000)<0 && geoH(40000)>0
           ? 'ok, THE DONUT IS THERE' : 'FAULT: that is not a donut'));
@@ -13986,8 +14035,8 @@ setTimeout(()=>{ try{
     const m = geoMat(cx, b.y - (b.R + geoH(0) - dep), cz);
     R.push('  ' + String(dep).padStart(7) + ' m down: ' + nm(m));
   }
-  R.push('  dirt to ' + GEO_DIRT + ' m, rock to ' + (GEO_CORE*100) +
-         '% of the radius, then lava ' +
+  R.push('  crust: ' + gg.layers.map(l=>SMAT[l.m].n+' '+l.d.toFixed(0)+'m').join(' > ') +
+         ' > rock to ' + (gg.coreF*100).toFixed(0) + '% of the radius, then lava ' +
          (geoMat(cx,b.y-b.R*0.3,cz)===S_LAVA ? 'ok, THERE IS A CORE' : 'FAULT'));
 
   R.push('AND ABOVE: ' + [1, 100, 5000].map(h =>
@@ -14010,6 +14059,32 @@ setTimeout(()=>{ try{
            ? 'ok, YOU COULD LAND ON IT' : 'FAULT: the planet still owns you there'));
   R.push('  orbit around the moon: ' + (orbitalV(0, moon)/1000).toFixed(2) +
          ' km/s, around the planet: ' + (orbitalV(0)/1000).toFixed(2) + ' km/s');
+
+  /* ---- AND A DIFFERENT PLANET EVERY RUN -------------------------------- */
+  R.push('FIVE RUNS, five worlds:');
+  const seen = new Set();
+  for(const sd of [1,2,3,4,5]){
+    seed = sd; genWorld(0); worldBodies();
+    const g = geoOf();
+    const key = [g.isleR|0, g.donutR|0, g.donutD|0, g.layers.length].join('/');
+    seen.add(key);
+    R.push('  seed ' + sd + ': island r=' + g.isleR.toFixed(0) + ' m h=' + g.isleH.toFixed(0) +
+           ', sea out to ' + (g.donutR/1000).toFixed(1) + ' km, ' + g.donutD.toFixed(0) +
+           ' m deep, mainland +' + g.plainH.toFixed(0) +
+           ', core at ' + (g.coreF*100).toFixed(0) + '%' +
+           ' | crust: ' + g.layers.map(l=>(SMAT[l.m].n)+' '+l.d.toFixed(0)+'m').join(' > ') + ' > rock > lava' +
+           ' | moon r=' + (g.moonR*100).toFixed(0) + '% at ' + g.moonD.toFixed(0) + 'R');
+  }
+  R.push('  ' + seen.size + ' of 5 are different ' +
+         (seen.size === 5 ? 'ok, EVERY RUN IS ITS OWN PLANET' : 'FAULT: they repeat'));
+  /* and the SAME run must not move under him */
+  seed = 3; genWorld(0);
+  const h1 = geoH(500), m1 = geoMat(1000,1000,1000);
+  for(let k=0;k<200;k++) geoMat(rnd()*1e6, rnd()*1e6, rnd()*1e6);
+  R.push('  and within one run, after 200 samples: geoH(500) ' +
+         (geoH(500)===h1 && geoMat(1000,1000,1000)===m1
+          ? 'is unchanged ok, THE GROUND HOLDS STILL WHILE HE IS ON IT'
+          : 'MOVED - FAULT'));
   R.push(window.__err.length ? ('FAULT '+window.__err.join(' | ')) : 'no errors');
   document.body.dataset.r=R.join(' ~ ');
 }catch(err){ document.body.dataset.r='THREW: '+err.message; }}, 300);
