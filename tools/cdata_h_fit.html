@@ -781,24 +781,212 @@ function gnow(){ return GRAV * (G.gravK === undefined ? 1 : G.gravK); }
    AND gravK STILL FLIPS IT, untouched. The dungeon's reversed gravity is this
    vector with a minus sign, which is what it always was - it is just that the
    thing being negated is now a direction rather than an axis. */
+/* ==========================================================================
+   BODIES, AND GRAVITY AS THE SUM OF THEM
+   --------------------------------------------------------------------------
+   "Gravity pointing towards a centre is perfect, and it should also be a curve
+   function: closer to the centre, stronger; further, weaker. This should
+   theoretically allow orbital movement and the ability to land on other
+   planets - the moon has weaker gravity and is a body in orbit around my
+   planet, so when I get there the moon's gravity affects me more than my
+   planet's and I am able to be in its own orbit AND my planet's."
+
+   That is n-body gravity, and it is a for-loop. Each body carries a centre, a
+   radius and a surface strength; the acceleration at a point is the SUM of
+   what each one pulls, each falling off as 1/r^2. Everything he described then
+   happens on its own and none of it is special-cased:
+
+     * near the planet, the planet wins and it feels like today
+     * near the moon, the moon wins - because 1/r^2 is steep and the moon is
+       close - so you land on it, and its own orbit is around you
+     * between them there is a point where they cancel, which is a real place
+       you can float
+     * and a black hole later is one more row in this list
+
+   THE MOON MOVES, so its pull moves with it. It is already drawn as a record
+   in the sky at a real angular size; giving it a position in metres is the
+   same number said in a different unit. */
+const BODIES = [];
+function bodyPlanet(){ return BODIES[0]; }
+function worldBodies(){
+  const cx = (G.nx||1)*BLOCK*0.5, cz = (G.nz||1)*BLOCK*0.5;
+  BODIES.length = 0;
+  /* the planet: the island sits on its surface, so its centre is one radius
+     straight down from sea level */
+  BODIES.push({ n:'planet', x:cx, y:(G.seaY||0)*BLOCK + PLANET_R, z:cz,
+                R:PLANET_R, g:GRAV });
+  /* THE MOON. A quarter the radius, a sixth the gravity - the Moon's own
+     numbers - on a circular orbit at sixty planet-radii, which is where ours
+     is. Its position comes from the same clock the sky already turns it by, so
+     what you see and what pulls you are the same object. */
+  const gg = geoOf();
+  const MOON_R = PLANET_R*gg.moonR, MOON_G = GRAV*gg.moonG, MOON_D = PLANET_R*gg.moonD;
+  const th = (typeof tGlobal==='number' ? tGlobal : 0) / (SKY_LUN||600) * 6.28318;
+  BODIES.push({ n:'moon',
+                x: cx + Math.cos(th)*MOON_D,
+                y: (G.seaY||0)*BLOCK + PLANET_R - Math.sin(th)*MOON_D,
+                z: cz,
+                R:MOON_R, g:MOON_G });
+  return BODIES;
+}
+/* ==========================================================================
+   THE GEOID: what the planet is made of, everywhere, as a function
+   --------------------------------------------------------------------------
+   "The world is solid, composed of dirt and rock and lava in the centre,
+   pretty much like earth, so imagine a geoid in which a portion of it contains
+   a DONUT-SHAPED DEPRESSION filled with water, and the centre of the donut -
+   the donut hole - is the dungeon below the island."
+
+   So the planet is not an empty sphere with an island glued on. It is solid
+   all the way down, and the sea is a dent in it:
+
+       surface        the geoid: R + H(d), where d is the distance from the
+                      island along the ground
+       0 .. 40 m      DIRT
+       40 m .. 55%R   ROCK
+       inside 55%R    LAVA
+
+       H(d):  d < 90 m       THE ISLAND, the donut's hole, rising to +16 m,
+                             with the dungeon buried under it
+              90 .. 400 m    the beach, falling away
+              400 m .. 10 km THE DONUT: a depression 60 m deep, and everything
+                             in it below sea level is WATER
+              beyond 10 km   PLAIN DIRT at +8 m, out to the horizon
+
+   ALL OF IT IS A FUNCTION AND NONE OF IT IS STORED. That is the point, and it
+   is his: "all is function until I get near, then the function becomes array."
+   An array can then be filled from this anywhere, at any time, and it will
+   always agree with itself - which is the whole of "I can't build stuff on a
+   changing world". Same seed, same ground, for ever. */
+/* EVERY RUN IS A DIFFERENT PLANET. Marcelo: "same seed, same ground, for ever
+   -> that's not cool for now, since I can't save the game. I want randomness
+   each RUN, not a fixed game. You can make small variations on what you built -
+   shape and layers of materials building the bodies."
+
+   So the geoid's shape and its layers are ROLLED ONCE per world, off the run's
+   own seed, and then they are constant for that run. Both halves matter: it is
+   a different island every time you press start, and it is the SAME island for
+   as long as you are standing on it - which is what "I can't build stuff on a
+   changing world" needed. The determinism was never about the seed being
+   fixed; it was about the ground not moving while you are on it.
+
+   And when saving exists, the save is these fifteen numbers. */
+let GEO = null;
+function rollGeo(){
+  const R = (a,b) => a + rnd()*(b-a);
+  /* THE ISLAND HAS TO FIT IN THE PATCH YOU CAN DIG. The array is 180 m across,
+     so it reaches 90 m from the middle - and the first roll made islands of
+     110 to 145 m, which meant the whole diggable world was island and there
+     was no shore anywhere in it: the sea count fell from 24,640 blocks to
+     1,223. The island is the donut's HOLE, and a hole you cannot see the edge
+     of is not a hole. So it is sized to leave beach and water inside the patch,
+     and the ten kilometres of ocean past it belong to the function. */
+  const island = R(26,52);
+  GEO = {
+    isleR : island,
+    isleH : R(9,27),                      // how far it stands out of the water
+    beachR: island + R(22,58),            // where the beach finishes falling
+    donutR: R(6500,14000),                // HIS TEN KILOMETRES, give or take
+    donutD: R(34,92),                     // how deep the sea gets
+    plainH: R(3,17),                      // and the mainland beyond it
+    coreF : R(0.44,0.66),                 // where the lava starts, as a fraction
+    /* THE LAYERS, from the surface down. A crust is not one thing: some worlds
+       have a deep soil, some are bare rock a metre down, some have a band of
+       sand or of rubble under the topsoil. Depths are metres of that material
+       before the next begins, and whatever is left over is rock down to the
+       core. */
+    layers: (() => {
+      const L = [{m:S_DIRT, d:R(8,55)}];
+      const roll = rnd();
+      if(roll < 0.34)      L.push({m:S_SAND,   d:R(4,26)});
+      else if(roll < 0.62) L.push({m:S_RUBBLE, d:R(6,34)});
+      else if(roll < 0.78) L.push({m:S_WETSND, d:R(5,20)});   // a clay band
+      if(rnd() < 0.30) L.push({m:S_SAND, d:R(3,14)});
+      return L;
+    })(),
+    /* and the moon is a body too, so it varies with the rest of them */
+    moonR : R(0.18,0.34), moonG: R(0.11,0.24), moonD: R(9,17)
+  };
+  BODIES.length = 0;                       // they are rebuilt from the new roll
+  return GEO;
+}
+function geoOf(){ return GEO || rollGeo(); }
+
+/* HOW HIGH THE GROUND IS above sea level, d metres from the island along the
+   surface. The island is the donut's hole; the donut is the sea; past its rim
+   the mainland goes on to the horizon. */
+function geoH(d){
+  const g = geoOf();
+  if(d < g.isleR){                      // the island, domed
+    const t = d/g.isleR;
+    return g.isleH*(1 - t*t);
+  }
+  if(d < g.beachR){                     // the beach, into the water
+    const t = (d-g.isleR)/(g.beachR-g.isleR);
+    return g.isleH*(1-t)*(1-t) - g.donutD*t*t;
+  }
+  if(d < g.donutR){                     // the donut floor, rising at its rim
+    const t = (d-g.beachR)/(g.donutR-g.beachR);
+    return -g.donutD + (g.donutD+g.plainH)*t*t*t*t;
+  }
+  return g.plainH;                      // and the mainland goes on
+}
+/* WHAT IS AT A POINT, from nothing but where it is: air above the ground,
+   water in the dent, then this run's own crust, then rock, then the core. */
+function geoMat(x,y,z){
+  const b = bodyPlanet() || (worldBodies(), bodyPlanet());
+  const dx=x-b.x, dy=y-b.y, dz=z-b.z;
+  const r = Math.hypot(dx,dy,dz);
+  const cx=(G.nx||1)*BLOCK*0.5, cz=(G.nz||1)*BLOCK*0.5;
+  const d = Math.hypot(x-cx, z-cz);
+  const surf = b.R + geoH(d);           // the solid surface, as a radius
+  if(r > surf) return r > b.R ? S_AIR : S_WATER;
+  const g = geoOf();
+  let dep = surf - r;
+  for(let i=0;i<g.layers.length;i++){
+    if(dep < g.layers[i].d) return g.layers[i].m;
+    dep -= g.layers[i].d;
+  }
+  if(r > b.R*g.coreF) return S_ROCK;
+  return S_LAVA;
+}
 const _GV = [0,0,0];
 function planetCY(){ return (G.seaY||0)*BLOCK + PLANET_R; }
 function gravAt(x,y,z){
-  const cx = (G.nx||1)*BLOCK*0.5, cy = planetCY(), cz = (G.nz||1)*BLOCK*0.5;
-  let dx = cx-x, dy = cy-y, dz = cz-z;
-  const r = Math.hypot(dx,dy,dz) || 1;
-  /* inverse square, normalised so it is exactly GRAV at the surface - and
-     capped inside the planet so falling down a shaft does not blow up */
-  const g = GRAV * (PLANET_R*PLANET_R)/(r*r > PLANET_R*PLANET_R*0.25 ? r*r : PLANET_R*PLANET_R*0.25)
-            * -(G.gravK === undefined ? 1 : G.gravK) * (typeof fxGrav==='function' ? fxGrav() : 1);
-  _GV[0]=dx/r*g; _GV[1]=dy/r*g; _GV[2]=dz/r*g;
+  if(!BODIES.length) worldBodies();
+  const sgn = -(G.gravK === undefined ? 1 : G.gravK) * (typeof fxGrav==='function' ? fxGrav() : 1);
+  let ax=0, ay=0, az=0;
+  for(let i=0;i<BODIES.length;i++){
+    const b = BODIES[i];
+    const dx=b.x-x, dy=b.y-y, dz=b.z-z;
+    let r2 = dx*dx+dy*dy+dz*dz;
+    /* capped inside the body, or a shaft to the core divides by nothing */
+    const rmin = b.R*0.5; if(r2 < rmin*rmin) r2 = rmin*rmin;
+    const r = Math.sqrt(r2);
+    const g = b.g * (b.R*b.R)/r2 * sgn;
+    ax += dx/r*g; ay += dy/r*g; az += dz/r*g;
+  }
+  _GV[0]=ax; _GV[1]=ay; _GV[2]=az;
   return _GV;
 }
-/* HOW FAST YOU WOULD HAVE TO BE GOING TO STAY UP, at a given height. Nothing
-   reads it yet; the rocket will, and having it here is what makes orbit a
-   number rather than a hope. */
-function orbitalV(h){ const r = PLANET_R + h; return Math.sqrt(GRAV*PLANET_R*PLANET_R/r); }
-function escapeV(h){ return orbitalV(h)*Math.SQRT2; }
+/* WHICH BODY OWNS YOU - the one pulling hardest. It is what a HUD would say
+   and what a landing would test, and it is the whole of "when I get there the
+   moon's gravity affects me more than my planet's". */
+function dominantBody(x,y,z){
+  if(!BODIES.length) worldBodies();
+  let best=null, bg=-1;
+  for(const b of BODIES){
+    const dx=b.x-x, dy=b.y-y, dz=b.z-z;
+    let r2=dx*dx+dy*dy+dz*dz; const rmin=b.R*0.5; if(r2<rmin*rmin) r2=rmin*rmin;
+    const g = b.g*(b.R*b.R)/r2;
+    if(g>bg){ bg=g; best=b; }
+  }
+  return {body:best, g:bg};
+}
+/* HOW FAST YOU WOULD HAVE TO BE GOING TO STAY UP, around any body. */
+function orbitalV(h, b){ b = b || bodyPlanet(); const r = b.R + h;
+  return Math.sqrt(b.g*b.R*b.R/r); }
+function escapeV(h, b){ return orbitalV(h,b)*Math.SQRT2; }
 /* WHICH WAY IS DOWN, as a sign, and everything that has an opinion about down
    reads it: the physics, the ground test, the jump, and the camera.
 
@@ -2926,6 +3114,9 @@ function genWorld(d){
   rollDensExp();
   for(let i=0;i<N;i++) G.mat[i] = (rnd()<0.055) ? 4 : (rnd()*4)|0;
 
+  /* A NEW PLANET EVERY RUN. Its shape and its layers are rolled here, off the
+     run's own seed, and then they hold for as long as the run does. */
+  rollGeo();
   G.dungeon = dung;
   /* WHERE TO DIG. The plain puzzle has no box: there the board IS the world
      and the generator may use all of it. */
@@ -4649,6 +4840,11 @@ const S_ROCK= addMat({n:'rock',k:K_STATIC, d:2700, s:0, c:[0.30,0.27,0.26], see:
    degrees), wet sand stands up and can overhang (45, which is why sandcastles
    exist), rock locks because angular fragments interlock. */
 const S_SAND   = addMat({n:'sand', stick:0.22,    k:K_POWDER, d:1600, slip:0.92, c:[0.80,0.68,0.44], emis:0.42});
+/* DIRT, because the planet is made of it. "The world is solid, composed of
+   dirt and rock and lava in the centre, pretty much like earth." It sits
+   between sand and rubble: it holds a slope better than sand, because roots
+   and clay do, and it comes apart more easily than stone. */
+const S_DIRT   = addMat({n:'dirt', stick:0.30,    k:K_POWDER, d:1500, slip:0.55, c:[0.42,0.31,0.20], emis:0.34});
 const S_RUBBLE = addMat({n:'rubble', stick:0.10,  k:K_POWDER, d:2700, slip:0.28, c:[0.30,0.28,0.26], emis:0.42});
 const S_WATER  = addMat({n:'water', stick:0.05,   k:K_LIQUID, d:1000, s:5, slip:1.0, opac:0.85, c:[0.22,0.44,0.76], emis:0.30});
 const S_GLASS  = addMat({n:'glass', stick:0.08,   k:K_POWDER, d:2500, slip:0.45, c:[0.66,0.86,0.88], emis:0.50});
@@ -10257,13 +10453,26 @@ function buildOuterWorld(){
     if(G.hull[i]) return;                       // the shell is not sand
     G.st[i]=ROCK; G.mat[i]=mat; G.scenery[i]=1;
   };
+  /* THE GROUND IS THE FUNCTION'S GROUND, NOT A SECOND OPINION.
+
+     This used to be its own island: a curve from the cylinder's rim out to
+     RISL, with its own roughness and its own idea of where the water met the
+     sand. So the world had TWO owners of one fact - geoH said one thing and
+     this said another - and that is the pattern behind every fault this week.
+
+     Now it reads geoH. The array becomes a CACHE OF THE FUNCTION rather than a
+     rival to it, which means the ground the shader draws past the array and
+     the ground you stand on inside it are the same ground, by construction.
+
+     geoH is in METRES above sea level and blocks count DOWNWARD from the sky,
+     so the conversion is one line - and the roughness stays, because a metre
+     of noise is what stops a smooth function looking like a smooth function. */
   const landY=(x,z)=>{
-    const d = dist(x,z);
-    if(d > RISL) return -1;
-    if(d <= RCYL) return ISLY;                  // the top face is the ground here
-    const t = (d-RCYL)/Math.max(1e-6, RISL-RCYL);
-    const rough = Math.sin(x*0.9)*Math.cos(z*0.7)*0.7 + Math.sin(z*1.7)*0.5;
-    return Math.round(ISLY + t*t*(SEAY+4-ISLY) + rough*t);
+    const dm = dist(x,z)*BLOCK;                 // distance from the island, in metres
+    const rough = (Math.sin(x*0.9)*Math.cos(z*0.7)*0.7 + Math.sin(z*1.7)*0.5) * BLOCK*0.5;
+    const y = Math.round(SEAY - (geoH(dm) + rough)/BLOCK);
+    if(y >= G.ny-1) return -1;                  // deeper than the world is tall
+    return Math.max(0, y);
   };
   /* AND IT STANDS ON A SEA FLOOR RATHER THAN FILLING THE WORLD TO ITS BOTTOM.
      Running the fill to y < G.ny made the island a SLAB - surface on top,
@@ -10275,8 +10484,17 @@ function buildOuterWorld(){
   for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
     if(dist(x,z) <= RCYL) continue;             // the cylinder is not sand
     const t = landY(x,z); if(t<0) continue;
-    for(let y=Math.max(0,t); y<=SEAB; y++)
-      set(x,y,z, y > t+2 ? M_STONE : (y >= SEAY-1 ? M_WETSAND : M_DRYSAND));
+    /* AND WHAT IT IS MADE OF IS THE FUNCTION'S ANSWER TOO. geoMat knows this
+       run's own crust - how deep the soil is, whether there is a band of sand
+       or rubble under it, where the rock starts - so the block world stops
+       guessing and asks. The block palette is coarser than the bead palette,
+       so this is the one place they are mapped onto each other. */
+    for(let y=Math.max(0,t); y<=SEAB; y++){
+      const gm = geoMat((x+0.5)*BLOCK, (y+0.5)*BLOCK, (z+0.5)*BLOCK);
+      set(x,y,z, gm===S_ROCK||gm===S_LAVA ? M_STONE
+               : gm===S_WETSND            ? M_WETSAND
+               : (y >= SEAY-1)            ? M_WETSAND : M_DRYSAND);
+    }
   }
 
   /* 4. AND THE ONE BLOCK THAT WILL GO. It is chosen now, at the middle of the

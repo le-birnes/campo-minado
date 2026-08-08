@@ -874,11 +874,18 @@ function worldBodies(){
 let GEO = null;
 function rollGeo(){
   const R = (a,b) => a + rnd()*(b-a);
-  const island = R(70,145);
+  /* THE ISLAND HAS TO FIT IN THE PATCH YOU CAN DIG. The array is 180 m across,
+     so it reaches 90 m from the middle - and the first roll made islands of
+     110 to 145 m, which meant the whole diggable world was island and there
+     was no shore anywhere in it: the sea count fell from 24,640 blocks to
+     1,223. The island is the donut's HOLE, and a hole you cannot see the edge
+     of is not a hole. So it is sized to leave beach and water inside the patch,
+     and the ten kilometres of ocean past it belong to the function. */
+  const island = R(26,52);
   GEO = {
     isleR : island,
     isleH : R(9,27),                      // how far it stands out of the water
-    beachR: island + R(180,520),          // where the beach finishes falling
+    beachR: island + R(22,58),            // where the beach finishes falling
     donutR: R(6500,14000),                // HIS TEN KILOMETRES, give or take
     donutD: R(34,92),                     // how deep the sea gets
     plainH: R(3,17),                      // and the mainland beyond it
@@ -10446,13 +10453,26 @@ function buildOuterWorld(){
     if(G.hull[i]) return;                       // the shell is not sand
     G.st[i]=ROCK; G.mat[i]=mat; G.scenery[i]=1;
   };
+  /* THE GROUND IS THE FUNCTION'S GROUND, NOT A SECOND OPINION.
+
+     This used to be its own island: a curve from the cylinder's rim out to
+     RISL, with its own roughness and its own idea of where the water met the
+     sand. So the world had TWO owners of one fact - geoH said one thing and
+     this said another - and that is the pattern behind every fault this week.
+
+     Now it reads geoH. The array becomes a CACHE OF THE FUNCTION rather than a
+     rival to it, which means the ground the shader draws past the array and
+     the ground you stand on inside it are the same ground, by construction.
+
+     geoH is in METRES above sea level and blocks count DOWNWARD from the sky,
+     so the conversion is one line - and the roughness stays, because a metre
+     of noise is what stops a smooth function looking like a smooth function. */
   const landY=(x,z)=>{
-    const d = dist(x,z);
-    if(d > RISL) return -1;
-    if(d <= RCYL) return ISLY;                  // the top face is the ground here
-    const t = (d-RCYL)/Math.max(1e-6, RISL-RCYL);
-    const rough = Math.sin(x*0.9)*Math.cos(z*0.7)*0.7 + Math.sin(z*1.7)*0.5;
-    return Math.round(ISLY + t*t*(SEAY+4-ISLY) + rough*t);
+    const dm = dist(x,z)*BLOCK;                 // distance from the island, in metres
+    const rough = (Math.sin(x*0.9)*Math.cos(z*0.7)*0.7 + Math.sin(z*1.7)*0.5) * BLOCK*0.5;
+    const y = Math.round(SEAY - (geoH(dm) + rough)/BLOCK);
+    if(y >= G.ny-1) return -1;                  // deeper than the world is tall
+    return Math.max(0, y);
   };
   /* AND IT STANDS ON A SEA FLOOR RATHER THAN FILLING THE WORLD TO ITS BOTTOM.
      Running the fill to y < G.ny made the island a SLAB - surface on top,
@@ -10464,8 +10484,17 @@ function buildOuterWorld(){
   for(let z=0;z<G.nz;z++) for(let x=0;x<G.nx;x++){
     if(dist(x,z) <= RCYL) continue;             // the cylinder is not sand
     const t = landY(x,z); if(t<0) continue;
-    for(let y=Math.max(0,t); y<=SEAB; y++)
-      set(x,y,z, y > t+2 ? M_STONE : (y >= SEAY-1 ? M_WETSAND : M_DRYSAND));
+    /* AND WHAT IT IS MADE OF IS THE FUNCTION'S ANSWER TOO. geoMat knows this
+       run's own crust - how deep the soil is, whether there is a band of sand
+       or rubble under it, where the rock starts - so the block world stops
+       guessing and asks. The block palette is coarser than the bead palette,
+       so this is the one place they are mapped onto each other. */
+    for(let y=Math.max(0,t); y<=SEAB; y++){
+      const gm = geoMat((x+0.5)*BLOCK, (y+0.5)*BLOCK, (z+0.5)*BLOCK);
+      set(x,y,z, gm===S_ROCK||gm===S_LAVA ? M_STONE
+               : gm===S_WETSND            ? M_WETSAND
+               : (y >= SEAY-1)            ? M_WETSAND : M_DRYSAND);
+    }
   }
 
   /* 4. AND THE ONE BLOCK THAT WILL GO. It is chosen now, at the middle of the
