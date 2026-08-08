@@ -9,6 +9,7 @@
    MINESWEEPER / THREE PLANES
    Palette: sand, ochre, ember, gold, arcane violet, soot
    ============================================================ */
+/* MAP minesweeper-three-planes · 294 lines · surface: - · uses: 13. INTERFACE(2), 14. LOOP(2), 12. ACTIONS — shoot and fl(1), 14b. THE FRAME - the tick(1) +3 · used by: - */
 :root{
   --sand:#d9a44c;
   --sand-hi:#f0c883;
@@ -305,6 +306,7 @@ kbd{font-family:var(--mono);font-size:.92em;background:var(--w95);color:#000;
    the screen and moving is a thumbstick on the left — the two things a pair of
    thumbs can do at once without getting in each other's way.
    ========================================================================== */
+/* MAP touch-controls · 386 lines · surface: - · uses: 13. INTERFACE(2), 16. TOUCH — the phone buil(2), 12. ACTIONS — shoot and fl(1), 12c. DUNGEON MODE — the th(1) +4 · used by: - */
 #touch{position:absolute;inset:0;z-index:7;display:none;touch-action:none;}
 body.touch #touch{display:block;}
 body.touch #needlock{display:none !important;}
@@ -688,6 +690,7 @@ body.world .stat.foe-only{ display:flex !important; }
 /* ==========================================================================
    0. WORLD CONSTANTS — real proportions
    ========================================================================== */
+/* MAP world-constants-real · 71 lines · surface: BLOCK, EYE, GRAV, P_H, P_R, eyeOff, eyeY, gnow · uses: 5. GAME STATE(1), THE LAYOUT - clusters, wei(1), 14. LOOP(1), THE UNIVERSE, AND IT IS ON(1) · used by: THE MINE INSIDE THE BLOCK(6), AND YOU CAN SEE THE RUNGS(4), 11. PHYSICS AND COLLISION(4), THE DRAW: THE SKY(3) +37 */
 const P_H     = 2.0;    // altura do personagem
 /* One face is 1.4 of you, not 2. At 4 m a cube read as architecture rather than
    as a block: standing in a one-cell corridor you could not see over anything,
@@ -782,6 +785,7 @@ function gnow(){ return GRAV * (G.gravK === undefined ? 1 : G.gravK); }
    AND gravK STILL FLIPS IT, untouched. The dungeon's reversed gravity is this
    vector with a minus sign, which is what it always was - it is just that the
    thing being negated is now a direction rather than an axis. */
+/* MAP gravity-vector-toward · 26 lines · surface: - · uses: 12. ACTIONS — shoot and fl(1), 10. STAFF(1), 0. WORLD CONSTANTS — real (1) · used by: - */
 /* ==========================================================================
    BODIES, AND GRAVITY AS THE SUM OF THEM
    --------------------------------------------------------------------------
@@ -807,6 +811,7 @@ function gnow(){ return GRAV * (G.gravK === undefined ? 1 : G.gravK); }
    THE MOON MOVES, so its pull moves with it. It is already drawn as a record
    in the sky at a real angular size; giving it a position in metres is the
    same number said in a different unit. */
+/* MAP bodies-gravity-sum · 25 lines · surface: - · uses: THE UNIVERSE, AND IT IS ON(1) · used by: - */
 /* ==========================================================================
    THE UNIVERSE, AND IT IS ONE FUNCTION
    --------------------------------------------------------------------------
@@ -838,6 +843,7 @@ function gnow(){ return GRAV * (G.gravK === undefined ? 1 : G.gravK); }
    THE PLANET CARRIES THE DONUT. Its geoid has an island at a feature point,
    a ring of sea around it and mainland beyond - and the moon's geoid has none
    of that, because a moon is plain. Same function, different roll. */
+/* MAP universe-function · 201 lines · surface: BODIES, bodyH, bodyPlanet, geoH, geoMat, geoOf, gravAt, gsign +2 · uses: WHAT IT DOES TO YOU(8), 0. WORLD CONSTANTS — real (3), THE SKY, THE SUN, THE MOON(2), 14b. THE FRAME - the tick(1) +5 · used by: THE DRAW: THE SKY(3), THE REVEAL - what you were(3), 11. PHYSICS AND COLLISION(2), THE SKY, THE SUN, THE MOON(2) +14 */
 const BODIES = [];
 function bodyPlanet(){ return BODIES[0]; }
 
@@ -1032,6 +1038,7 @@ function gsign(){ return gnow() >= 0 ? 1 : -1; }
    crosshair and the camera were looking at different heights.)
 
    And it takes time, because a body turning over takes time. ROLL_DUR of it. */
+/* MAP which-way-up · 263 lines · surface: COYOTE, CUSTOM, DIFFS, DUNGEON, ECHO_DUR, FUSE_T, HINT_DUR, JUMP_BUF +19 · uses: 0. WORLD CONSTANTS — real (2), 12. ACTIONS — shoot and fl(1), 12c. DUNGEON MODE — the th(1), 14b. THE FRAME - the tick(1) +6 · used by: 13. INTERFACE(11), genWorld - THE ONE ENTRY P(7), THE REVEAL - what you were(4), 12. ACTIONS — shoot and fl(3) +22 */
 const ROLL_DUR = 0.75;
 let ROLL_A = 0, ROLL_B = 0, ROLL_T = 0;      // from, to, seconds left
 function rollTarget(){ return gsign() > 0 ? 0 : Math.PI; }
@@ -1274,6 +1281,7 @@ const SOLID=0, AIR=1, MARKED=2, ROCK=3;
 /* ==========================================================================
    1. MATH
    ========================================================================== */
+/* MAP math · 78 lines · surface: clamp, compose, composeAA, lerp, rnd, seed, viewFrom, wrange +1 · uses: - · used by: 12. ACTIONS — shoot and fl(3), THE DRAW: THE CUBE PASSES(3), 13b. GAMEPAD — built again(3), 13. INTERFACE(3) +36 */
 const m4 = {
   persp(fovy, asp, n, f){
     const t = 1/Math.tan(fovy/2), o = new Float32Array(16);
@@ -1352,6 +1360,7 @@ const wrange = (lo,hi) => lo + ((wrnd()*(hi-lo+1))|0);
 /* ==========================================================================
    2. WEBGL — context and programs
    ========================================================================== */
+/* MAP webgl-context-programs · 310 lines · surface: canvas, pBB, pCube, prog · uses: 12. ACTIONS — shoot and fl(1), 9. DRAW BATCHES(1), 12c. DUNGEON MODE — the th(1), 14b. THE FRAME - the tick(1) +3 · used by: THE SKY, THE SUN, THE MOON(3), THE CREATURE FORGE(1), THE DRAW: THE BILLBOARD PA(1), THE DRAW: THE CUBE PASSES(1) +13 */
 const canvas = document.getElementById('gl');
 const gl = canvas.getContext('webgl2', {antialias:true, alpha:false, powerPreference:'high-performance'});
 if(!gl){ document.getElementById('nogl').style.display='grid'; return; }
@@ -1683,6 +1692,7 @@ const pBB   = prog(VS_BB,   FS_BB);
    writes off, so anything in front of it covers it, and inside a sealed
    dungeon every direction has stone in it. No flag, no test.
    ========================================================================== */
+/* MAP sky-sun-moon · 370 lines · surface: PLANET_R, SKY_LUN, _sun, pSky, skyNow, skyStart, skyVAO · uses: 2. WEBGL — context and pro(3), THE UNIVERSE, AND IT IS ON(2), 12. ACTIONS — shoot and fl(1), 14b. THE FRAME - the tick(1) +4 · used by: THE DRAW: THE SKY(4), THE UNIVERSE, AND IT IS ON(2), THE DRAW: FOG AND WATER(1), DRAWING IT(1) +2 */
 const VS_SKY = `#version 300 es
 precision highp float;
 out vec2 vNDC;
@@ -2029,6 +2039,15 @@ const uB = {
   spr:gl.getUniformLocation(pBB,'uSpr')
 };
 
+/* ==========================================================================
+   CUBE GEOMETRY AND THE INSTANCE BATCHES
+   --------------------------------------------------------------------------
+   One cube, six faces, and the two batch builders every draw pass in the
+   game fills: a cube batch and a billboard batch. It sat inside the sky's
+   banner and so the map credited the sky with drawCubes, which is how you
+   find out a banner is in the wrong place.
+   ========================================================================== */
+/* MAP cube-geometry-instance · 92 lines · surface: BB_STRIDE, CUBE, CUBE_STRIDE, drawBBs, drawCubes, makeBBBatch, makeCubeBatch · uses: 5. GAME STATE(2), 1. MATH(1) · used by: THE DRAW: THE CUBE PASSES(3), 9. DRAW BATCHES(2), THE DRAW: THE BILLBOARD PA(2), DRAWING IT(2) +8 */
 /* ---- geometria do cubo ---- */
 function buildCube(){
   const F = [
@@ -2117,6 +2136,7 @@ function drawBBs(b){
    3. GLYPH ATLAS  (numbers 0-26, arrows, mine, rune, glow, coin)
    canal R = preenchimento, canal G = contorno
    ========================================================================== */
+/* MAP glyph-atlas-numbers · 168 lines · surface: HI_CLUE, HI_GUESS, HI_MINE, HI_TGT, NUMCOL, NUMHI, T_CRACK_A, T_UP +2 · uses: 5. GAME STATE(1), 2. WEBGL — context and pro(1) · used by: THE DRAW: THE BILLBOARD PA(6), 12b. HINT — the deduction,(4), 12. ACTIONS — shoot and fl(2) */
 const T_UP=27, T_DOWN=28, T_MINE=29, T_RUNE=30, T_GLOW=31, T_COIN=32, T_SPARK=33;
 const T_CRACK_A=34, T_CRACK_B=35;   // what is inside a half-broken block
 const ATLAS_N = 8, TILE = 128, ATLAS_PX = ATLAS_N*TILE;
@@ -2284,6 +2304,7 @@ const HI_GUESS = [1.00,0.72,0.16];  // hint: no proof, only the safest bet
 /* ==========================================================================
    4. CAVE MATERIALS
    ========================================================================== */
+/* MAP cave-materials · 56 lines · surface: BEDCRYST, BEDROCK, CINDER, CINDER_HP, FOG_HELL, MATS, M_DRYSAND, hellStone · uses: 5. GAME STATE(1) · used by: THE SAND STEP, AND DRAWING(6), 12. ACTIONS — shoot and fl(2), THE OCEAN(2), THE DRAW: FOG AND WATER(1) +6 */
 const MATS = [
   {c:[0.86,0.64,0.32]}, // sandstone
   {c:[0.94,0.75,0.42]}, // pale sand
@@ -2350,6 +2371,7 @@ const FOG_HELL = [0.105,0.035,0.030];
    moved. Variant III holds for 0.42 s, which in practice means it hits you
    unless you are already moving when it fires. Variant I holds for 3 s, so it
    only ever catches someone who has stopped to think. */
+/* MAP enemy-types-boss · 233 lines · surface: EBODY, EN_MAX, EN_PARTS, ESHOT_SPD, ETYPES, FAM_FLAG, HELL_MAXH, HELL_UNIT +2 · uses: 12. ACTIONS — shoot and fl(1), 12c. DUNGEON MODE — the th(1), 5. GAME STATE(1), 14. LOOP(1) +1 · used by: 12c. DUNGEON MODE — the th(6), THE MINE INSIDE THE BLOCK(6), THE DRAW: THE CUBE PASSES(4), 9. DRAW BATCHES(2) +5 */
 const FAM_FLAG=0, FAM_ORB=1, FAM_SLUG=2, FAM_FINAL=3, FAM_MINE=4, FAM_HELL=5;
 /* Everything in the roster is measured against the player, who is 2 m. The
    smallest thing is about your height and the biggest is just under three of
@@ -2573,6 +2595,7 @@ const EBODY = ETYPES.map(bodyOf);
 /* ==========================================================================
    5. GAME STATE
    ========================================================================== */
+/* MAP game-state · 148 lines · surface: CELL_S, CLEAR_M, SPREAD, blocksBody, densExp, idx, inside, isSolidCell +1 · uses: WHICH WAY UP THE PLAYER IS(2), 14b. THE FRAME - the tick(1), 10. STAFF(1), 0. WORLD CONSTANTS — real (1) · used by: THE LAYOUT - clusters, wei(5), THE SAND STEP, AND DRAWING(4), 12. ACTIONS — shoot and fl(3), genWorld - THE ONE ENTRY P(3) +38 */
 const G = {
   state:'menu',          // menu | play | pause | over
   diff:0,
@@ -2718,6 +2741,12 @@ const SPREAD = 3.0, HALF = 5.0;
    are held quiet. You get somewhere to read from before the board argues. */
 const CLEAR_M = 6.0;
 let densExp = 1;
+/* ==========================================================================
+   THE LAYOUT - clusters, weights, reachability
+   --------------------------------------------------------------------------
+   Where the mines go, and the guarantee that the board can be walked.
+   ========================================================================== */
+/* MAP layout-clusters-weights · 224 lines · surface: DL_H, DL_LEVELS, DL_N, blankLayout, openFace, placeClusters, rollDensExp, shapeArena +2 · uses: 5. GAME STATE(5), 1. MATH(2), WHICH WAY UP THE PLAYER IS(2), 12b. HINT — the deduction,(1) +1 · used by: genWorld - THE ONE ENTRY P(7), SHAPING THE DUNGEON(4), 13. INTERFACE(1), 0. WORLD CONSTANTS — real (1) */
 function rollDensExp(){ densExp = -1 + rnd()*3; }
 function distWeight(i, sx, sy, sz){
   const x=i%G.nx, z=((i/G.nx)|0)%G.nz, y=(i/(G.nx*G.nz))|0;
@@ -2937,6 +2966,12 @@ const DL_N = 4;    // three zones and the arena
    the level. The grid height follows it, so a one-band dungeon really is a
    sixth of the world rather than a full one with the lights off. */
 let DL_LEVELS = DL_N;
+/* ==========================================================================
+   SHAPING THE DUNGEON
+   --------------------------------------------------------------------------
+   The rooms, the corridors, and the shell that holds them.
+   ========================================================================== */
+/* MAP shaping-dungeon · 239 lines · surface: shapeDungeon · uses: THE LAYOUT - clusters, wei(4), 5. GAME STATE(2), WHICH WAY UP THE PLAYER IS(2), 12. ACTIONS — shoot and fl(1) +4 · used by: genWorld - THE ONE ENTRY P(1) */
 function setDungeonLevels(n){
   DL_LEVELS = Math.max(1, Math.min(DL_N, n|0));
   DUNGEON.ny = DL_H * DL_LEVELS;
@@ -3171,6 +3206,12 @@ function shapeDungeon(){
    has to hold two numbers in their head at once. That ratio is what "hard but
    fair" actually means here, and it is the thing the difficulties are graded
    on now. */
+/* ==========================================================================
+   IS IT SOLVABLE - shallow moves and forced guesses
+   --------------------------------------------------------------------------
+   Two tests a generated board has to pass before anyone is asked to play it.
+   ========================================================================== */
+/* MAP solvable-shallow-moves · 60 lines · surface: countForcedGuesses, lastDepth · uses: 12b. HINT — the deduction,(4), REVEAL, ECHO AND FLAGS(2), 12. ACTIONS — shoot and fl(1), WHICH WAY UP THE PLAYER IS(1) · used by: genWorld - THE ONE ENTRY P(2) */
 function shallowMoveExists(){
   const N=G.nx*G.ny*G.nz;
   for(let i=0;i<N;i++){
@@ -3226,6 +3267,12 @@ function countForcedGuesses(){
 }
 let lastDepth = 0;
 
+/* ==========================================================================
+   genWorld - THE ONE ENTRY POINT THAT BUILDS A GAME
+   --------------------------------------------------------------------------
+   Everything above is called from here, in this order, once per run.
+   ========================================================================== */
+/* MAP genworld-entry-point · 332 lines · surface: genWorld · uses: THE LAYOUT - clusters, wei(7), WHICH WAY UP THE PLAYER IS(7), 5. GAME STATE(3), 12d. CHESTS — what the dun(2) +21 · used by: 15. BOOT(1), 13. INTERFACE(1), THE PROMOTION LADDER - bea(1), THE REVEAL - what you were(1) */
 function genWorld(d){
   /* The dungeon brings its own dimensions; the difficulty only chooses the
      board when you are playing the plain puzzle. When the dungeon learns to
@@ -3553,6 +3600,12 @@ function genWorld(d){
 /* reveals with flood fill through zeros (26 neighbors) */
 /* `flat` opens exactly the cell asked for and nothing else. Used for the
    opening face, where the flood is not wanted: see openFace. */
+/* ==========================================================================
+   REVEAL, ECHO AND FLAGS
+   --------------------------------------------------------------------------
+   What happens to the board when a cell is opened or marked.
+   ========================================================================== */
+/* MAP reveal-echo-flags · 78 lines · surface: clearEcho, echoColOf, numSatisfied, planeFlags, revealAt, setEcho · uses: 5. GAME STATE(2), THE BLOCK BECOMES BEADS - (1), 4. CAVE MATERIALS(1), 12d. CHESTS — what the dun(1) +2 · used by: 12b. HINT — the deduction,(4), THE DRAW: THE BILLBOARD PA(3), 12. ACTIONS — shoot and fl(2), IS IT SOLVABLE - shallow m(2) +3 */
 function revealAt(start, silent, flat){
   if(G.st[start]===AIR || G.st[start]===ROCK) return;
   const stack=[start]; let opened=0;
@@ -3629,6 +3682,7 @@ function planeFlags(x,y,z){
 /* ==========================================================================
    6. RAY — voxel DDA
    ========================================================================== */
+/* MAP ray-voxel-dda · 37 lines · surface: raycast · uses: 5. GAME STATE(3), WHICH WAY UP THE PLAYER IS(1), 0. WORLD CONSTANTS — real (1) · used by: 12. ACTIONS — shoot and fl(1), THE CAMERA - where the eye(1), 13b. GAMEPAD — built again(1), THE MINE INSIDE THE BLOCK(1) +1 */
 function raycast(ox,oy,oz, dx,dy,dz, maxD, wantNum, numR){
   let x=Math.floor(ox/BLOCK), y=Math.floor(oy/BLOCK), z=Math.floor(oz/BLOCK);
   const sx=Math.sign(dx)||1, sy=Math.sign(dy)||1, sz=Math.sign(dz)||1;
@@ -3666,6 +3720,7 @@ function raycast(ox,oy,oz, dx,dy,dz, maxD, wantNum, numR){
 /* ==========================================================================
    7. PARTICLES
    ========================================================================== */
+/* MAP particles · 19 lines · surface: MAXP, addP, addS, dust, particles, sprites · uses: 1. MATH(1) · used by: THE LONG SHOT(4), THE OCEAN(3), 12. ACTIONS — shoot and fl(2), THE DRAW: THE BILLBOARD PA(2) +14 */
 const particles=[];  // cubes with rotation
 const sprites=[];    // additive glows
 const dust=[];
@@ -3696,6 +3751,7 @@ function addS(x,y,z, vx,vy,vz, size, life, col, tile, alpha){
    further. Because the cap is measured in the pellet's own size, making the
    voxels bigger makes the pattern bigger with them, and it stays one number
    to tune instead of two that have to agree. */
+/* MAP buckshot-leaving-barrel · 37 lines · surface: KICK_TAU, PEL_N, PEL_OPEN, PEL_RADII, PEL_SIZE, PEL_SPD, SHOT_KICK, SHOT_LIFT · uses: 0. WORLD CONSTANTS — real (2), 5. GAME STATE(1) · used by: THE LONG SHOT(4), 12. ACTIONS — shoot and fl(2), THE DRAW: THE CUBE PASSES(2), 11. PHYSICS AND COLLISION(1) */
 const PEL_N     = 18;
 const PEL_SIZE  = BLOCK*0.032;      // a voxel, and deliberately a tiny one
 const PEL_RADII = 4;                // ...and it opens to four of its own
@@ -3740,6 +3796,7 @@ const SHOT_LIFT = Math.sqrt(2*GRAV*BLOCK/3);
 
    IT IS THE STARTING WEAPON ONLY, and only once the world is open: it is the
    way OUT of the island, not a tool for the dungeon. */
+/* MAP long-shot · 115 lines · surface: HOLD_LONG, LONG_V, SMOKE_N, STAG_MIN, STAG_T, VIEW_PUNCH, addPellets, pellets +3 · uses: BUCKSHOT — what leaving th(4), 7. PARTICLES(4), 1. MATH(3), 12. ACTIONS — shoot and fl(2) +6 · used by: 12. ACTIONS — shoot and fl(6), 14b. THE FRAME - the tick(2), genWorld - THE ONE ENTRY P(2), 11. PHYSICS AND COLLISION(2) +4 */
 const HOLD_LONG = 10.0;               // seconds on the trigger
 const LONG_V    = 1000.0;             // metres a second, straight back
 /* AND IT STOPS YOU DEAD FOR A MOMENT.
@@ -3837,6 +3894,7 @@ function spawnCrumble(x,y,z,mat){
 /* ==========================================================================
    8. AUDIO — everything synthesized
    ========================================================================== */
+/* MAP audio-everything-synthesized · 177 lines · surface: snd · uses: 5. GAME STATE(1), 14. LOOP(1), THE OCEAN(1) · used by: 12. ACTIONS — shoot and fl(1), 12d. CHESTS — what the dun(1), 12c. DUNGEON MODE — the th(1), 14b. THE FRAME - the tick(1) +10 */
 const snd = (function(){
   let ac=null, master=null, drone=null;
   function ensure(){
@@ -4011,6 +4069,12 @@ const snd = (function(){
   };
   let bankState = 'cold';          // cold -> loading -> done
   let bankBad = 0;
+/* ==========================================================================
+   THE REAL SHELLS - decoding what was baked into the page
+   --------------------------------------------------------------------------
+   Marcelo's own recordings, base64 at the foot of the file, decoded once on the first gesture.
+   ========================================================================== */
+/* MAP real-shells-decoding · 208 lines · surface: - · uses: 14. LOOP(1), 2. WEBGL — context and pro(1) · used by: - */
   function bankLoad(){
     if(bankState !== 'cold') return;
     const B = window.SND_B64;
@@ -4214,6 +4278,12 @@ const snd = (function(){
   const SECTION_BARS = 32;
   let mVar=0, mSection=-1;
 
+/* ==========================================================================
+   THE MUSIC
+   --------------------------------------------------------------------------
+   Two guitars, a snare, and a clock.
+   ========================================================================== */
+/* MAP music · 439 lines · surface: - · uses: 12. ACTIONS — shoot and fl(1), 5. GAME STATE(1), THE LAST FLAG(1), 14. LOOP(1) +3 · used by: - */
   function mEnsure(){
     if(!ensure()) return false;
     if(!mBus){ mBus = ac.createGain(); mBus.gain.value = mMuted?0:mVol; mBus.connect(ac.destination); }
@@ -4651,6 +4721,7 @@ const snd = (function(){
 /* ==========================================================================
    9. DRAW BATCHES
    ========================================================================== */
+/* MAP draw-batches · 35 lines · surface: boomB, chestB, debris, enemyB, ghostB, glowB, glyphB, hellB +3 · uses: CUBE GEOMETRY AND THE INST(2), 4b. ENEMY TYPES(2), 7. PARTICLES(1), WHICH WAY UP THE PLAYER IS(1) · used by: THE DRAW: THE CUBE PASSES(7), THE DRAW: THE BILLBOARD PA(5), 12. ACTIONS — shoot and fl(1), THE BLACK BOX(1) +11 */
 /* Sized for the largest board there is. Custom tops out at 20 x 5 x 20, but
    the dungeon is 18 x 24 x 18, and with its shell that is 20 * 26 * 20 — six
    times the cubes. Overflowing this batch drops geometry silently. */
@@ -4714,6 +4785,7 @@ const hellB   = makeCubeBatch(6000);
    1,352 can be seen), and only VOX_MAX blocks may be voxelised at once, oldest
    evicted first. Past that a block is damaged the old way, which looks worse
    and never breaks. */
+/* MAP voxel-layer-block · 31 lines · surface: - · uses: CUBE GEOMETRY AND THE INST(1), 9. DRAW BATCHES(1), 0. WORLD CONSTANTS — real (1) · used by: - */
 /* ==========================================================================
    9b. SAND — voxel/sand.js, in the game
    ==========================================================================
@@ -4788,6 +4860,7 @@ const hellB   = makeCubeBatch(6000);
        Without it piles come out flatter along the diagonals, which is the same
        artefact as before wearing a different hat.
    ========================================================================== */
+/* MAP sand-voxel-sand · 158 lines · surface: AIR_MAX, CELL_M, FX_DUR, FX_NAME, HP_START, K_STATIC, LAT_DIV, LAT_M +16 · uses: THE PROMOTION LADDER - bea(3), 12. ACTIONS — shoot and fl(1), THE GAME SIDE: where the g(1), 11. PHYSICS AND COLLISION(1) +2 · used by: WHAT IT DOES TO YOU(15), AND YOU CAN SEE THE RUNGS(10), ONE CELL, ONE STEP - the f(7), THE PROMOTION LADDER - bea(7) +17 */
 /* THE THREE SCALES, and each number now answers only its own question.
 
      CELL  = BLOCK   4.5 m   the minesweeper unit: a mine, a safe block, a
@@ -4900,6 +4973,7 @@ const SM_OPAC = new Float32Array(256);
    goes the other; if conservation lived in shoot(), the rocket would be a
    second implementation of the same idea and the two would disagree. It lives
    here, in the material table, where the beads are. */
+/* MAP integrity-momentum-law · 30 lines · surface: SM_INTEG, SM_MASS · uses: 12. ACTIONS — shoot and fl(1) · used by: WHAT IT DOES TO YOU(2), GRIT - a bead in flight, a(2), A SHOT INTO THE WORLD - bu(2) */
 const SM_INTEG = new Float32Array(256);   // joules to break one bead
 const SM_MASS  = new Float32Array(256);   // kg of one bead, from density
 /* ==========================================================================
@@ -4932,6 +5006,7 @@ const SM_MASS  = new Float32Array(256);   // kg of one bead, from density
    settles, and is never looked at again. The scattered beads at the edge of a
    spill are the only ones the engine pays for, and they are the only ones that
    are supposed to be going anywhere. */
+/* MAP mortal · 30 lines · surface: - · uses: 11. PHYSICS AND COLLISION(1) · used by: - */
 /* ==========================================================================
    WHAT IT DOES TO YOU
    --------------------------------------------------------------------------
@@ -4944,6 +5019,7 @@ const SM_MASS  = new Float32Array(256);   // kg of one bead, from density
    water in never. The status is one id, because a material in Noita does one
    thing to you - it is the combination of materials that gets complicated, and
    that complication belongs in the reaction table rather than here. */
+/* MAP does · 147 lines · surface: EVAP_BASE, EVAP_EVERY, HUMID, HUMID_DECAY, HUMID_PER, SM_BURN, SM_DMG, SM_DOUSE +24 · uses: 9b. SAND — voxel/sand.js, (15), INTEGRITY, AND MOMENTUM AS(2), 1. MATH(1) · used by: NOITA'S TABLE(25), ONE CELL, ONE STEP - the f(8), THE GAME SIDE: where the g(8), THE UNIVERSE, AND IT IS ON(8) +13 */
 const SM_DMG  = new Float32Array(256);  // HP a second while you are in it
 const SM_FX   = new Uint8Array(256);    // the status it gives you
 const SM_BURN = new Uint8Array(256);    // does fire take it
@@ -5100,6 +5176,7 @@ const S_GPOWD  = addMat({n:'gunpowder', k:K_POWDER, d:1700, slip:0.80, c:[0.18,0
    through whom, and the answer is then automatically right without anybody
    ordering a list. Noita's own invented liquids are all near water, which is
    why they mix rather than stratify. */
+/* MAP noita-s-table · 277 lines · surface: CORNER_RATE, LATX, LATZ, NB26X, SAND_LAT, SIM_R, SIM_SPHERE, SRS +2 · uses: WHAT IT DOES TO YOU(25), 9b. SAND — voxel/sand.js, (3), THE GAME SIDE: where the g(1), 14. LOOP(1) · used by: ONE CELL, ONE STEP - the f(8), sandTick - ONE PASS OVER E(3), THE SPIT(2), THE PROMOTION LADDER - bea(1) +1 */
 
 /* ---- blood and the things that live ---- */
 const S_BLOOD  = addMat({n:'blood',       k:K_LIQUID, d:1050, s:4, slip:1.0, opac:2.6, c:[0.48,0.04,0.05], emis:0.22, douse:1});
@@ -5398,6 +5475,7 @@ let SIM_SPHERE = true;
    every side, which is what still makes every probe safe without a bounds test:
    the furthest anything reaches is the eight-cell column walk in the liquid
    rule, and the pad is thirty-two. */
+/* MAP paged-cell-store · 52 lines · surface: PGB, PGC, PGO, PGP, PGS, PGSH · uses: STREAMING: the array is a (4), THE BLOCK BECOMES BEADS - (3), THE PROMOTION LADDER - bea(3), 9b. SAND — voxel/sand.js, (2) +3 · used by: STREAMING: the array is a (6), THE PROMOTION LADDER - bea(4), SandWorld - THE GRID ITSEL(4), THE SAND STEP, AND DRAWING(3) +3 */
 const PGS = SAND_DIV/LAT_DIV;      // 8 — a page is one LAT block
 const PGSH = Math.round(Math.log2(PGS)), PGM = PGS-1;
 const PGC = PGS*PGS*PGS;           // cells in a block
@@ -5432,6 +5510,7 @@ function pgOf(w,x,y,z){ return ((((y+PGO)>>PGSH)*w.BD + ((z+PGO)>>PGSH))*w.BW + 
    The cost of arriving somewhere new is therefore paid PER BLOCK HE TOUCHES,
    not per block that exists, which is the same bargain the paged grid already
    made one rung down. */
+/* MAP streaming-array-window · 112 lines · surface: PG_UNKNOWN, aGet, aSet, cBlockBulk, cBlockPage, cFault, cFreeBlock, cGet +1 · uses: THE PAGED CELL STORE — why(6), WHAT IT DOES TO YOU(1), 5. GAME STATE(1), 9b. SAND — voxel/sand.js, (1) +2 · used by: THE BLOCK BECOMES BEADS - (4), ONE CELL, ONE STEP - the f(4), THE PAGED CELL STORE — why(4), SandWorld - THE GRID ITSEL(4) +8 */
 const PG_UNKNOWN = 255;                    // no material is 255; the table has ~80
 
 /* WHAT SHOULD BE HERE, asked of the universe and then remembered. A block that
@@ -5520,6 +5599,12 @@ function cBlockBulk(w, bx,by,bz){
   return w.pg[b] === null ? w.pgu[b] : -1;
 }
 
+/* ==========================================================================
+   SandWorld - THE GRID ITSELF
+   --------------------------------------------------------------------------
+   The object every bead lives in: pages, chunks, wake bits, and the stats the log reads.
+   ========================================================================== */
+/* MAP sandworld-grid-itself · 173 lines · surface: SandWorld · uses: THE PAGED CELL STORE — why(4), 9b. SAND — voxel/sand.js, (4), STREAMING: the array is a (4), WHAT IT DOES TO YOU(3) +4 · used by: THE BLOCK BECOMES BEADS - (1), THE PROMOTION LADDER - bea(1) */
 class SandWorld {
   constructor(W,H,D){
     this.W=W; this.H=H; this.D=D;
@@ -5688,6 +5773,12 @@ class SandWorld {
 
 /* Can I displace what is there? Air always; a lighter fluid yes, which is how
    sand sinks through water and oil climbs through it with no special case. */
+/* ==========================================================================
+   ONE CELL, ONE STEP - the falling-sand rules
+   --------------------------------------------------------------------------
+   What a single bead does in a single tick, which is the whole of the material behaviour.
+   ========================================================================== */
+/* MAP cell-step-falling · 335 lines · surface: sStepCell · uses: WHAT IT DOES TO YOU(8), NOITA'S TABLE(8), 9b. SAND — voxel/sand.js, (7), STREAMING: the array is a (4) +6 · used by: AND YOU CAN SEE THE RUNGS(1), sandTick - ONE PASS OVER E(1) */
 function sPassable(mat, tgt){
   if(tgt === S_AIR) return true;
   const k = SM_K[tgt];
@@ -6018,6 +6109,12 @@ function sStepCell(w, x,y,z, mat, gdir){
    gravity so a grain does not fall twice in one tick, and the x direction
    alternates, because a fixed order makes every flow drift the same way and
    the eye picks that up immediately. */
+/* ==========================================================================
+   sandTick - ONE PASS OVER EVERYTHING AWAKE
+   --------------------------------------------------------------------------
+   The sweep, the order it goes in, and the seven-metre sphere that bounds it.
+   ========================================================================== */
+/* MAP sandtick-pass-over · 148 lines · surface: sandTick · uses: WHAT IT DOES TO YOU(5), 9b. SAND — voxel/sand.js, (5), NOITA'S TABLE(3), STREAMING: the array is a (3) +4 · used by: THE SAND STEP, AND DRAWING(1) */
 function sandTick(w, gdir){
   const CW=w.CW, CD=w.CD;
   const flip = (w.tick & 1) === 1;
@@ -6164,6 +6261,7 @@ function sandTick(w, gdir){
 /* ==========================================================================
    THE GAME SIDE: where the grid meets the block world
    ========================================================================== */
+/* MAP game-side-where · 66 lines · surface: SAND, SAND_DRAW_R, VOXD, VOXHOLLOW, voxMatAt, voxRecipe · uses: WHAT IT DOES TO YOU(8), 4. CAVE MATERIALS(1), 1. MATH(1), THE OCEAN(1) +2 · used by: THE SAND STEP, AND DRAWING(5), THE BLOCK BECOMES BEADS - (4), A SHOT INTO THE WORLD - bu(4), 12. ACTIONS — shoot and fl(1) +11 */
 let SAND = null;
 
 /* A block is sand with some rock through it and some water in it, mixed from
@@ -6251,6 +6349,7 @@ const SAND_DRAW_R = BLOCK*11;              // chunks past this are not drawn
    Loose material - a heap of sand, a spill - keeps the full bead radius,
    because it has no rung above bead to go to. Only what has been PROMOTED
    changes size, which means the size you see is the rung it is on. */
+/* MAP can-see-rungs · 232 lines · surface: LAD_MASS_R, SAND_BEAD_R, SAND_CHUNKS, SAND_DRAW_MAX, SAND_HZ, V_MAX, V_UNIT, sandAcc +5 · uses: 9b. SAND — voxel/sand.js, (10), WHAT IT DOES TO YOU(6), 0. WORLD CONSTANTS — real (4), ONE CELL, ONE STEP - the f(1) +13 · used by: THE SAND STEP, AND DRAWING(7), THE PROMOTION LADDER - bea(4), ONE CELL, ONE STEP - the f(2), 11. PHYSICS AND COLLISION(2) +5 */
 const SAND_BEAD_R = 10.0;             // promoted material past this is a cube
 const LAD_MASS_R  = 42.0;              // and past this the whole body is one box
 const SAND_DRAW_MAX = 22000;               // instances the sand layer may spend
@@ -6478,6 +6577,7 @@ function tickBody(dt){
 
    What you have in your mouth is the last liquid you were in, because being in
    a thing IS taking it - the same rule as everywhere else. Water otherwise. */
+/* MAP spit · 124 lines · surface: doSpit, fxGrav, fxSpeed, sandWakeLoose, spitCharge · uses: 9b. SAND — voxel/sand.js, (4), WHAT IT DOES TO YOU(3), THE PROMOTION LADDER - bea(3), NOITA'S TABLE(2) +11 · used by: 14b. THE FRAME - the tick(2), 11. PHYSICS AND COLLISION(2), 13. INTERFACE(1), THE OCEAN(1) +1 */
 const SPIT_MAX = 1.1;                  // seconds of charge for a full mouthful
 const SPIT_DOSE = 0.35;                // how much of it you get, being the one holding it
 function spitCharge(dt){
@@ -6636,6 +6736,7 @@ function sandWakeLoose(){
    whatever the physics actually does - which is the correct answer and also
    the cheap one.
    ========================================================================== */
+/* MAP promotion-ladder-bead · 469 lines · surface: LADB, LADM, LADQ, LAD_DRAW_MAX, LNX, ladBodyAt, ladBreak, ladCensus +10 · uses: 9b. SAND — voxel/sand.js, (7), AND YOU CAN SEE THE RUNGS(4), THE PAGED CELL STORE — why(4), CUBE GEOMETRY AND THE INST(2) +14 · used by: THE OCEAN(5), THE SAND STEP, AND DRAWING(5), THE PAGED CELL STORE — why(3), 9b. SAND — voxel/sand.js, (3) +8 */
 /* IS THIS A BLOCK OF WATER? Marcelo: "a block of water is considered so once
    there are AT LEAST BLOCK/8 beads of water in it." So this is a second, looser
    rung beside LADM: LADM says "every one of my 4,096 cells is this", which is
@@ -7052,6 +7153,12 @@ function ladDraw(d, n){
 
 /* Build the grid for the world that genWorld just made: everything is rock,
    so only the air has to be written. */
+/* ==========================================================================
+   THE BLOCK BECOMES BEADS - build, voxelise, dig
+   --------------------------------------------------------------------------
+   A block is one cube until something happens to it; these are the ways it stops being one.
+   ========================================================================== */
+/* MAP block-becomes-beads · 119 lines · surface: sandBuild, sandDig, sandFill, voxCarve, voxelise · uses: THE GAME SIDE: where the g(4), STREAMING: the array is a (4), 9b. SAND — voxel/sand.js, (3), THE PAGED CELL STORE — why(2) +9 · used by: THE PAGED CELL STORE — why(3), A SHOT INTO THE WORLD - bu(3), 12. ACTIONS — shoot and fl(2), THE SAND STEP, AND DRAWING(2) +4 */
 function sandBuild(){
   const W=G.nx*SAND_DIV, H=G.ny*SAND_DIV, D=G.nz*SAND_DIV;
   if(!SAND || SAND.W!==W || SAND.H!==H || SAND.D!==D) SAND = new SandWorld(W,H,D);
@@ -7166,6 +7273,12 @@ function sandDig(bx,by,bz){
 }
 /* And a block came out violently: a sample of what it was made of is thrown
    into the air, to land as real material wherever it lands. */
+/* ==========================================================================
+   A SHOT INTO THE WORLD - burst, ray, collapse, blast
+   --------------------------------------------------------------------------
+   Where a shot meets matter: what it passes through, what it breaks, and what it throws.
+   ========================================================================== */
+/* MAP shot-into-world · 414 lines · surface: GRIT, GRIT_MAX, SWIM_A, SWIM_DRAG, blockCollapse, sandBlast, sandBurst, sandRayHit · uses: 9b. SAND — voxel/sand.js, (5), THE GAME SIDE: where the g(4), STREAMING: the array is a (4), THE BLOCK BECOMES BEADS - (3) +17 · used by: 12. ACTIONS — shoot and fl(3), THE BLOCK BECOMES BEADS - (2), GRIT - a bead in flight, a(2), 11. PHYSICS AND COLLISION(2) +5 */
 function sandBurst(bx,by,bz, dirx,diry,dirz, count){
   const bi = idx(bx,by,bz);
   const cx=(bx+0.5)*BLOCK, cy=(by+0.5)*BLOCK, cz=(bz+0.5)*BLOCK;
@@ -7575,6 +7688,12 @@ const GRIT = {
   vx:new Float32Array(GRIT_MAX), vy:new Float32Array(GRIT_MAX), vz:new Float32Array(GRIT_MAX),
   m:new Uint8Array(GRIT_MAX), live:new Uint8Array(GRIT_MAX)
 };
+/* ==========================================================================
+   GRIT - a bead in flight, and what it hits
+   --------------------------------------------------------------------------
+   A bead that survived a blast is a projectile with mass and momentum until it lands.
+   ========================================================================== */
+/* MAP grit-bead-flight · 106 lines · surface: gritAdd, gritStep, sandCell · uses: 9b. SAND — voxel/sand.js, (3), WHAT IT DOES TO YOU(2), INTEGRITY, AND MOMENTUM AS(2), A SHOT INTO THE WORLD - bu(2) +9 · used by: A SHOT INTO THE WORLD - bu(2), 12. ACTIONS — shoot and fl(1), AND YOU CAN SEE THE RUNGS(1), THE OCEAN(1) +2 */
 function gritAdd(x,y,z, vx,vy,vz, mat){
   let i = -1;
   if(GRIT.n < GRIT_MAX) i = GRIT.n++;
@@ -7676,6 +7795,12 @@ function gritStep(dt){
 
 /* One frame: the beads in the air, then the grid, at a fixed rate so the
    physics does not change speed with the frame rate. */
+/* ==========================================================================
+   THE SAND STEP, AND DRAWING IT
+   --------------------------------------------------------------------------
+   One pass of the simulation per frame, and the instance buffer that shows the result.
+   ========================================================================== */
+/* MAP sand-step-drawing · 354 lines · surface: WD_MAX, rebuildWorld, sandDraw, sandStep · uses: AND YOU CAN SEE THE RUNGS(7), 9b. SAND — voxel/sand.js, (7), 4. CAVE MATERIALS(6), THE GAME SIDE: where the g(5) +19 · used by: THE CAMERA - where the eye(1), AND YOU CAN SEE THE RUNGS(1), THE DRAW: THE CUBE PASSES(1), 14b. THE FRAME - the tick(1) */
 function sandStep(dt){
   if(!SAND) return;
   gritStep(dt);
@@ -8028,6 +8153,7 @@ function rebuildWorld(){
 /* ==========================================================================
    10. STAFF (view model) — 13% of the lower-left frame
    ========================================================================== */
+/* MAP staff-view-model · 146 lines · surface: MUZZLE, PUMPA, SHOTGUN, buildViewModel, mulM, recoil · uses: 8. AUDIO — everything synt(1), CUBE GEOMETRY AND THE INST(1), 9. DRAW BATCHES(1), 14b. THE FRAME - the tick(1) +2 · used by: 12. ACTIONS — shoot and fl(3), THE CAMERA - where the eye(1), THE DRAW: THE CUBE PASSES(1), THE DRAW: THE VIEW MODEL A(1) +7 */
 /* Parts in the staff's LOCAL space: +Y axis, origin at the center of the
    shaft, unit = half the screen height. A single global matrix places the
    whole thing, so the parts have no way to come apart from each other. */
@@ -8174,6 +8300,7 @@ function buildViewModel(t, speed, aspect){
 /* ==========================================================================
    11. PHYSICS AND COLLISION
    ========================================================================== */
+/* MAP physics-collision · 168 lines · surface: physics · uses: 0. WORLD CONSTANTS — real (4), WHICH WAY UP THE PLAYER IS(3), AND YOU CAN SEE THE RUNGS(2), THE LONG SHOT(2) +8 · used by: THE DRAW: THE CUBE PASSES(1), THE ENDING — the boss blow(1), 14b. THE FRAME - the tick(1), GRIT - a bead in flight, a(1) +9 */
 function collideAxis(axis, delta){
   if(delta===0) return false;
   if(axis===0) P.x+=delta; else if(axis===1) P.y+=delta; else P.z+=delta;
@@ -8342,6 +8469,7 @@ function physics(dt){
 /* ==========================================================================
    12. ACTIONS — shoot and flag
    ========================================================================== */
+/* MAP actions-shoot-flag · 514 lines · surface: THINK, aimRay, endThink, hover, mark, shoot, startThink, thinkAim · uses: THE LONG SHOT(6), THE MINE INSIDE THE BLOCK(6), 12d. CHESTS — what the dun(3), 5. GAME STATE(3) +33 · used by: 13. INTERFACE(5), 13b. GAMEPAD — built again(4), THE CAMERA - where the eye(3), 16. TOUCH — the phone buil(3) +28 */
 function aimRay(){
   const cy=Math.cos(P.yaw), sy=Math.sin(P.yaw), cp=Math.cos(P.pitch), sp=Math.sin(P.pitch);
   return {ox:P.x, oy:eyeY(), oz:P.z, dx:-sy*cp, dy:sp, dz:-cy*cp};
@@ -8868,6 +8996,7 @@ function mark(hit){
              -> the blocks one covers and the other does not
 
    Returns {nums:[revealed cells used], target, mine} or null. */
+/* MAP hint-deduction-shown · 317 lines · surface: askHint, cellXYZ, findHint, insta_dungeon_solve, nbrsOf, planeHidden · uses: 3. GLYPH ATLAS(4), REVEAL, ECHO AND FLAGS(4), 12. ACTIONS — shoot and fl(2), 5. GAME STATE(2) +10 · used by: IS IT SOLVABLE - shallow m(4), 12c. DUNGEON MODE — the th(2), 13. INTERFACE(2), 12. ACTIONS — shoot and fl(1) +11 */
 function cellXYZ(i){
   return [i%G.nx, (i/(G.nx*G.nz))|0, ((i/G.nx)|0)%G.nz];
 }
@@ -9173,6 +9302,7 @@ function insta_dungeon_solve(){
 /* ==========================================================================
    12c. DUNGEON MODE — the things that live down there
    ========================================================================== */
+/* MAP dungeon-mode-things · 135 lines · surface: DIG_FUSE, ODDS_ARCHON, ODDS_COMMON, _mz, correctFlags, enemies, frameM, muzzleOf +3 · uses: 4b. ENEMY TYPES(6), 12b. HINT — the deduction,(2), 0. WORLD CONSTANTS — real (2), 12. ACTIONS — shoot and fl(1) +6 · used by: THE MINE INSIDE THE BLOCK(9), THE DRAW: THE BILLBOARD PA(3), 13b. GAMEPAD — built again(3), THE DRAW: THE CUBE PASSES(2) +12 */
 const enemies=[], eshots=[];
 
 function solidAtWorld(x,y,z){
@@ -9324,6 +9454,7 @@ const DIG_FUSE = [3, 75];
 
    Their shots cost a whole heart rather than the half that everything else in
    the cave deals. There is no attrition here. */
+/* MAP last-flag · 41 lines · surface: HELL, SHELL · uses: THE LONG SHOT(1) · used by: THE REVEAL - what you were(2), 12. ACTIONS — shoot and fl(1), THE FORGE ITSELF(1), 13b. GAMEPAD — built again(1) +5 */
 const SHELL = 280;                       // four shotgun blasts
 const SIL_WALK=0, SIL_FLOAT=1, SIL_LEGS=2;
 const HELL = [
@@ -9363,6 +9494,7 @@ HELL.forEach((h,i)=>{ h.tile=i; });
    Baron and the Hell Knight are one drawing in two palettes and the Spectre
    is the Demon rendered almost invisible.
    ========================================================================== */
+/* MAP old-sprites · 526 lines · surface: HELL_ART, HELL_VOX, hellPalette, hellVoxels, spriteTex · uses: THE CREATURE FORGE(2), 12c. DUNGEON MODE — the th(1), 14b. THE FRAME - the tick(1), THE LAST FLAG(1) +1 · used by: THE CREATURE FORGE(2), THE DRAW: THE CUBE PASSES(2), THE FORGE ITSELF(2), THE DRAW: THE BILLBOARD PA(1) +3 */
 /* One drawing per creature, one character per pixel. See tools/gen_sprites.py.
    Shape is fixed here; colour comes from the creature ramp at build time. */
 const HELL_ART = {
@@ -9891,6 +10023,7 @@ for(let i=0;i<SPR_N*SPR_N;i++){
    `life` and `rate` will be scaled per difficulty later; the shape of the
    table is what matters now. Bands are non-overlapping — the brief had 4-5 and
    "5 to 7" sharing a 5 — so 5 belongs to the lower, calmer band. */
+/* MAP mine-inside-block · 543 lines · surface: POP_S, POP_T, armDigFuse, corpses, digSpawn, hatchMine, hurtPoints, killEnemy +4 · uses: 12c. DUNGEON MODE — the th(9), 4b. ENEMY TYPES(6), 0. WORLD CONSTANTS — real (6), THE OCEAN(4) +14 · used by: 12. ACTIONS — shoot and fl(6), THE DRAW: THE CUBE PASSES(3), genWorld - THE ONE ENTRY P(2), THE CAMERA - where the eye(1) +5 */
 const MINE_TIERS = [
   //  up to N adjacent shots : hp, first shot after, seconds between aims
   {upTo:0, hp:0,  first:0,    rate:0,    scale:1.00, fly:false},   // never wakes
@@ -10423,6 +10556,7 @@ function rayEnemy(ox,oy,oz, dx,dy,dz, maxD){
    chest and it gives up exactly one thing. Two of the three are rare enough
    that most of what you find is the eye — which is the one that helps you
    think, and the one the dungeon is really about. */
+/* MAP chests-dungeon-pays · 90 lines · surface: chests, openChest, rayChest, spawnChest, syncPowHud · uses: 0. WORLD CONSTANTS — real (2), 12. ACTIONS — shoot and fl(1), 8. AUDIO — everything synt(1), 12b. HINT — the deduction,(1) +3 · used by: 12. ACTIONS — shoot and fl(3), genWorld - THE ONE ENTRY P(2), THE DRAW: THE CUBE PASSES(1), THE MINE INSIDE THE BLOCK(1) +1 */
 const chests=[];
 /* A heart is worth far more on a board that can kill you quickly, so how often
    a chest holds one depends on the difficulty rather than being a flat 1%:
@@ -10527,6 +10661,7 @@ function syncPowHud(){
    solid thing until something breaks it, so an intact island costs exactly
    what an intact dungeon costs. Shoot it and it becomes grains like anything
    else. */
+/* MAP ending-boss-blows · 24 lines · surface: EMERGE_T · uses: 9. DRAW BATCHES(1), 14. LOOP(1), 1. MATH(1), 11. PHYSICS AND COLLISION(1) · used by: THE OCEAN(1) */
 const EMERGE_T = 2.6;                   // seconds of falling upward
 
 /* ==========================================================================
@@ -10562,6 +10697,7 @@ const EMERGE_T = 2.6;                   // seconds of falling upward
      y = ROCK0      the top of the chunk, and the dungeon is still inside it
      y = ny-1       the sea floor
    ========================================================================== */
+/* MAP reveal-were-inside · 513 lines · surface: buildOuterWorld, revealIsland · uses: WHICH WAY UP THE PLAYER IS(4), WHAT IT DOES TO YOU(3), THE UNIVERSE, AND IT IS ON(3), 5. GAME STATE(2) +16 · used by: 14b. THE FRAME - the tick(1), genWorld - THE ONE ENTRY P(1), SHAPING THE DUNGEON(1), WHICH WAY UP THE PLAYER IS(1) */
 let OUTER_N = 0;
 function buildOuterWorld(){
   OUTER_N++;
@@ -11058,6 +11194,7 @@ function revealIsland(){
    Near you it is beads, because the bead pass draws whatever is inside the
    draw radius and the cells are all still there. Past that it is one cube a
    block. Both are the same water; which one you get is how far away it is. */
+/* MAP ocean · 394 lines · surface: HOUSE_LAMP, VIAL_BASE, blast, bossBlows, buildVials, checkWin, detonate, oceanFill +1 · uses: WHAT IT DOES TO YOU(5), THE PROMOTION LADDER - bea(5), 9b. SAND — voxel/sand.js, (4), 13. INTERFACE(3) +23 · used by: THE MINE INSIDE THE BLOCK(4), 12. ACTIONS — shoot and fl(3), 14b. THE FRAME - the tick(2), 8. AUDIO — everything synt(1) +10 */
 function oceanFill(){
   if(!SAND || !G.seaB || !G.seaB.length) return 0;
   const w = SAND, S = SAND_DIV;
@@ -11439,6 +11576,7 @@ function blast(){
 /* ==========================================================================
    13. INTERFACE
    ========================================================================== */
+/* MAP interface · 556 lines · surface: KEY, canJump, elMenu, flashScreen, loadCfg, lockHint, locked, setScreen +11 · uses: WHICH WAY UP THE PLAYER IS(11), 12. ACTIONS — shoot and fl(5), 1. MATH(3), 12b. HINT — the deduction,(2) +17 · used by: 13b. GAMEPAD — built again(6), 14b. THE FRAME - the tick(5), 16. TOUCH — the phone buil(5), THE PANEL(4) +18 */
 const $ = id => document.getElementById(id);
 const elMenu=$('menu'), elPause=$('pause'), elOver=$('over'), elHud=$('hud'), elCross=$('cross');
 
@@ -12006,6 +12144,7 @@ function updateJump(dt){
    axes instead, and a few report an axis that RESTS at -1 rather than 0. So a
    trigger counts as pulled if either the button is past half or a plausible
    trigger axis has moved well away from where it started. */
+/* MAP gamepad-built-against · 244 lines · surface: blinkMine, keyLook, pollPad, startFinale, updateLock · uses: 13. INTERFACE(6), 12. ACTIONS — shoot and fl(4), 12c. DUNGEON MODE — the th(3), 1. MATH(3) +9 · used by: 14b. THE FRAME - the tick(3), 12. ACTIONS — shoot and fl(1), 13. INTERFACE(1), THE OCEAN(1) */
 const GP = {
   active:false, woke:false, prev:[], think:false,
   invLatch:false, menuLatch:false, lockLatch:false
@@ -12239,6 +12378,7 @@ function keyLook(dt){
 /* ==========================================================================
    14. LOOP
    ========================================================================== */
+/* MAP loop · 18 lines · surface: FOG, SUN, last, resize, viewM · uses: 16. TOUCH — the phone buil(1), 2. WEBGL — context and pro(1) · used by: THE DRAW: THE CUBE PASSES(2), THE DRAW: THE VIEW MODEL A(2), 14b. THE FRAME - the tick(2), WHAT LIGHTS THE CAVE(2) +27 */
 let W=1, H=1, DPR=1;
 function resize(){
   DPR = Math.min(window.devicePixelRatio||1, TOUCH ? 1.5 : 2);
@@ -12276,6 +12416,7 @@ let last=performance.now(), nextWhisper=25+Math.random()*30, tGlobal=0;
 
    Lights ADD where they overlap, so two flags light a corner better than one.
    ========================================================================== */
+/* MAP lights-cave · 290 lines · surface: FLY_R, LIGHT_FLY, LIT_FOG, LIT_GLYPH, LIT_LANTERN, LIT_LANTR, LIT_LANTR2, LIT_LANTT +14 · uses: 4b. ENEMY TYPES(2), 5. GAME STATE(2), 14. LOOP(2), 8. AUDIO — everything synt(1) +9 · used by: THE DRAW: THE CUBE PASSES(16), THE DRAW: THE BILLBOARD PA(6), 12. ACTIONS — shoot and fl(1), THE DRAW: FOG AND WATER(1) +6 */
 /* All three are tunable from the URL — ?dark=0.06&lantern=0.05&glyph=0.06 —
    because "way darker" is a look, and a look is found by turning a knob and
    looking, not by a round trip through a rebuild. */
@@ -12567,6 +12708,7 @@ const litNums=[];
    export both flip y, and those two lines are the only place the old idiom
    and this one have to agree.
    ========================================================================== */
+/* MAP creature-forge · 104 lines · surface: FORGE_ART, FZ_CH, FZ_LABEL, FZ_N, FZ_STORE, FZ_W, forgeVoxels, fzIn +1 · uses: THE OLD SPRITES(2), 2. WEBGL — context and pro(1) · used by: THE FORGE ITSELF(7), DRAWING IT(3), THE OLD SPRITES(2), THE PANEL(2) */
 const FZ_W = 24, FZ_H = 28, FZ_D = 24;
 const FZ_N = FZ_W*FZ_H*FZ_D;
 const fzi  = (x,y,z) => (y*FZ_D + z)*FZ_W + x;
@@ -12651,6 +12793,7 @@ function forgeVoxels(m){
 /* ==========================================================================
    THE FORGE ITSELF
    ========================================================================== */
+/* MAP forge-itself · 233 lines · surface: FZ_BG, FZ_FOV, fzAxis, fzB, fzCam, fzClearSlice, fzExport, fzGet +9 · uses: THE CREATURE FORGE(7), 1. MATH(2), THE OLD SPRITES(2), CUBE GEOMETRY AND THE INST(1) +4 · used by: THE PANEL(11), DRAWING IT(6), TOUCH CONTROLS(1) */
 const FZ = {
   grid: new Uint8Array(FZ_N),
   art:'imp', col:[0.62,0.38,0.20],
@@ -12889,6 +13032,7 @@ function fzAxis(a){ FZ.axis = a; FZ.slice = Math.min(FZ.slice, fzSliceMax()); fz
    painting into a solid and cannot see the tip of the pencil. Orbit past the
    plane and the hidden half swaps sides on its own.
    ========================================================================== */
+/* MAP drawing · 112 lines · surface: fzFrame · uses: THE FORGE ITSELF(6), THE CREATURE FORGE(3), CUBE GEOMETRY AND THE INST(2), 1. MATH(2) +8 · used by: 14b. THE FRAME - the tick(1) */
 function fzBuild(){
   const d = fzB.data; let n = 0;
   const pal = hellPalette(FZ.col);
@@ -12996,6 +13140,7 @@ function fzFrame(dt){
 /* ==========================================================================
    THE PANEL
    ========================================================================== */
+/* MAP panel · 160 lines · surface: fzHUD, fzKey, fzSyncUI · uses: THE FORGE ITSELF(11), 13. INTERFACE(4), THE CREATURE FORGE(2), THE BLOCK BECOMES BEADS - (1) +6 · used by: DRAWING IT(1), THE FORGE ITSELF(1), 13. INTERFACE(1) */
 function fzSwatches(){
   const box = $('fzPal'); if(!box) return;
   const pal = hellPalette(FZ.col);
@@ -13171,6 +13316,7 @@ if(/[?&]forge/.test(location.search)) setTimeout(()=>fzOpen(), 60);
    win needs no key pressed at the moment it matters least.
 
    F3 dumps it whenever you like, mid-run. */
+/* MAP black-box · 107 lines · surface: logDump, logEvent, logSample · uses: THE PROMOTION LADDER - bea(2), 9b. SAND — voxel/sand.js, (2), AND YOU CAN SEE THE RUNGS(1), 9. DRAW BATCHES(1) +8 · used by: 14b. THE FRAME - the tick(2), 12. ACTIONS — shoot and fl(1), genWorld - THE ONE ENTRY P(1), 13. INTERFACE(1) +3 */
 const LOG_MAX = 4000;
 const LOG = [];
 let LOG_T = 0, LOG_DUMPED = false, LOG_T0 = 0;
@@ -13260,6 +13406,12 @@ function logDump(why){
     toast('last_run.txt written to Downloads.', 1600);
   }catch(e){}
 }
+/* ==========================================================================
+   14b. THE FRAME - the tick
+   --------------------------------------------------------------------------
+   Everything that happens to the world in one frame, before any of it is drawn.
+   ========================================================================== */
+/* MAP frame-tick · 98 lines · surface: frame · uses: 13. INTERFACE(5), 13b. GAMEPAD — built again(3), 12. ACTIONS — shoot and fl(2), THE BLACK BOX(2) +18 · used by: 12. ACTIONS — shoot and fl(1), THE BLACK BOX(1), 15. BOOT(1), THE CAMERA - where the eye(1) +25 */
 function frame(now){
   requestAnimationFrame(frame);
   let dt = Math.min(0.05, (now-last)/1000); last=now;
@@ -13353,6 +13505,12 @@ function frame(now){
     if(s.tile===T_GLOW) s.vy*=(1-1.6*sim);
   }
 
+/* ==========================================================================
+   THE CAMERA - where the eye is, and where it is pointing
+   --------------------------------------------------------------------------
+   Shake, roll, drunkenness and the water's wobble all land here and nowhere else.
+   ========================================================================== */
+/* MAP camera-where-eye · 59 lines · surface: - · uses: 12. ACTIONS — shoot and fl(3), WHICH WAY UP THE PLAYER IS(2), 12c. DUNGEON MODE — the th(1), 14b. THE FRAME - the tick(1) +10 · used by: - */
   // ------- camera -------
   /* Shake shoves the camera, and it used to shove it 2.2 m in a random
      direction every frame while also jittering the ANGLES — and the angles are
@@ -13407,6 +13565,12 @@ function frame(now){
   if(G.dirty) rebuildWorld();
 
   // ------- draw -------
+/* ==========================================================================
+   THE DRAW: FOG AND WATER
+   --------------------------------------------------------------------------
+   What colour the frame starts as: the horizon outside, and the water when you are under it.
+   ========================================================================== */
+/* MAP draw-fog-water · 45 lines · surface: - · uses: 4. CAVE MATERIALS(1), 4b. ENEMY TYPES(1), 14b. THE FRAME - the tick(1), WHAT LIGHTS THE CAVE(1) +3 · used by: - */
   gl.viewport(0,0,W,H);
   /* THE FOG WAS THE BASE LIGHT, and this is the one that made "way darker"
      come back looking the same twice. Every surface fades toward uFog with
@@ -13447,6 +13611,12 @@ function frame(now){
   gl.disable(gl.BLEND);
   gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
 
+/* ==========================================================================
+   THE DRAW: THE SKY
+   --------------------------------------------------------------------------
+   One triangle, drawn first with depth writes off, so everything covers it and it covers nothing.
+   ========================================================================== */
+/* MAP draw-sky · 57 lines · surface: - · uses: THE SKY, THE SUN, THE MOON(4), THE UNIVERSE, AND IT IS ON(3), 0. WORLD CONSTANTS — real (3), 5. GAME STATE(1) · used by: - */
   /* THE SKY, first and behind everything. Depth writes off, so it never
      occludes anything and everything occludes it - which is how the cave sees
      none of it without a single test. */
@@ -13499,6 +13669,12 @@ function frame(now){
     gl.enable(gl.DEPTH_TEST); gl.depthMask(true); gl.enable(gl.CULL_FACE);
   }
 
+/* ==========================================================================
+   THE DRAW: THE CUBE PASSES
+   --------------------------------------------------------------------------
+   World, sand, fireflies, enemies, the boss, chests and ghost blocks, in that order.
+   ========================================================================== */
+/* MAP draw-cube-passes · 387 lines · surface: - · uses: WHAT LIGHTS THE CAVE(16), 9. DRAW BATCHES(7), 4b. ENEMY TYPES(4), CUBE GEOMETRY AND THE INST(3) +21 · used by: - */
   gl.useProgram(pCube);
   gl.uniformMatrix4fv(uC.proj,false,projMain);
   gl.uniformMatrix4fv(uC.view,false,viewM);
@@ -13881,6 +14057,12 @@ function frame(now){
   }
 
   // ------- glyphs: numbers, arrows, mines -------
+/* ==========================================================================
+   THE DRAW: THE BILLBOARD PASSES
+   --------------------------------------------------------------------------
+   Glyphs, sprites and glows - everything that turns to face you.
+   ========================================================================== */
+/* MAP draw-billboard-passes · 289 lines · surface: - · uses: 3. GLYPH ATLAS(6), WHAT LIGHTS THE CAVE(6), 9. DRAW BATCHES(5), 12c. DUNGEON MODE — the th(3) +13 · used by: - */
   gl.useProgram(pBB);
   gl.uniformMatrix4fv(uB.proj,false,projMain);
   gl.uniformMatrix4fv(uB.view,false,viewM);
@@ -14165,6 +14347,12 @@ function frame(now){
   }
 
   // ------- staff -------
+/* ==========================================================================
+   THE DRAW: THE VIEW MODEL AND THE HUD
+   --------------------------------------------------------------------------
+   The staff in the corner, drawn last and with its own projection.
+   ========================================================================== */
+/* MAP draw-view-model · 28 lines · surface: - · uses: 14. LOOP(2), 12. ACTIONS — shoot and fl(1), CUBE GEOMETRY AND THE INST(1), 9. DRAW BATCHES(1) +4 · used by: - */
   if(G.state==='play' || G.state==='pause'){
     gl.clear(gl.DEPTH_BUFFER_BIT);
     gl.useProgram(pCube);
@@ -14195,6 +14383,7 @@ function frame(now){
    and looking becomes a drag. Left thumb moves, right thumb looks, buttons sit
    under whichever thumb is free. Every control routes through the same
    functions the mouse and keyboard use, so there is one game underneath. */
+/* MAP touch-phone-build · 145 lines · surface: TOUCH, tStick · uses: 13. INTERFACE(5), 12. ACTIONS — shoot and fl(3), 14b. THE FRAME - the tick(1), 12b. HINT — the deduction,(1) +3 · used by: TOUCH CONTROLS(2), 13. INTERFACE(1), 14. LOOP(1) */
 const TOUCH = /[?&]touch=1/.test(location.search) ||
               ((('ontouchstart' in window) || (navigator.maxTouchPoints|0) > 0)
                && matchMedia('(pointer: coarse)').matches);
@@ -14336,6 +14525,7 @@ if(TOUCH){
 /* ==========================================================================
    15. BOOT
    ========================================================================== */
+/* MAP boot · 21 lines · surface: - · uses: 13. INTERFACE(3), 14b. THE FRAME - the tick(1), genWorld - THE ONE ENTRY P(1), 14. LOOP(1) · used by: - */
 resize();
 loadCfg();
 G.diff=0; updateDiffNote();
@@ -14371,6 +14561,7 @@ requestAnimationFrame(frame);
 
    Rebuild with tools/bake_snd.py from the untrimmed originals.
    ========================================================================== */
+/* MAP recordings-18-files · 39 lines · surface: - · uses: - · used by: - */
 window.SND_B64={
 S0:"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",
 S1:"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",
