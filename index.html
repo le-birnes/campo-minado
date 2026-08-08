@@ -1698,41 +1698,64 @@ precision highp float;
 in vec2 vNDC;
 uniform vec3 uFwd, uRight, uUpv;      // the camera's own basis
 uniform vec2 uTan;                    // tan(fov/2) across and up
-uniform vec3 uWorldUp;                // which way is up in the world, right now
 uniform vec3 uSunDir, uMoonDir;
 uniform vec3 uZenith, uHoriz, uSea, uSunCol, uMoonCol;
-uniform float uNight;                 // 0 day, 1 night - how many stars
-/* THE PLANET. From five hundred metres up he said: "the whole drawing is still
-   contained inside a giant visible box." It was, and this is why. The sea was a
-   COLOUR below a horizon LINE - h = dot(dir, uWorldUp) was the entire geometry
-   of it. No surface, no distance, no curvature, so the world was a square of
-   stored blocks with a flat wash behind it and no altitude could ever make
-   anything shrink.
-   It is a sphere of radius uR now, with the eye uH above it, and the ray is
-   INTERSECTED with it. Everything follows and nothing is drawn: the horizon
-   sits at sqrt(2*R*h) - 2.8 km from an eye 2 m up, 78 km from five hundred -
-   and it curves, and as you climb it closes into a disc and then a ball. */
+/* THE PLANET, AND ONE NUMBER FOR HOW FAR AWAY THE SKY IS.
+   From a hundred kilometres up he said: "the planet is a black mass and there
+   is a different horizon and sky IN THE UNIVERSE ABOVE." Both were true and
+   both had the same cause. There were THREE separate opinions in here about
+   how high he was - a gradient in dot(dir,up), a haze in exp(-t/9000), and a
+   dimming in uH/45000 - and above the atmosphere they disagreed: the dimming
+   blacked the planet out, the gradient kept drawing a sky over the top of it,
+   and the seam between them was the second horizon.
+   They are one quantity now, and it is a real one: HOW MUCH AIR THE RAY GOES
+   THROUGH, integrated through an exponential atmosphere. Everything is a
+   consequence of it and nothing is a special case:
+     no air        -> black, and full of stars
+     a little air  -> deep blue: the zenith
+     a lot of air  -> pale: the horizon, from either side of it
+   Which is why the same formula that makes the sky blue from the beach makes
+   the planet a blue ball from orbit, with a white rim where the line of sight
+   grazes the air and nothing at all beyond it. */
 uniform float uR;                     // planet radius, metres
-/* THE HORIZON IS THE PLANET, NOT A PICTURE OF ONE.
-   uPC is the planet's centre and uFeat the island's, both RELATIVE TO THE EYE,
-   and uIsleA/uIsleB are this run's own island: its radius, its height, where
-   the beach finishes, how far the sea reaches, how deep it is, and how high
-   the mainland stands beyond it. The same six numbers the ground is built
-   from. So what he sees at the horizon is the terrain, marched - the donut of
-   sea, its far rim, and the mainland rising past it - rather than a coloured
-   line at eye level pretending to be a world. */
-uniform vec3  uPC, uFeat;
+uniform vec3  uPC, uFeat;             // the centre, and the island, from the eye
 uniform vec4  uIsleA;                 // r, h, beach, seaR
 uniform vec2  uIsleB;                 // seaD, plain
-uniform float uH;                     // how far the eye is above sea level
 uniform float uPhase;                 // cos of the sun-moon angle: the moon's phase
 out vec4 frag;
 
-/* one hash, used for the stars. Fewer, brighter, and only where it is dark. */
+const float ATM    = 70000.0;         // where the air runs out
+const float HSC    =  7000.0;         // and how fast it thins on the way up
+const float OD_F   =  2400.0;         // how much air makes a full sky
+const float OD_H   = 55000.0;         // and how much makes it horizon-coloured
+const float BETA_S = 1.05e-4;         // what the air does to what is behind it
+/* AIR OVER SOMETHING IS A VEIL; AIR OVER NOTHING IS THE SKY - and it is the
+   same air. That asymmetry is not a fudge, it is what a screen forces: real
+   sunlit ground is ten times brighter than the real sky, and both are drawn
+   here between 0 and 1, so adding a whole sky on top of a whole ground goes
+   over the top and stays there. Measured, before this line existed: the planet
+   from orbit came back (138,196,255) with blue pinned at the ceiling, and
+   ocean and land were the same colour because everything above 1.0 is white.
+   Now the air only half-covers what it is in front of, and the island is
+   visible from a hundred kilometres. */
+const float VEIL   = 0.60;
+const float RS     = 0.00463;         // half a degree: the sun, and the moon
+
+/* one hash, used for the stars */
 float h31(vec3 p){
   p = fract(p*0.3183099 + vec3(0.71,0.113,0.419));
   p *= 17.0;
   return fract(p.x*p.y*p.z*(p.x+p.y+p.z));
+}
+
+/* where a ray enters and leaves a sphere centred at C, or negative for neither */
+vec2 raySph(vec3 dir, vec3 C, float rad){
+  float b = dot(dir, C);
+  float c = dot(C, C) - rad*rad;
+  float d = b*b - c;
+  if(d < 0.0) return vec2(-1.0, -1.0);
+  float s = sqrt(d);
+  return vec2(b - s, b + s);
 }
 
 /* the same curve as bodyH(), in the shader, because there is only one shape */
@@ -1743,103 +1766,160 @@ float isleH(float d){
   if(d < sR){ float t=(d-be)/max(sR-be,1.0); float t4=t*t*t*t; return -sD + (sD+pl)*t4; }
   return pl;
 }
+
+/* THE REST OF THE UNIVERSE. Quantised direction, so they hold still while you
+   turn - which is the whole point of them, and the only way they are any use
+   for working out which way you are going. Two sizes, because a sky of
+   identical stars reads as a texture, and a band, because a galaxy is a place
+   where there are more of them than anywhere else. */
+vec3 stars(vec3 d){
+  vec3 s = vec3(0.0);
+  vec3 c1 = floor(d*260.0);
+  float b1 = smoothstep(0.99560, 0.99965, h31(c1));
+  vec3 c2 = floor(d*690.0 + 19.3);
+  float b2 = smoothstep(0.99880, 0.99996, h31(c2))*0.5;
+  s += mix(vec3(0.70,0.79,1.00), vec3(1.00,0.86,0.68), h31(c1+7.1)) * b1;
+  s += mix(vec3(0.80,0.86,1.00), vec3(1.00,0.92,0.80), h31(c2+3.3)) * b2;
+  float bd = 1.0 - abs(dot(d, normalize(vec3(0.36,0.30,-0.88))));
+  float band = smoothstep(0.86, 1.0, bd); band *= band;
+  float n = h31(floor(d*23.0))*0.55 + h31(floor(d*57.0)+11.0)*0.45;
+  s *= 1.0 + band*1.8;                       // thicker with stars along the band
+  s += vec3(0.32,0.34,0.46) * band * (0.20 + 0.80*n) * 0.20;
+  return s;
+}
+
 void main(){
   vec3 dir = normalize(uFwd + uRight*(vNDC.x*uTan.x) + uUpv*(vNDC.y*uTan.y));
-  float h = dot(dir, uWorldUp);                    // +1 straight up, -1 straight down
 
-  /* THE GRADIENT. Deep at the zenith, pale at the horizon, and the power is
-     what stops it reading as a linear ramp - the real sky is nearly all
-     horizon colour for the bottom fifth and nearly all zenith for the rest. */
-  vec3 col = mix(uHoriz, uZenith, pow(clamp(h,0.0,1.0), 0.42));
-  /* and below the line it is the sea, going darker as it goes under you */
-  /* THE OCEAN IS A SPHERE YOU HIT, not a colour you are handed. Its centre is
-     straight down from the eye at R + H; a ray that hits it is water at that
-     distance and one that misses is sky, and the horizon is simply where the
-     hits stop - which is what a horizon is. */
-  vec3  Cp = -uWorldUp * (uR + uH);
-  float bq = dot(dir, Cp);
-  float cq = dot(Cp, Cp) - uR*uR;
-  float dq = bq*bq - cq;
-  float seaT = -1.0;
-  if(dq > 0.0){ float t = bq - sqrt(dq); if(t > 0.0) seaT = t; }
-  if(seaT > 0.0){
-    /* MARCH THE GROUND. The sphere hit is only the FAR BOUND - the sea's own
-       level - and the land can stand above it or fall below it, so the ray is
-       walked and the first step that goes under the surface is the ground.
-       Geometric steps: detail past a few hundred metres is under a pixel, and
-       the horizon is 2.8 km from an eye two metres up. */
-    float landT = -1.0, lh = 0.0;
-    float t = 2.0, prev = 0.0;
-    for(int i=0;i<96;i++){
-      if(t >= seaT) break;
-      vec3 q = dir*t;                                   // relative to the eye
-      vec3 rel = q - uPC;                               // relative to the centre
-      vec3 fr  = q - uFeat;
-      float dd = length(fr - uWorldUp*dot(fr, uWorldUp));   // along the surface
-      float hh = isleH(dd);
-      if(length(rel) < uR + hh){ landT = mix(prev, t, 0.5); lh = hh; break; }
-      prev = t;
-      t += max(2.0, t*0.09);
-    }
-    if(landT > 0.0){
-      /* SAND AT THE WATERLINE, DIRT ABOVE IT, and the whole thing goes to the
-         horizon's colour with distance, because that is what air does. */
-      vec3 sand = vec3(0.62,0.54,0.38), soil = vec3(0.34,0.30,0.20);
-      vec3 land = mix(sand, soil, clamp(lh/22.0, 0.0, 1.0));
-      col = mix(land, uHoriz, clamp(1.0 - exp(-landT/9000.0), 0.0, 1.0));
+  /* ONE FRAME OF REFERENCE, and it is the planet. Up is the way away from its
+     centre and height is how far - so there is nothing left to disagree with. */
+  vec3  C    = uPC;
+  float H    = max(length(C) - uR, 0.5);
+  vec3  up   = normalize(-C);
+  vec3  fdir = normalize(uFeat - C);         // the island, seen from the centre
+
+  /* --- WHAT THE RAY LANDS ON, IF ANYTHING -------------------------------- */
+  vec2  sg = raySph(dir, C, uR);
+  float tG = (sg.y > 0.0 && sg.x > 0.0) ? sg.x : -1.0;
+  float lh = 0.0;
+  bool  land = false;
+  if(tG > 0.0){
+    if(H < 15000.0){
+      /* NEAR ENOUGH TO SEE THE SHAPE OF IT. The sphere hit is only the far
+         bound - the sea's own level - and the land stands above it, so walk
+         the ray and take the first step that goes under the ground. */
+      float t = 2.0, prev = 0.0, best = -1.0;
+      for(int i=0;i<96;i++){
+        if(t >= tG) break;
+        vec3 q = dir*t, fr = q - uFeat;
+        float hh = isleH(length(fr - up*dot(fr,up)));
+        if(length(q - C) < uR + hh){ best = mix(prev,t,0.5); lh = hh; break; }
+        prev = t; t += max(2.0, t*0.09);
+      }
+      if(best > 0.0){ tG = best; land = true; }
+      else {
+        vec3 q = dir*tG, fr = q - uFeat;
+        lh = isleH(length(fr - up*dot(fr,up)));
+        land = lh > 0.0;
+      }
     } else {
-      /* AND IT FADES INTO ITS OWN HORIZON: fifteen kilometres of air turns any
-         sea the colour of the sky, which is why a far coast is a smudge. */
-      vec3 water = mix(uSea, uSea*0.35, clamp(-h*2.2, 0.0, 1.0));
-      col = mix(water, uHoriz, clamp(1.0 - exp(-seaT/15000.0), 0.0, 1.0));
+      /* TOO FAR FOR RELIEF - a metre of hill is a hundredth of a pixel from up
+         here - so the sphere IS the ground, and the same six numbers say what
+         is standing on it. The island you can see from orbit is the island you
+         walked on. */
+      vec3 q = dir*tG, fr = q - uFeat;
+      float dd = length(fr - up*dot(fr,up));
+      if(dot(q - C, fdir) < 0.0) dd = 1e9;     // that part is round the back
+      lh = isleH(dd);
+      land = lh > 0.0;
     }
-  } else if(h <= 0.0){
-    col = mix(uHoriz, uZenith*0.30, clamp(uH/60000.0, 0.0, 1.0));
-  }
-  /* THE HORIZON ITSELF is a line, not a fade. Standing on an island, the edge
-     of the world is the sharpest thing in the picture. */
-  /* AND SPACE IS BLACK. The air thins with height the way it really does, so
-     leaving the atmosphere is something that happens to the picture rather
-     than something announced. */
-  col *= mix(1.0, 0.06, clamp(uH/45000.0, 0.0, 1.0));
-
-  /* STARS, and only where the sky is dark enough to have any. Quantised
-     direction so they hold still while you turn, which is the whole point of
-     them: they are the fixed thing. */
-  if((uNight > 0.02 || uH > 20000.0) && seaT < 0.0){
-    vec3 q = floor(dir*420.0);
-    float r = h31(q);
-    float st = smoothstep(0.9975, 0.99930, r);
-    /* the brightest few twinkle; the rest are steady */
-    col += vec3(0.85,0.88,1.0) * st * uNight * clamp(h*3.0,0.0,1.0);
   }
 
-  /* THE SUN. 0.53 degrees across, so a half-angle of 0.00463 radians, and for
-     an angle that small the chord is the angle to nine decimal places. */
-  const float RS = 0.00463;
-  float ds = length(dir - uSunDir);
-  float sun = 1.0 - smoothstep(RS*0.86, RS*1.06, ds);
-  /* the corona is not the disc: it is a hundred times wider and a hundredth as
-     bright, and without it the sun reads as a sticker */
-  float halo = exp(-ds*ds*2600.0)*0.55 + exp(-ds*ds*90.0)*0.16;
-  col = mix(col, uSunCol, clamp(sun + halo*0.85, 0.0, 1.0));
+  /* --- HOW MUCH AIR IS ON THIS RAY. THE ONE NUMBER. ----------------------
+     Measured in metres of sea-level air: 7 km looking straight up, 81 km
+     looking along the horizon, and nothing at all in space. Twenty-four
+     samples get both to within one percent. */
+  vec2  sa = raySph(dir, C, uR + ATM);
+  float od = 0.0;
+  vec3  mid = dir;
+  if(sa.y > 0.0){
+    float t0 = max(sa.x, 0.0);
+    float t1 = (tG > 0.0) ? min(tG, sa.y) : sa.y;
+    if(t1 > t0){
+      float dt = (t1 - t0)/24.0;
+      for(int i=0;i<24;i++){
+        vec3 q = dir*(t0 + (float(i)+0.5)*dt);
+        od += exp(-max(length(q - C) - uR, 0.0)/HSC) * dt;
+      }
+      mid = dir*((t0 + t1)*0.5);
+    }
+  }
 
-  /* THE MOON, the same size, and lit by the same sun - so its phase is not a
-     setting, it is where the two of them are. The terminator is an ELLIPSE:
-     the great circle dividing the lit half, seen at an angle. */
-  float dm = length(dir - uMoonDir);
-  if(dm < RS*3.0){
-    vec3 o = dir - uMoonDir*dot(dir,uMoonDir);      // offset across the disc
-    vec3 st = normalize(uSunDir - uMoonDir*dot(uSunDir,uMoonDir) + vec3(1e-6));
-    vec3 pt = cross(st, uMoonDir);
-    float u = dot(o, st)/RS, v = dot(o, pt)/RS;
-    float edge = -uPhase * sqrt(max(0.0, 1.0 - v*v));
-    float lit = smoothstep(edge-0.10, edge+0.10, u);
-    float disc = 1.0 - smoothstep(RS*0.90, RS*1.04, dm);
-    /* earthshine: the dark limb is not black, it is lit by the planet */
-    vec3 mc = uMoonCol * (0.09 + 0.91*lit);
-    col = mix(col, mc, disc);
-    col += uMoonCol * exp(-dm*dm*9000.0) * 0.10;
+  /* --- AND WHETHER THE SUN IS SHINING ON IT ------------------------------
+     Not on YOU - on the air the ray goes through. Standing on the beach every
+     ray's air is over your own head and this is just the time of day; from
+     orbit it is different for every ray, and that is the terminator: the sky
+     goes out along a line across the planet because the sun does. */
+  vec3  upM  = (od > 0.0) ? normalize(mid - C) : up;
+  float lit  = smoothstep(-0.32, 0.20, dot(uSunDir,  upM));
+  float litM = smoothstep(-0.32, 0.20, dot(uMoonDir, upM));
+  float cs = dot(dir, uSunDir), cm = dot(dir, uMoonDir);
+  float f   = 1.0 - exp(-od/OD_F);                       // how full the sky is
+  vec3  pal = mix(uZenith, uHoriz, clamp(od/OD_H, 0.0, 1.0));   // and which sky
+  vec3  insc = pal * f * (0.75*(1.0 + cs*cs)) * lit
+             + uMoonCol * (0.05 * f * (0.75*(1.0 + cm*cm)) * litM);
+
+  /* --- THE PICTURE. Space is black and everything else is added to it. --- */
+  vec3 col = vec3(0.0);
+  if(tG > 0.0){
+    vec3  q = dir*tG;
+    vec3  N = normalize(q - C);
+    vec3 alb = land
+      ? mix(vec3(0.62,0.54,0.38), vec3(0.34,0.30,0.20), clamp(lh/22.0, 0.0, 1.0))
+      : mix(uSea, uSea*0.35, clamp(-lh/60.0, 0.0, 1.0));
+    if(!land){
+      /* WATER AT A GRAZING ANGLE IS A MIRROR - which is why the sea is pale at
+         the horizon and dark under your feet, and it is one term, not a fade. */
+      float fr = 0.02 + 0.98*pow(1.0 - max(dot(-dir, N), 0.0), 5.0);
+      alb = mix(alb, uHoriz, fr);
+    }
+    /* AND IT HAS A DAY SIDE. Flat and bright wherever the sun is properly up,
+       which is everywhere near you, and black where it has set - which from
+       orbit is half the world. */
+    float shade = 0.06 + 0.98*smoothstep(-0.12, 0.30, dot(N, uSunDir))
+                       + 0.05*max(dot(N, uMoonDir), 0.0);
+    col = alb * shade * exp(-BETA_S*od) + insc*VEIL;
+  } else col = insc;
+
+  /* --- STARS, wherever the sky is dark enough to have any. Not "at night"
+     and not "above the horizon" - both of those were wrong from orbit, where
+     it is daytime and most of the sky is below you. --------------------- */
+  if(tG < 0.0){
+    float sv = clamp(1.0 - max(col.r, max(col.g, col.b))*2.6, 0.0, 1.0);
+    if(sv > 0.002) col += stars(dir) * sv;
+  }
+
+  /* --- THE SUN AND THE MOON, unless the planet is in front of them ------- */
+  if(tG < 0.0){
+    float ds = length(dir - uSunDir);
+    float sun = 1.0 - smoothstep(RS*0.86, RS*1.06, ds);
+    /* the corona is the AIR, so it goes when the air does and the sun in
+       vacuum is the hard little disc it really is */
+    float halo = (exp(-ds*ds*2600.0)*0.55 + exp(-ds*ds*90.0)*0.16) * f;
+    col = mix(col, uSunCol, clamp(sun + halo*0.85, 0.0, 1.0));
+
+    float dm = length(dir - uMoonDir);
+    if(dm < RS*3.0){
+      vec3 o = dir - uMoonDir*dot(dir,uMoonDir);
+      vec3 st = normalize(uSunDir - uMoonDir*dot(uSunDir,uMoonDir) + vec3(1e-6));
+      vec3 pt = cross(st, uMoonDir);
+      float u = dot(o, st)/RS, v = dot(o, pt)/RS;
+      float edge = -uPhase * sqrt(max(0.0, 1.0 - v*v));
+      float li = smoothstep(edge-0.10, edge+0.10, u);
+      float disc = 1.0 - smoothstep(RS*0.90, RS*1.04, dm);
+      col = mix(col, uMoonCol*(0.09 + 0.91*li), disc);
+      col += uMoonCol * exp(-dm*dm*9000.0) * 0.10 * (0.25 + 0.75*f);
+    }
   }
 
   frag = vec4(col, 1.0);
@@ -1848,13 +1928,12 @@ const pSky = prog(VS_SKY, FS_SKY);
 const uS = {
   fwd:gl.getUniformLocation(pSky,'uFwd'), right:gl.getUniformLocation(pSky,'uRight'),
   upv:gl.getUniformLocation(pSky,'uUpv'), tan:gl.getUniformLocation(pSky,'uTan'),
-  worldUp:gl.getUniformLocation(pSky,'uWorldUp'),
   sunDir:gl.getUniformLocation(pSky,'uSunDir'), moonDir:gl.getUniformLocation(pSky,'uMoonDir'),
   zenith:gl.getUniformLocation(pSky,'uZenith'), horiz:gl.getUniformLocation(pSky,'uHoriz'),
   sea:gl.getUniformLocation(pSky,'uSea'), sunCol:gl.getUniformLocation(pSky,'uSunCol'),
   moonCol:gl.getUniformLocation(pSky,'uMoonCol'),
-  night:gl.getUniformLocation(pSky,'uNight'), phase:gl.getUniformLocation(pSky,'uPhase'),
-  R:gl.getUniformLocation(pSky,'uR'), H:gl.getUniformLocation(pSky,'uH'),
+  phase:gl.getUniformLocation(pSky,'uPhase'),
+  R:gl.getUniformLocation(pSky,'uR'),
   PC:gl.getUniformLocation(pSky,'uPC'), FEAT:gl.getUniformLocation(pSky,'uFeat'),
   ISA:gl.getUniformLocation(pSky,'uIsleA'), ISB:gl.getUniformLocation(pSky,'uIsleB')
 };
@@ -13127,7 +13206,9 @@ function logSample(dt){
     'fps=' + (dt>0 ? (1/dt).toFixed(0) : '?'),
     'at=' + bx + ',' + by + ',' + bz,
     'y_m=' + P.y.toFixed(1),
-    'grav=' + (gsign()>0 ? '+Y_down' : '-Y_down'),
+    /* gsign() is +1 when UP is +Y, which is when down is -Y. The label used to
+       say the opposite and cost an hour of reading the log backwards. */
+    'grav=' + (gsign()>0 ? '-Y_down' : '+Y_down'),
     'island=' + (G.island?1:0),
     'hp=' + (P.hp!==undefined ? P.hp.toFixed(0) : '?'),
     'air=' + (P.air!==undefined ? P.air.toFixed(0) : '?'),
@@ -13378,7 +13459,6 @@ function frame(now){
     gl.uniform3f(uS.right, basis.rx, basis.ry, basis.rz);
     gl.uniform3f(uS.upv,   basis.ux, basis.uy, basis.uz);
     gl.uniform2f(uS.tan,   tv*aspect, tv);
-    gl.uniform3f(uS.worldUp, 0, SKY.up, 0);
     /* HIS NUMBER, six hundred kilometres. Height above sea level is measured
        through gravity's sign, because down is +Y once the boss is dead. */
     gl.uniform1f(uS.R, PLANET_R);
@@ -13389,15 +13469,23 @@ function frame(now){
     {
       const pb = (typeof bodyPlanet==='function' && bodyPlanet()) || null;
       const gi = (typeof geoOf==='function' && geoOf() && geoOf().isle) || null;
-      const ey = eyeY();
-      if(pb && gi){
-        gl.uniform3f(uS.PC,   pb.x-P.x, pb.y-ey, pb.z-P.z);
-        gl.uniform3f(uS.FEAT, pb.fx-P.x, (pb.y-pb.R)-ey, pb.fz-P.z);
-        gl.uniform4f(uS.ISA, gi.r, gi.h, gi.beach, gi.seaR);
-        gl.uniform2f(uS.ISB, gi.seaD, gi.plain);
-      }
+      const ey = eyeY(), sy = G.seaY*BLOCK;
+      /* WHERE THE CENTRE OF THE WORLD IS, and it is the only thing the shader
+         is told about where he is standing: it carries which way is down, how
+         high he is and how big the planet is, all three, so nothing in there
+         can hold a different opinion about any of them. Straight down from the
+         eye by a radius plus his height - never less than half a metre, or
+         wading into the sea would put the eye inside the sphere and the ocean
+         would vanish from under him. */
+      const hh = Math.max(0.5, (sy - ey) * -gsign());
+      gl.uniform3f(uS.PC, 0, -SKY.up*(PLANET_R + hh), 0);
+      gl.uniform3f(uS.FEAT, (pb ? pb.fx : G.nx*BLOCK*0.5) - P.x, sy - ey,
+                            (pb ? pb.fz : G.nz*BLOCK*0.5) - P.z);
+      /* and a world with no island rolled is a plain sphere, not a stale one */
+      if(gi){ gl.uniform4f(uS.ISA, gi.r, gi.h, gi.beach, gi.seaR);
+              gl.uniform2f(uS.ISB, gi.seaD, gi.plain); }
+      else  { gl.uniform4f(uS.ISA, 1, 0, 1, 1); gl.uniform2f(uS.ISB, 0, 0); }
     }
-    gl.uniform1f(uS.H, Math.max(0.5, (G.seaY*BLOCK - eyeY()) * -gsign()));
     gl.uniform3fv(uS.sunDir, _sun);
     gl.uniform3fv(uS.moonDir, _moon);
     gl.uniform3fv(uS.zenith, SKY.zen);
@@ -13405,7 +13493,6 @@ function frame(now){
     gl.uniform3fv(uS.sea,    SKY.sea);
     gl.uniform3fv(uS.sunCol, SKY.sunC);
     gl.uniform3fv(uS.moonCol, SKY.moonC);
-    gl.uniform1f(uS.night, SKY.night);
     gl.uniform1f(uS.phase, SKY.phase);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     SKY_DREW++;
