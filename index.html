@@ -878,7 +878,7 @@ function gnow(){ return GRAV * (G.gravK === undefined ? 1 : G.gravK); }
    THE PLANET CARRIES THE DONUT. Its geoid has an island at a feature point,
    a ring of sea around it and mainland beyond - and the moon's geoid has none
    of that, because a moon is plain. Same function, different roll. */
-/* MAP universe-function · 201 lines · surface: BODIES, bodyH, bodyPlanet, geoH, geoMat, geoOf, gravAt, gsign +2 · uses: WHAT IT DOES TO YOU(8), 0. WORLD CONSTANTS — real (3), THE SKY, THE SUN, THE MOON(2), 14b. THE FRAME - the tick(1) +5 · used by: THE DRAW: THE SKY(3), THE REVEAL - what you were(3), AND YOU CAN SEE THE RUNGS(2), 11. PHYSICS AND COLLISION(2) +15 */
+/* MAP universe-function · 201 lines · surface: BODIES, bodyH, bodyPlanet, geoH, geoMat, geoOf, gravAt, gsign +2 · uses: WHAT IT DOES TO YOU(8), 0. WORLD CONSTANTS — real (3), THE SKY, THE SUN, THE MOON(2), 14b. THE FRAME - the tick(1) +5 · used by: THE SAND STEP, AND DRAWING(4), THE DRAW: THE SKY(3), THE REVEAL - what you were(3), AND YOU CAN SEE THE RUNGS(2) +16 */
 const BODIES = [];
 function bodyPlanet(){ return BODIES[0]; }
 
@@ -2359,7 +2359,7 @@ const HI_GUESS = [1.00,0.72,0.16];  // hint: no proof, only the safest bet
 /* ==========================================================================
    4. CAVE MATERIALS
    ========================================================================== */
-/* MAP cave-materials · 56 lines · surface: BEDCRYST, BEDROCK, CINDER, CINDER_HP, FOG_HELL, MATS, M_DRYSAND, hellStone · uses: 5. GAME STATE(1) · used by: THE SAND STEP, AND DRAWING(6), 12. ACTIONS — shoot and fl(2), THE OCEAN(2), THE DRAW: FOG AND WATER(1) +6 */
+/* MAP cave-materials · 56 lines · surface: BEDCRYST, BEDROCK, CINDER, CINDER_HP, FOG_HELL, MATS, M_DRYSAND, hellStone · uses: 5. GAME STATE(1) · used by: THE SAND STEP, AND DRAWING(7), 12. ACTIONS — shoot and fl(2), THE OCEAN(2), THE DRAW: FOG AND WATER(1) +6 */
 const MATS = [
   {c:[0.86,0.64,0.32]}, // sandstone
   {c:[0.94,0.75,0.42]}, // pale sand
@@ -7921,7 +7921,7 @@ function gritStep(dt){
    --------------------------------------------------------------------------
    One pass of the simulation per frame, and the instance buffer that shows the result.
    ========================================================================== */
-/* MAP sand-step-drawing · 354 lines · surface: WD_MAX, rebuildWorld, sandDraw, sandStep · uses: AND YOU CAN SEE THE RUNGS(7), 9b. SAND — voxel/sand.js, (7), 4. CAVE MATERIALS(6), THE GAME SIDE: where the g(5) +19 · used by: THE CAMERA - where the eye(1), AND YOU CAN SEE THE RUNGS(1), THE DRAW: THE CUBE PASSES(1), 14b. THE FRAME - the tick(1) */
+/* MAP sand-step-drawing · 420 lines · surface: WD_MAX, rebuildWorld, sandDraw, sandStep · uses: AND YOU CAN SEE THE RUNGS(7), 4. CAVE MATERIALS(7), 9b. SAND — voxel/sand.js, (7), THE GAME SIDE: where the g(5) +20 · used by: THE CAMERA - where the eye(1), AND YOU CAN SEE THE RUNGS(1), THE DRAW: THE CUBE PASSES(1), 14b. THE FRAME - the tick(1) */
 function sandStep(dt){
   if(!SAND) return;
   gritStep(dt);
@@ -8132,6 +8132,11 @@ function sandDraw(){
    the same three functions, writing into the one grid instead of into a
    Uint8Array per block that could not spill into its neighbour. */
 
+/* HOW FAR THE DRAWN PLANET REACHES, and how coarse it gets on the way out:
+   [reach in blocks, step in blocks]. One cube per step x step column, so a
+   ring costs (reach/step)^2 rather than reach^2 - 864 m of world for about
+   seven thousand cubes instead of a hundred and fifty thousand. */
+const FAR_LOD = [[24,1],[48,2],[96,4],[192,8]];
 function rebuildWorld(){
   const d = worldB.data; let n=0;
   const put=(px,py,pz,s,col,seedv,emis,mark,echo,hi)=>{
@@ -8266,6 +8271,67 @@ function rebuildWorld(){
     put((x+0.5)*BLOCK,(y+0.5)*BLOCK,(z+0.5)*BLOCK, BLOCK*CELL_S,
         m.c, ((i*2654435761)>>>0 %1000)/1000, G.lava?emis:(m.gold?0.16:0),
         G.st[i]===MARKED?1:0, echo, echo>0 ? echoColOf(i) : null);
+  }
+  /* ==================================================================
+     THE PLANET BETWEEN THE ARRAY AND THE HORIZON
+     ------------------------------------------------------------------
+     Marcelo, standing on the edge with the sea painted flat beyond it:
+     "This shows how the world is only being generated up to an extent
+     and beyond this is emptyness."
+
+     The collision and the materials past the array come from universeAt
+     now, so he can stand out there - but nothing DREW it, so the stored
+     patch was a square plate with its underside showing and a wash
+     behind it. Three rungs, one generator, and this is the middle one:
+
+       near   the stored array, editable, every block real
+       mid    THIS: one cube per column, no storage and no search - the
+              height is bodyH(), which is an equation, so a column costs
+              a hypot and nothing else
+       far    the sky shader marching the same curve to the horizon
+
+     It is not diggable and it does not need to be: the moment you get
+     close enough to dig, you are in the array. What it has to be is the
+     SAME SHAPE and the SAME COLOUR as the two rungs either side of it,
+     and it is, because all three ask one function.
+
+     Coarser with distance, so 864 m of world costs about 7,000 cubes
+     instead of 150,000. */
+  if(G.island){
+    const pb = (typeof bodyPlanet==='function') ? bodyPlanet() : null;
+    if(pb){
+      const sy = G.seaY*BLOCK, gs = gsign(), cap = worldB.max - 8;
+      const pbx = Math.floor(P.x/BLOCK), pbz = Math.floor(P.z/BLOCK);
+      let prev = 0;
+      for(const L of FAR_LOD){
+        const reach = L[0], step = L[1], sz = BLOCK*step;
+        for(let dz=-reach; dz<reach; dz+=step)
+        for(let dx=-reach; dx<reach; dx+=step){
+          if(n >= cap) break;
+          /* square rings, so an outer pass never redraws an inner one */
+          if(Math.abs(dx) < prev && Math.abs(dz) < prev) continue;
+          /* snapped to the step, or the whole ring shimmers as he walks */
+          const bx = Math.floor((pbx+dx)/step)*step, bz = Math.floor((pbz+dz)/step)*step;
+          if(bx+step > -1 && bx <= G.nx && bz+step > -1 && bz <= G.nz) continue;
+          const wx = (bx + step*0.5)*BLOCK, wz = (bz + step*0.5)*BLOCK;
+          const h = bodyH(pb, Math.hypot(wx-pb.fx, wz-pb.fz));
+          const s = ((bx*73856093 ^ bz*83492791)>>>0 % 1000)/1000;
+          /* HALF OF ITS OWN SIZE, not half a block: an outer cube is 36 m on a
+             side and putting its centre BLOCK/2 under the surface floated it
+             15.75 m in the air. Measured - the coarse rings sat twenty metres
+             above the ground the collision uses. */
+          if(h >= 0)
+            put(wx, sy + gs*(h - sz*0.5), wz, sz,
+                MATS[h > 16 ? M_STONE : M_DRYSAND].c, s, 0, 0, 0);
+          else
+            /* under the waterline it is the SEA, drawn at the waterline in
+               the same colour the stored ocean uses - the hard line in his
+               photograph was one ocean drawn two ways */
+            put(wx, sy - gs*sz*0.5, wz, sz, MATS[M_SALT].c, s, 0.14, 0, 0);
+        }
+        prev = reach;
+      }
+    }
   }
   worldB.count=n;
   G.dirty=false;
@@ -13838,7 +13904,7 @@ function frame(now){
    --------------------------------------------------------------------------
    Shake, roll, drunkenness and the water's wobble all land here and nowhere else.
    ========================================================================== */
-/* MAP camera-where-eye · 59 lines · surface: - · uses: 12. ACTIONS — shoot and fl(3), WHICH WAY UP THE PLAYER IS(2), 12c. DUNGEON MODE — the th(1), 14b. THE FRAME - the tick(1) +10 · used by: - */
+/* MAP camera-where-eye · 66 lines · surface: - · uses: 12. ACTIONS — shoot and fl(3), WHICH WAY UP THE PLAYER IS(2), 0. WORLD CONSTANTS — real (2), 12c. DUNGEON MODE — the th(1) +10 · used by: - */
   // ------- camera -------
   /* Shake shoves the camera, and it used to shove it 2.2 m in a random
      direction every frame while also jittering the ANGLES — and the angles are
@@ -13890,6 +13956,13 @@ function frame(now){
 
   if(G.echoUntil + 0.1 > tGlobal) G.dirty = true;   // echo alive: rebuild
   lockHint();
+  /* AND THE DRAWN PLANET FOLLOWS HIM. The far terrain is built around where
+     he is standing, so crossing a block is a reason to rebuild even when
+     nothing in the world has changed. */
+  if(G.island){
+    const fbx = Math.floor(P.x/BLOCK), fbz = Math.floor(P.z/BLOCK);
+    if(fbx !== G.farBX || fbz !== G.farBZ){ G.farBX=fbx; G.farBZ=fbz; G.dirty=true; }
+  }
   if(G.dirty) rebuildWorld();
 
   // ------- draw -------

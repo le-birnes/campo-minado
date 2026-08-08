@@ -93,7 +93,8 @@ document.body.dataset.r='STAGE start';
   /* ---- 1. THE GROUND, and it must not have changed --------------------
      Sixty metres over the island rather than on it: the same air to within one
      part in a hundred, and no tree or roof in the way of the measurement. */
-  skStage('ground', ()=>{ skSun(0.25); skPose(null, 0.35); P.y += gsign()*60; }, g=>{
+  skStage('ground', ()=>{ skSun(0.25); skPose(null, 0.35); P.y += gsign()*60;
+                          G.dirty = true; }, g=>{
     const sky = skAt(g, g.w*0.30, g.h*0.10);
     const low = skAt(g, g.w*0.30, g.h*0.72);
     R.push('SIXTY METRES UP AT NOON: sky at 49 degrees ' + skS(sky) +
@@ -191,6 +192,20 @@ document.body.dataset.r='STAGE start';
            (b.mean < 40 && b.bright > 10 ? 'ok, dark, and the stars are out'
                                          : 'FAULT: mean ' + b.mean.toFixed(1) +
                                            ' lit ' + b.bright));
+  });
+
+  /* ---- 7. THE EDGE HE PHOTOGRAPHED ------------------------------------ */
+  skStage('edge', ()=>{
+    skSun(0.25);
+    P.x = (G.nx+1)*BLOCK; P.z = (G.nz*0.5)*BLOCK;
+    P.y = G.seaY*BLOCK + gsign()*14;
+    P.vx=P.vy=P.vz=0; P.yaw = -Math.PI/2; P.pitch = -gsign()*0.16;
+    G.dirty = true;
+  }, g=>{
+    const out = skBox(g, g.w*0.05, g.h*0.55, g.w*0.45, g.h*0.95, 40);
+    R.push('STANDING AT THE EDGE, LOOKING OUT: the ground ahead reads ' +
+           out.mean.toFixed(0) + '/255 ' +
+           (out.mean > 20 ? 'ok, there is something there' : 'FAULT: emptiness'));
   });
 
   /* ---- and leave him wherever the run was asked to photograph --------- */
