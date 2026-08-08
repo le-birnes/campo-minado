@@ -754,6 +754,51 @@ const GRAV    = 20.0;   // m/s^2 (heavy, so jumps do not float)
    speed comes from "down" being a compile-time index offset. This is the half
    of it that costs nothing. */
 function gnow(){ return GRAV * (G.gravK === undefined ? 1 : G.gravK); }
+
+/* ==========================================================================
+   GRAVITY IS A VECTOR TOWARD A CENTRE
+   --------------------------------------------------------------------------
+   Marcelo: "give gravity to my planet ... create it as a planet", and "a place
+   I can later shoot up and go around it".
+
+   Both of those need the same thing and it is not a bigger number: gravity has
+   to stop being an axis and become a DIRECTION TO A POINT. Then
+
+     * the horizon curves, because the ground does
+     * shooting downward for long enough puts you in ORBIT rather than at the
+       top of a very tall jump - because g falls off as 1/r^2 and eventually
+       stops taking back what the recoil gave you
+     * going AROUND it means walking a great circle, not walking off an edge
+     * and the black holes he wants later are the same function with a
+       different centre. Nothing else has to change for them.
+
+   THE CENTRE IS 600 km BELOW SEA LEVEL, straight down, so the island sits on
+   the surface of the sphere. That makes this change INVISIBLE where he plays:
+   ten kilometres from the middle the direction of down has turned by 0.95
+   degrees, and one metre above the beach the strength is GRAV to eleven
+   decimal places. It only starts to mean anything when he leaves.
+
+   AND gravK STILL FLIPS IT, untouched. The dungeon's reversed gravity is this
+   vector with a minus sign, which is what it always was - it is just that the
+   thing being negated is now a direction rather than an axis. */
+const _GV = [0,0,0];
+function planetCY(){ return (G.seaY||0)*BLOCK + PLANET_R; }
+function gravAt(x,y,z){
+  const cx = (G.nx||1)*BLOCK*0.5, cy = planetCY(), cz = (G.nz||1)*BLOCK*0.5;
+  let dx = cx-x, dy = cy-y, dz = cz-z;
+  const r = Math.hypot(dx,dy,dz) || 1;
+  /* inverse square, normalised so it is exactly GRAV at the surface - and
+     capped inside the planet so falling down a shaft does not blow up */
+  const g = GRAV * (PLANET_R*PLANET_R)/(r*r > PLANET_R*PLANET_R*0.25 ? r*r : PLANET_R*PLANET_R*0.25)
+            * -(G.gravK === undefined ? 1 : G.gravK) * (typeof fxGrav==='function' ? fxGrav() : 1);
+  _GV[0]=dx/r*g; _GV[1]=dy/r*g; _GV[2]=dz/r*g;
+  return _GV;
+}
+/* HOW FAST YOU WOULD HAVE TO BE GOING TO STAY UP, at a given height. Nothing
+   reads it yet; the rocket will, and having it here is what makes orbit a
+   number rather than a hope. */
+function orbitalV(h){ const r = PLANET_R + h; return Math.sqrt(GRAV*PLANET_R*PLANET_R/r); }
+function escapeV(h){ return orbitalV(h)*Math.SQRT2; }
 /* WHICH WAY IS DOWN, as a sign, and everything that has an opinion about down
    reads it: the physics, the ground test, the jump, and the camera.
 
@@ -7744,11 +7789,18 @@ function physics(dt){
      times and the three would disagree. */
   const RHO_BODY = 1000;
   const gAcc = gnow()*fxGrav();
+  /* THE PLANET'S PULL, where he is. Near the island this is (0, -gAcc, 0) to
+     eleven decimal places, so nothing about walking or swimming changes; far
+     from it, it is a direction and a falling strength, which is what makes
+     leaving possible. */
+  const GV = gravAt(P.x, P.y + P_H*0.5, P.z);
   if(P.imm > 0.02){
     const rho  = P.immD || 1000;
     const swim = P.imm;
-    let ay = -gAcc * (1 - swim*(rho/RHO_BODY));      // gravity + buoyancy
-    let ax = 0, az = 0;
+    /* gravity + buoyancy, and buoyancy is the same vector the other way: what
+       floats, floats along the line the planet pulls */
+    const bf = 1 - swim*(rho/RHO_BODY);
+    let ax = GV[0]*bf, ay = GV[1]*bf, az = GV[2]*bf;
 
     /* THRUST FOLLOWS THE AIM, including straight down, which is the whole of
        what he asked for. On land forward is a direction along the ground and
@@ -7772,7 +7824,8 @@ function physics(dt){
     P.vx += ax*dt; P.vy += ay*dt; P.vz += az*dt;
     if(swim > 0.25) P.ground = false;
   } else {
-    P.vy -= gAcc*dt;                                  // dry: gravity alone
+    /* dry: the planet alone, on all three axes */
+    P.vx += GV[0]*dt; P.vy += GV[1]*dt; P.vz += GV[2]*dt;
   }
   if(P.vy < -60) P.vy = -60;
   if(P.vy >  60) P.vy =  60;

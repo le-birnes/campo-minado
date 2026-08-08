@@ -754,6 +754,51 @@ const GRAV    = 20.0;   // m/s^2 (heavy, so jumps do not float)
    speed comes from "down" being a compile-time index offset. This is the half
    of it that costs nothing. */
 function gnow(){ return GRAV * (G.gravK === undefined ? 1 : G.gravK); }
+
+/* ==========================================================================
+   GRAVITY IS A VECTOR TOWARD A CENTRE
+   --------------------------------------------------------------------------
+   Marcelo: "give gravity to my planet ... create it as a planet", and "a place
+   I can later shoot up and go around it".
+
+   Both of those need the same thing and it is not a bigger number: gravity has
+   to stop being an axis and become a DIRECTION TO A POINT. Then
+
+     * the horizon curves, because the ground does
+     * shooting downward for long enough puts you in ORBIT rather than at the
+       top of a very tall jump - because g falls off as 1/r^2 and eventually
+       stops taking back what the recoil gave you
+     * going AROUND it means walking a great circle, not walking off an edge
+     * and the black holes he wants later are the same function with a
+       different centre. Nothing else has to change for them.
+
+   THE CENTRE IS 600 km BELOW SEA LEVEL, straight down, so the island sits on
+   the surface of the sphere. That makes this change INVISIBLE where he plays:
+   ten kilometres from the middle the direction of down has turned by 0.95
+   degrees, and one metre above the beach the strength is GRAV to eleven
+   decimal places. It only starts to mean anything when he leaves.
+
+   AND gravK STILL FLIPS IT, untouched. The dungeon's reversed gravity is this
+   vector with a minus sign, which is what it always was - it is just that the
+   thing being negated is now a direction rather than an axis. */
+const _GV = [0,0,0];
+function planetCY(){ return (G.seaY||0)*BLOCK + PLANET_R; }
+function gravAt(x,y,z){
+  const cx = (G.nx||1)*BLOCK*0.5, cy = planetCY(), cz = (G.nz||1)*BLOCK*0.5;
+  let dx = cx-x, dy = cy-y, dz = cz-z;
+  const r = Math.hypot(dx,dy,dz) || 1;
+  /* inverse square, normalised so it is exactly GRAV at the surface - and
+     capped inside the planet so falling down a shaft does not blow up */
+  const g = GRAV * (PLANET_R*PLANET_R)/(r*r > PLANET_R*PLANET_R*0.25 ? r*r : PLANET_R*PLANET_R*0.25)
+            * -(G.gravK === undefined ? 1 : G.gravK) * (typeof fxGrav==='function' ? fxGrav() : 1);
+  _GV[0]=dx/r*g; _GV[1]=dy/r*g; _GV[2]=dz/r*g;
+  return _GV;
+}
+/* HOW FAST YOU WOULD HAVE TO BE GOING TO STAY UP, at a given height. Nothing
+   reads it yet; the rocket will, and having it here is what makes orbit a
+   number rather than a hope. */
+function orbitalV(h){ const r = PLANET_R + h; return Math.sqrt(GRAV*PLANET_R*PLANET_R/r); }
+function escapeV(h){ return orbitalV(h)*Math.SQRT2; }
 /* WHICH WAY IS DOWN, as a sign, and everything that has an opinion about down
    reads it: the physics, the ground test, the jump, and the camera.
 
@@ -4361,7 +4406,20 @@ const SAND_DIV = 24;                       // beads per CELL edge (8 per LAT)
 const CELL_M   = BLOCK/SAND_DIV;           // 0.125 m — the bead, BLOCK/8
 /* A CHUNK IS STILL EXACTLY 2x2x2 BLOCKS, which is what the whole ladder hangs
    off, so it follows the divisor rather than being written down twice. */
-const SCS = SAND_DIV*2;                    // chunk edge, in cells
+/* A CHUNK IS TWO PAGES ON A SIDE, and it has to be said in PAGES.
+
+   This read SAND_DIV*2, and it was right when SAND_DIV meant "beads per
+   page". It stopped being right the moment the page became the LATTICE block
+   and SAND_DIV became beads per CELL: 24*2 is 48 cells, which is SIX pages a
+   side, not two - while ladChunkOf, ladBreak, ladWakeBlock, cbulk and the bead
+   draw all still divided by two.
+
+   So the draw pass walked 8 of every 216 pages in a chunk - the corners - and
+   the dirty flags landed on chunks that were not the ones that changed.
+   Measured: 8,909 loose beads on the ground beside the player, 1,200 chunks
+   flagged drawable, and NOT ONE of them within fifty metres of him. The beads
+   were real, in the grid, and nothing was looking at them. */
+const SCS = (SAND_DIV/LAT_DIV)*2;          // chunk edge in cells: two pages
 const SCSH = Math.round(Math.log2(SCS)), SCSM = SCS-1;
 const SCS3 = SCS*SCS*SCS;
 
@@ -7392,7 +7450,21 @@ function rebuildWorld(){
     }
     return false;
   };
-  // bedrock: a one-block shell around everything
+  /* THE BEDROCK SHELL - A ONE-BLOCK BOX AROUND THE ENTIRE WORLD, and it is
+     THE BOX. Not the ocean, not the island, not the sky: a literal cube of
+     bedrock drawn around everything, by name, in this loop.
+
+     Which is exactly right for a DUNGEON, because you are inside it and it is
+     the edge of the world making its promise: this does not open. And it is
+     exactly wrong for an OPEN WORLD, because you are outside it, looking at
+     the six faces of a box from the air. "The world should have 600 km radius,
+     that box needs to be GONE, it should not exist."
+
+     So it does not exist once the world opens. The floor is still there - it
+     is blocksBody that holds you up, not this - and what is past the array is
+     sea and sky, drawn by the shader, which is the whole point of a planet
+     with a radius. */
+  if(!G.island)
   for(let y=-1;y<=G.ny;y++) for(let z=-1;z<=G.nz;z++) for(let x=-1;x<=G.nx;x++){
     if(inside(x,y,z)) continue;
     if(!facesAir(x,y,z)) continue;
@@ -7717,11 +7789,18 @@ function physics(dt){
      times and the three would disagree. */
   const RHO_BODY = 1000;
   const gAcc = gnow()*fxGrav();
+  /* THE PLANET'S PULL, where he is. Near the island this is (0, -gAcc, 0) to
+     eleven decimal places, so nothing about walking or swimming changes; far
+     from it, it is a direction and a falling strength, which is what makes
+     leaving possible. */
+  const GV = gravAt(P.x, P.y + P_H*0.5, P.z);
   if(P.imm > 0.02){
     const rho  = P.immD || 1000;
     const swim = P.imm;
-    let ay = -gAcc * (1 - swim*(rho/RHO_BODY));      // gravity + buoyancy
-    let ax = 0, az = 0;
+    /* gravity + buoyancy, and buoyancy is the same vector the other way: what
+       floats, floats along the line the planet pulls */
+    const bf = 1 - swim*(rho/RHO_BODY);
+    let ax = GV[0]*bf, ay = GV[1]*bf, az = GV[2]*bf;
 
     /* THRUST FOLLOWS THE AIM, including straight down, which is the whole of
        what he asked for. On land forward is a direction along the ground and
@@ -7745,7 +7824,8 @@ function physics(dt){
     P.vx += ax*dt; P.vy += ay*dt; P.vz += az*dt;
     if(swim > 0.25) P.ground = false;
   } else {
-    P.vy -= gAcc*dt;                                  // dry: gravity alone
+    /* dry: the planet alone, on all three axes */
+    P.vx += GV[0]*dt; P.vy += GV[1]*dt; P.vz += GV[2]*dt;
   }
   if(P.vy < -60) P.vy = -60;
   if(P.vy >  60) P.vy =  60;
@@ -12550,62 +12630,33 @@ $('btnForge').addEventListener('click', ()=>fzOpen());
 if(/[?&]forge/.test(location.search)) setTimeout(()=>fzOpen(), 60);
 
 /* ==========================================================================
-
    THE BLACK BOX
-
    --------------------------------------------------------------------------
-
    Marcelo: "can't you make like a debugger to check what is being processed
-
    and watch the bot and me play more objectively? ... just a way you can read.
-
    Perhaps a last_run.txt log or something you can access."
 
-
-
    Right, and a screen overlay would be the wrong answer: it tells HIM what is
-
    happening while he is busy playing, and I cannot see it at all. A file can be
-
    left behind and read afterwards by either of us, which is the whole point.
 
-
-
    The page is opened from file:// and cannot write to disk, so it keeps a ring
-
    in memory and DOWNLOADS it - which lands in Downloads/last_run.txt, a path I
-
    can open. It writes a sample once a second and a line for anything that
-
    happens, and it dumps itself automatically when the run ends, so a death or a
-
    win needs no key pressed at the moment it matters least.
 
-
-
    F3 dumps it whenever you like, mid-run. */
-
 const LOG_MAX = 4000;
-
 const LOG = [];
-
 let LOG_T = 0, LOG_DUMPED = false, LOG_T0 = 0;
-
 function logLine(s){
-
   LOG.push(((performance.now()-LOG_T0)/1000).toFixed(2) + '  ' + s);
-
   if(LOG.length > LOG_MAX) LOG.shift();
-
 }
-
 /* AN EVENT, and these are the ones worth a line each: they are the moments the
-
    world changes under the player rather than the moments it is merely busy. */
-
 function logEvent(s){ logLine('EVENT  ' + s); }
-
-
 
 /* ACCUMULATED, NOT SNAPSHOT. A snapshot once a second of a counter that is
    reset every tick reads ZERO for anything that happens and finishes between
@@ -12614,9 +12665,7 @@ function logEvent(s){ logLine('EVENT  ' + s); }
    rather than about the engine. Sum every frame; keep the worst tick. */
 let LOG_SCAN=0, LOG_MOVE=0, LOG_PEAK=0, LOG_FR=0;
 function logSample(dt){
-
   if(!LOG_T0) { LOG_T0 = performance.now(); logHeader(); }
-
   if(SAND){
     LOG_SCAN += SAND.stats.scanned;
     LOG_MOVE += SAND.stats.moves;
@@ -12624,125 +12673,67 @@ function logSample(dt){
   }
   LOG_FR++;
   LOG_T += dt;
-
   if(LOG_T < 1.0) return;
-
   LOG_T = 0;
-
   const w = SAND;
-
   const bx = Math.floor(P.x/BLOCK), by = Math.floor(P.y/BLOCK), bz = Math.floor(P.z/BLOCK);
-
   const parts = [
-
     'state=' + G.state,
-
     'fps=' + (dt>0 ? (1/dt).toFixed(0) : '?'),
-
     'at=' + bx + ',' + by + ',' + bz,
-
     'y_m=' + P.y.toFixed(1),
-
     'grav=' + (gsign()>0 ? '+Y_down' : '-Y_down'),
-
     'island=' + (G.island?1:0),
-
     'hp=' + (P.hp!==undefined ? P.hp.toFixed(0) : '?'),
-
     'air=' + (P.air!==undefined ? P.air.toFixed(0) : '?'),
-
     'imm=' + (P.imm||0).toFixed(2),
-
     'sub=' + (P.sub||0).toFixed(2)
-
   ];
-
   if(w) parts.push(
-
     'awake=' + w.stats.awake,
-
     'scan/s=' + LOG_SCAN,
     'peak=' + LOG_PEAK,
-
     'defer=' + (w.stats.deferred||0),
-
     'moves/s=' + LOG_MOVE,
     'frames=' + LOG_FR,
-
     'pages=' + w.pgn,
-
     'MB=' + (w.bytes()/1048576).toFixed(1));
-
   parts.push(
-
     'lad_blocks=' + ladStats.blocks,
-
     'masses=' + ladStats.masses,
-
     'queue=' + LADQ.length,
-
     'grit=' + (GRIT.moving||0),
-
     'world_inst=' + worldB.count,
-
     'bead_inst=' + sandB.count);
-
   logLine(parts.join(' '));
-
   LOG_SCAN=0; LOG_MOVE=0; LOG_PEAK=0; LOG_FR=0;
 }
-
 function logHeader(){
-
   LOG.push('# Minesweeper Three Planes - black box');
-
   LOG.push('# ' + new Date().toISOString());
-
   LOG.push('# world ' + G.nx + 'x' + G.ny + 'x' + G.nz + ' cells of ' + BLOCK + ' m'
-
          + ' | lattice ' + LAT_M + ' m | bead ' + CELL_M.toFixed(4) + ' m'
-
          + ' | mode ' + (G.mode===MODE_DUNGEON?'DUNGEON':'SWEEP') + ' diff ' + G.diff);
-
   LOG.push('# seaY ' + G.seaY + ' rock0 ' + G.rock0 + ' mines ' + G.mines
-
          + ' safe ' + G.safeTotal + (G.lump ? ' | dungeon y ' + G.lump.y0 + '..' + G.lump.y1
-
            + ' r ' + G.lump.r.toFixed(1) : ''));
-
   LOG.push('# columns: t state fps at=cell y_m grav island hp air imm sub'
-
          + ' awake scan/s peak defer moves/s frames pages MB lad_blocks masses queue grit'
-
          + ' world_inst bead_inst');
-
 }
-
 function logDump(why){
-
   try{
-
     logLine('DUMP  ' + (why||'asked'));
-
     const NLC = String.fromCharCode(10);
     const blob = new Blob([LOG.join(NLC) + NLC], {type:'text/plain'});
-
     const a = document.createElement('a');
-
     a.href = URL.createObjectURL(blob);
-
     a.download = 'last_run.txt';
-
     document.body.appendChild(a); a.click(); a.remove();
-
     setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
-
     toast('last_run.txt written to Downloads.', 1600);
-
   }catch(e){}
-
 }
-
 function frame(now){
   requestAnimationFrame(frame);
   let dt = Math.min(0.05, (now-last)/1000); last=now;
