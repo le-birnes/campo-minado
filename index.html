@@ -9,7 +9,7 @@
    MINESWEEPER / THREE PLANES
    Palette: sand, ochre, ember, gold, arcane violet, soot
    ============================================================ */
-/* MAP minesweeper-three-planes · 308 lines · surface: - · uses: 13. INTERFACE(2), 14. LOOP(2), 12. ACTIONS — shoot and fl(1), 14b. THE FRAME - the tick(1) +3 · used by: - */
+/* MAP minesweeper-three-planes · 316 lines · surface: - · uses: 13. INTERFACE(2), 14. LOOP(2), 12. ACTIONS — shoot and fl(1), 14b. THE FRAME - the tick(1) +3 · used by: - */
 :root{
   --sand:#d9a44c;
   --sand-hi:#f0c883;
@@ -146,6 +146,14 @@ canvas#gl{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:
       align-self:flex-end;padding-bottom:6px;}
 #sAlt.on{display:block;}
 #sAlt i{font-style:normal;font-size:.62em;opacity:.7;margin-left:.28em;}
+
+/* the torch in the belt: a stick and a flame, which is all a torch is. Two
+   boxes and a shadow beat a sprite sheet for something 20 px across. */
+.torchIco{display:block;position:relative;width:5px;height:13px;
+          background:linear-gradient(180deg,#7a4c22,#3d2611);}
+.torchIco::after{content:"";position:absolute;left:-3px;top:-9px;width:11px;height:11px;
+                 border-radius:50% 50% 45% 45%;
+                 background:radial-gradient(circle at 50% 62%,#fff3c4,#ffab2e 45%,#e2560d 78%,rgba(226,86,13,0));}
 
 /* the two boss-mode readouts only exist when something is hunting you */
 .foe-only{display:none;}
@@ -407,7 +415,7 @@ body.touch.portrait #rotate{display:grid;}
          to put in them. -->
     <div id="belt">
       <div class="slot held"><canvas id="wpn" width="20" height="20"></canvas></div>
-      <div class="slot"></div>
+      <div class="slot"><i class="torchIco"></i></div>
       <div class="slot"></div>
     </div>
   </div>
@@ -708,7 +716,7 @@ body.world .stat.foe-only{ display:flex !important; }
 /* ==========================================================================
    0. WORLD CONSTANTS — real proportions
    ========================================================================== */
-/* MAP world-constants-real · 75 lines · surface: ALT_SHOW, BLOCK, EYE, GRAV, P_H, P_R, eyeOff, eyeY +1 · uses: 5. GAME STATE(1), THE LAYOUT - clusters, wei(1), 14. LOOP(1), THE UNIVERSE, AND IT IS ON(1) · used by: THE MINE INSIDE THE BLOCK(6), AND YOU CAN SEE THE RUNGS(4), 11. PHYSICS AND COLLISION(4), THE DRAW: THE SKY(3) +37 */
+/* MAP world-constants-real · 75 lines · surface: ALT_SHOW, BLOCK, EYE, GRAV, P_H, P_R, eyeOff, eyeY +1 · uses: 5. GAME STATE(1), THE LAYOUT - clusters, wei(1), 14. LOOP(1), THE UNIVERSE, AND IT IS ON(1) · used by: THE MINE INSIDE THE BLOCK(6), AND YOU CAN SEE THE RUNGS(4), 11. PHYSICS AND COLLISION(4), THE DRAW: THE SKY(3) +38 */
 const P_H     = 2.0;    // altura do personagem
 /* One face is 1.4 of you, not 2. At 4 m a cube read as architecture rather than
    as a block: standing in a one-cell corridor you could not see over anything,
@@ -1382,7 +1390,7 @@ const wrange = (lo,hi) => lo + ((wrnd()*(hi-lo+1))|0);
 /* ==========================================================================
    2. WEBGL — context and programs
    ========================================================================== */
-/* MAP webgl-context-programs · 310 lines · surface: canvas, pBB, pCube, prog · uses: 12. ACTIONS — shoot and fl(1), 9. DRAW BATCHES(1), 12c. DUNGEON MODE — the th(1), 14b. THE FRAME - the tick(1) +3 · used by: THE SKY, THE SUN, THE MOON(3), THE CREATURE FORGE(1), THE DRAW: THE BILLBOARD PA(1), THE DRAW: THE CUBE PASSES(1) +13 */
+/* MAP webgl-context-programs · 320 lines · surface: canvas, pBB, pCube, prog · uses: 12. ACTIONS — shoot and fl(1), 9. DRAW BATCHES(1), 12c. DUNGEON MODE — the th(1), 14b. THE FRAME - the tick(1) +4 · used by: THE SKY, THE SUN, THE MOON(3), THE CREATURE FORGE(1), THE DRAW: THE BILLBOARD PA(1), THE DRAW: THE CUBE PASSES(1) +13 */
 const canvas = document.getElementById('gl');
 const gl = canvas.getContext('webgl2', {antialias:true, alpha:false, powerPreference:'high-performance'});
 if(!gl){ document.getElementById('nogl').style.display='grid'; return; }
@@ -1436,6 +1444,7 @@ in vec3 vN, vW, vC, vHi;
 in vec2 vUV;
 in float vSeed, vEmis, vMark, vEcho, vHover;
 uniform vec3 uCam, uSun, uFog;
+uniform vec3 uSunC;      // the colour of the key light, which is the sun's
 uniform float uTime, uOutline, uAlpha, uWallGrey, uEdgeSolid;
 /* THE LIGHTS IN THE ROOM.
    xyz is where it is and w is how far it carries; the colour carries its peak
@@ -1512,7 +1521,16 @@ void main(){
      cave lit from an imaginary sky is a lit room with rock textures in it.
      Turn the sky almost off and let the flags and the fireflies do the work,
      and the cave becomes somewhere you are being kept. */
-  vec3 lit = base * (amb + vec3(1.25,1.02,0.72) * band * 0.54) * uDark;
+  /* AND THE SUN IS THE COLOUR OF THE SUN. Marcelo: "Make the sun the master
+     source of light of this universe (player still emits light)." It was
+     vec3(1.25,1.02,0.72) forever - a fixed warm key light - while the sky
+     shader three hundred lines up was drawing the real one going orange and
+     setting. Same disease as the horizon: two things holding an opinion about
+     one fact. uSunC is the clock's own sun colour, scaled to the brightness
+     that constant used to have, so noon is unchanged and every other hour
+     is not. Underground uDark takes it to nothing, and what is left is the
+     staff and the fires - which is the point of a cave. */
+  vec3 lit = base * (amb + uSunC * band * 0.54) * uDark;
 
   /* --- staff lantern, banded as well --- */
   /* The staff you are carrying. This was the brightest thing in the cave and
@@ -1714,7 +1732,7 @@ const pBB   = prog(VS_BB,   FS_BB);
    writes off, so anything in front of it covers it, and inside a sealed
    dungeon every direction has stone in it. No flag, no test.
    ========================================================================== */
-/* MAP sky-sun-moon · 370 lines · surface: PLANET_R, SKY_LUN, _sun, pSky, skyNow, skyStart, skyVAO · uses: 2. WEBGL — context and pro(3), THE UNIVERSE, AND IT IS ON(2), 12. ACTIONS — shoot and fl(1), 14b. THE FRAME - the tick(1) +4 · used by: THE DRAW: THE SKY(4), THE UNIVERSE, AND IT IS ON(2), THE DRAW: FOG AND WATER(1), DRAWING IT(1) +2 */
+/* MAP sky-sun-moon · 380 lines · surface: PLANET_R, SKY_LUN, _sun, pSky, skyNow, skyStart, skyVAO · uses: 2. WEBGL — context and pro(3), THE UNIVERSE, AND IT IS ON(2), 12. ACTIONS — shoot and fl(1), 14b. THE FRAME - the tick(1) +4 · used by: THE DRAW: THE SKY(4), THE UNIVERSE, AND IT IS ON(2), THE DRAW: FOG AND WATER(1), WHAT LIGHTS THE CAVE(1) +1 */
 const VS_SKY = `#version 300 es
 precision highp float;
 out vec2 vNDC;
@@ -2049,6 +2067,7 @@ const uC = {
   proj:gl.getUniformLocation(pCube,'uProj'), view:gl.getUniformLocation(pCube,'uView'),
   cam:gl.getUniformLocation(pCube,'uCam'),   sun:gl.getUniformLocation(pCube,'uSun'),
   fog:gl.getUniformLocation(pCube,'uFog'),   time:gl.getUniformLocation(pCube,'uTime'),
+  sunC:gl.getUniformLocation(pCube,'uSunC'),
   hover:gl.getUniformLocation(pCube,'uHover'), outline:gl.getUniformLocation(pCube,'uOutline'),
   alpha:gl.getUniformLocation(pCube,'uAlpha'),
   wallGrey:gl.getUniformLocation(pCube,'uWallGrey'),
@@ -2402,7 +2421,7 @@ const FOG_HELL = [0.105,0.035,0.030];
    moved. Variant III holds for 0.42 s, which in practice means it hits you
    unless you are already moving when it fires. Variant I holds for 3 s, so it
    only ever catches someone who has stopped to think. */
-/* MAP enemy-types-boss · 233 lines · surface: EBODY, EN_MAX, EN_PARTS, ESHOT_SPD, ETYPES, FAM_FLAG, HELL_MAXH, HELL_UNIT +2 · uses: 12. ACTIONS — shoot and fl(1), 12c. DUNGEON MODE — the th(1), 5. GAME STATE(1), 14. LOOP(1) +1 · used by: 12c. DUNGEON MODE — the th(6), THE MINE INSIDE THE BLOCK(6), THE DRAW: THE CUBE PASSES(4), 9. DRAW BATCHES(2) +5 */
+/* MAP enemy-types-boss · 233 lines · surface: EBODY, EN_MAX, EN_PARTS, ESHOT_SPD, ETYPES, FAM_FLAG, HELL_MAXH, HELL_UNIT +2 · uses: 12. ACTIONS — shoot and fl(1), 12c. DUNGEON MODE — the th(1), 5. GAME STATE(1), 14. LOOP(1) +1 · used by: 12c. DUNGEON MODE — the th(6), THE MINE INSIDE THE BLOCK(6), THE DRAW: THE CUBE PASSES(4), 9. DRAW BATCHES(2) +6 */
 const FAM_FLAG=0, FAM_ORB=1, FAM_SLUG=2, FAM_FINAL=3, FAM_MINE=4, FAM_HELL=5;
 /* Everything in the roster is measured against the player, who is 2 m. The
    smallest thing is about your height and the biggest is just under three of
@@ -2626,7 +2645,7 @@ const EBODY = ETYPES.map(bodyOf);
 /* ==========================================================================
    5. GAME STATE
    ========================================================================== */
-/* MAP game-state · 148 lines · surface: CELL_S, CLEAR_M, SPREAD, blocksBody, densExp, idx, inside, isSolidCell +1 · uses: WHICH WAY UP THE PLAYER IS(2), 14b. THE FRAME - the tick(1), 10. STAFF(1), 0. WORLD CONSTANTS — real (1) · used by: THE LAYOUT - clusters, wei(5), THE SAND STEP, AND DRAWING(4), 12. ACTIONS — shoot and fl(3), genWorld - THE ONE ENTRY P(3) +38 */
+/* MAP game-state · 148 lines · surface: CELL_S, CLEAR_M, SPREAD, blocksBody, densExp, idx, inside, isSolidCell +1 · uses: WHICH WAY UP THE PLAYER IS(2), 14b. THE FRAME - the tick(1), 10. STAFF(1), 0. WORLD CONSTANTS — real (1) · used by: THE LAYOUT - clusters, wei(5), THE SAND STEP, AND DRAWING(4), 12. ACTIONS — shoot and fl(3), genWorld - THE ONE ENTRY P(3) +40 */
 const G = {
   state:'menu',          // menu | play | pause | over
   diff:0,
@@ -3303,8 +3322,13 @@ let lastDepth = 0;
    --------------------------------------------------------------------------
    Everything above is called from here, in this order, once per run.
    ========================================================================== */
-/* MAP genworld-entry-point · 332 lines · surface: genWorld · uses: THE LAYOUT - clusters, wei(7), WHICH WAY UP THE PLAYER IS(7), 5. GAME STATE(3), 12d. CHESTS — what the dun(2) +21 · used by: 15. BOOT(1), 13. INTERFACE(1), THE PROMOTION LADDER - bea(1), THE REVEAL - what you were(1) */
+/* MAP genworld-entry-point · 337 lines · surface: genWorld · uses: THE LAYOUT - clusters, wei(7), WHICH WAY UP THE PLAYER IS(7), 5. GAME STATE(3), 12d. CHESTS — what the dun(2) +22 · used by: 15. BOOT(1), 13. INTERFACE(1), THE PROMOTION LADDER - bea(1), THE REVEAL - what you were(1) */
 function genWorld(d){
+  /* a new run has no torches in it, and the old ones pointed at bead cells
+     in a world that no longer exists */
+  TORCH.length = 0; G.belt = BELT_GUN;
+  { const sl = document.querySelectorAll('#belt .slot');
+    for(let k=0;k<sl.length;k++) sl[k].classList.toggle('held', k===0); }
   /* The dungeon brings its own dimensions; the difficulty only chooses the
      board when you are playing the plain puzzle. When the dungeon learns to
      differ per difficulty, this is the one line that changes. */
@@ -3925,7 +3949,7 @@ function spawnCrumble(x,y,z,mat){
 /* ==========================================================================
    8. AUDIO — everything synthesized
    ========================================================================== */
-/* MAP audio-everything-synthesized · 177 lines · surface: snd · uses: 5. GAME STATE(1), 14. LOOP(1), THE OCEAN(1) · used by: 12. ACTIONS — shoot and fl(1), 12d. CHESTS — what the dun(1), 12c. DUNGEON MODE — the th(1), 14b. THE FRAME - the tick(1) +10 */
+/* MAP audio-everything-synthesized · 177 lines · surface: snd · uses: 5. GAME STATE(1), 14. LOOP(1), THE OCEAN(1) · used by: 12. ACTIONS — shoot and fl(1), 12d. CHESTS — what the dun(1), 12c. DUNGEON MODE — the th(1), 14b. THE FRAME - the tick(1) +11 */
 const snd = (function(){
   let ac=null, master=null, drone=null;
   function ensure(){
@@ -4891,7 +4915,7 @@ const hellB   = makeCubeBatch(6000);
        Without it piles come out flatter along the diagonals, which is the same
        artefact as before wearing a different hat.
    ========================================================================== */
-/* MAP sand-voxel-sand · 158 lines · surface: AIR_MAX, CELL_M, FX_DUR, FX_NAME, HP_START, K_STATIC, LAT_DIV, LAT_M +16 · uses: THE PROMOTION LADDER - bea(3), 12. ACTIONS — shoot and fl(1), THE GAME SIDE: where the g(1), 11. PHYSICS AND COLLISION(1) +2 · used by: WHAT IT DOES TO YOU(15), AND YOU CAN SEE THE RUNGS(10), ONE CELL, ONE STEP - the f(7), THE PROMOTION LADDER - bea(7) +17 */
+/* MAP sand-voxel-sand · 158 lines · surface: AIR_MAX, CELL_M, FX_DUR, FX_NAME, HP_START, K_STATIC, LAT_DIV, LAT_M +16 · uses: THE PROMOTION LADDER - bea(3), 12. ACTIONS — shoot and fl(1), THE GAME SIDE: where the g(1), 11. PHYSICS AND COLLISION(1) +2 · used by: WHAT IT DOES TO YOU(15), AND YOU CAN SEE THE RUNGS(10), ONE CELL, ONE STEP - the f(7), THE PROMOTION LADDER - bea(7) +18 */
 /* THE THREE SCALES, and each number now answers only its own question.
 
      CELL  = BLOCK   4.5 m   the minesweeper unit: a mine, a safe block, a
@@ -5050,7 +5074,7 @@ const SM_MASS  = new Float32Array(256);   // kg of one bead, from density
    water in never. The status is one id, because a material in Noita does one
    thing to you - it is the combination of materials that gets complicated, and
    that complication belongs in the reaction table rather than here. */
-/* MAP does · 147 lines · surface: EVAP_BASE, EVAP_EVERY, HUMID, HUMID_DECAY, HUMID_PER, SM_BURN, SM_DMG, SM_DOUSE +24 · uses: 9b. SAND — voxel/sand.js, (15), INTEGRITY, AND MOMENTUM AS(2), 1. MATH(1) · used by: NOITA'S TABLE(25), ONE CELL, ONE STEP - the f(8), THE GAME SIDE: where the g(8), THE UNIVERSE, AND IT IS ON(8) +13 */
+/* MAP does · 147 lines · surface: EVAP_BASE, EVAP_EVERY, HUMID, HUMID_DECAY, HUMID_PER, SM_BURN, SM_DMG, SM_DOUSE +24 · uses: 9b. SAND — voxel/sand.js, (15), INTEGRITY, AND MOMENTUM AS(2), 1. MATH(1) · used by: NOITA'S TABLE(25), ONE CELL, ONE STEP - the f(8), THE GAME SIDE: where the g(8), THE UNIVERSE, AND IT IS ON(8) +14 */
 const SM_DMG  = new Float32Array(256);  // HP a second while you are in it
 const SM_FX   = new Uint8Array(256);    // the status it gives you
 const SM_BURN = new Uint8Array(256);    // does fire take it
@@ -5207,7 +5231,7 @@ const S_GPOWD  = addMat({n:'gunpowder', k:K_POWDER, d:1700, slip:0.80, c:[0.18,0
    through whom, and the answer is then automatically right without anybody
    ordering a list. Noita's own invented liquids are all near water, which is
    why they mix rather than stratify. */
-/* MAP noita-s-table · 277 lines · surface: CORNER_RATE, LATX, LATZ, NB26X, SAND_LAT, SIM_R, SIM_SPHERE, SRS +2 · uses: WHAT IT DOES TO YOU(25), 9b. SAND — voxel/sand.js, (3), THE GAME SIDE: where the g(1), 14. LOOP(1) · used by: ONE CELL, ONE STEP - the f(8), sandTick - ONE PASS OVER E(3), THE SPIT(2), THE PROMOTION LADDER - bea(1) +1 */
+/* MAP noita-s-table · 277 lines · surface: CORNER_RATE, LATX, LATZ, NB26X, SAND_LAT, SIM_R, SIM_SPHERE, SRS +3 · uses: WHAT IT DOES TO YOU(25), 9b. SAND — voxel/sand.js, (3), THE GAME SIDE: where the g(1), 14. LOOP(1) · used by: ONE CELL, ONE STEP - the f(8), sandTick - ONE PASS OVER E(3), THE SPIT(2), THE PROMOTION LADDER - bea(1) +2 */
 
 /* ---- blood and the things that live ---- */
 const S_BLOOD  = addMat({n:'blood',       k:K_LIQUID, d:1050, s:4, slip:1.0, opac:2.6, c:[0.48,0.04,0.05], emis:0.22, douse:1});
@@ -6292,7 +6316,7 @@ function sandTick(w, gdir){
 /* ==========================================================================
    THE GAME SIDE: where the grid meets the block world
    ========================================================================== */
-/* MAP game-side-where · 66 lines · surface: SAND, SAND_DRAW_R, VOXD, VOXHOLLOW, voxMatAt, voxRecipe · uses: WHAT IT DOES TO YOU(8), 4. CAVE MATERIALS(1), 1. MATH(1), THE OCEAN(1) +2 · used by: THE SAND STEP, AND DRAWING(5), THE BLOCK BECOMES BEADS - (4), A SHOT INTO THE WORLD - bu(4), 12. ACTIONS — shoot and fl(1) +11 */
+/* MAP game-side-where · 66 lines · surface: SAND, SAND_DRAW_R, VOXD, VOXHOLLOW, voxMatAt, voxRecipe · uses: WHAT IT DOES TO YOU(8), 4. CAVE MATERIALS(1), 1. MATH(1), THE OCEAN(1) +2 · used by: THE SAND STEP, AND DRAWING(5), THE BLOCK BECOMES BEADS - (4), A SHOT INTO THE WORLD - bu(4), 12. ACTIONS — shoot and fl(1) +12 */
 let SAND = null;
 
 /* A block is sand with some rock through it and some water in it, mixed from
@@ -6380,7 +6404,7 @@ const SAND_DRAW_R = BLOCK*11;              // chunks past this are not drawn
    Loose material - a heap of sand, a spill - keeps the full bead radius,
    because it has no rung above bead to go to. Only what has been PROMOTED
    changes size, which means the size you see is the rung it is on. */
-/* MAP can-see-rungs · 232 lines · surface: LAD_MASS_R, SAND_BEAD_R, SAND_CHUNKS, SAND_DRAW_MAX, SAND_HZ, V_MAX, V_UNIT, sandAcc +5 · uses: 9b. SAND — voxel/sand.js, (10), WHAT IT DOES TO YOU(6), 0. WORLD CONSTANTS — real (4), ONE CELL, ONE STEP - the f(1) +13 · used by: THE SAND STEP, AND DRAWING(7), THE PROMOTION LADDER - bea(4), ONE CELL, ONE STEP - the f(2), 11. PHYSICS AND COLLISION(2) +5 */
+/* MAP can-see-rungs · 232 lines · surface: LAD_MASS_R, SAND_BEAD_R, SAND_CHUNKS, SAND_DRAW_MAX, SAND_HZ, V_MAX, V_UNIT, sandAcc +5 · uses: 9b. SAND — voxel/sand.js, (10), WHAT IT DOES TO YOU(6), 0. WORLD CONSTANTS — real (4), ONE CELL, ONE STEP - the f(1) +13 · used by: THE SAND STEP, AND DRAWING(7), THE PROMOTION LADDER - bea(4), ONE CELL, ONE STEP - the f(2), 11. PHYSICS AND COLLISION(2) +6 */
 const SAND_BEAD_R = 10.0;             // promoted material past this is a cube
 const LAD_MASS_R  = 42.0;              // and past this the whole body is one box
 const SAND_DRAW_MAX = 22000;               // instances the sand layer may spend
@@ -8500,7 +8524,7 @@ function physics(dt){
 /* ==========================================================================
    12. ACTIONS — shoot and flag
    ========================================================================== */
-/* MAP actions-shoot-flag · 514 lines · surface: THINK, aimRay, endThink, hover, mark, shoot, startThink, thinkAim · uses: THE LONG SHOT(6), THE MINE INSIDE THE BLOCK(6), 12d. CHESTS — what the dun(3), 5. GAME STATE(3) +33 · used by: 13. INTERFACE(5), 13b. GAMEPAD — built again(4), THE CAMERA - where the eye(3), 16. TOUCH — the phone buil(3) +28 */
+/* MAP actions-shoot-flag · 514 lines · surface: THINK, aimRay, endThink, hover, mark, shoot, startThink, thinkAim · uses: THE LONG SHOT(6), THE MINE INSIDE THE BLOCK(6), 12d. CHESTS — what the dun(3), 5. GAME STATE(3) +33 · used by: 13. INTERFACE(5), 13b. GAMEPAD — built again(4), THE CAMERA - where the eye(3), 16. TOUCH — the phone buil(3) +29 */
 function aimRay(){
   const cy=Math.cos(P.yaw), sy=Math.sin(P.yaw), cp=Math.cos(P.pitch), sp=Math.sin(P.pitch);
   return {ox:P.x, oy:eyeY(), oz:P.z, dx:-sy*cp, dy:sp, dz:-cy*cp};
@@ -9027,7 +9051,7 @@ function mark(hit){
              -> the blocks one covers and the other does not
 
    Returns {nums:[revealed cells used], target, mine} or null. */
-/* MAP hint-deduction-shown · 317 lines · surface: askHint, cellXYZ, findHint, insta_dungeon_solve, nbrsOf, planeHidden · uses: 3. GLYPH ATLAS(4), REVEAL, ECHO AND FLAGS(4), 12. ACTIONS — shoot and fl(2), 5. GAME STATE(2) +10 · used by: IS IT SOLVABLE - shallow m(4), 12c. DUNGEON MODE — the th(2), 13. INTERFACE(2), 12. ACTIONS — shoot and fl(1) +11 */
+/* MAP hint-deduction-shown · 317 lines · surface: askHint, cellXYZ, findHint, insta_dungeon_solve, nbrsOf, planeHidden · uses: 3. GLYPH ATLAS(4), REVEAL, ECHO AND FLAGS(4), 12. ACTIONS — shoot and fl(2), 5. GAME STATE(2) +10 · used by: IS IT SOLVABLE - shallow m(4), 12c. DUNGEON MODE — the th(2), 13. INTERFACE(2), 12. ACTIONS — shoot and fl(1) +12 */
 function cellXYZ(i){
   return [i%G.nx, (i/(G.nx*G.nz))|0, ((i/G.nx)|0)%G.nz];
 }
@@ -11607,7 +11631,7 @@ function blast(){
 /* ==========================================================================
    13. INTERFACE
    ========================================================================== */
-/* MAP interface · 575 lines · surface: KEY, canJump, elMenu, flashScreen, loadCfg, lockHint, locked, setScreen +11 · uses: WHICH WAY UP THE PLAYER IS(11), 12. ACTIONS — shoot and fl(5), 1. MATH(3), 12b. HINT — the deduction,(2) +17 · used by: 13b. GAMEPAD — built again(6), 14b. THE FRAME - the tick(5), 16. TOUCH — the phone buil(5), THE PANEL(4) +18 */
+/* MAP interface · 589 lines · surface: KEY, canJump, elMenu, flashScreen, loadCfg, lockHint, locked, setScreen +11 · uses: WHICH WAY UP THE PLAYER IS(11), 12. ACTIONS — shoot and fl(5), 1. MATH(3), TORCHES(3) +18 · used by: 13b. GAMEPAD — built again(6), 14b. THE FRAME - the tick(5), 16. TOUCH — the phone buil(5), THE PANEL(4) +19 */
 const $ = id => document.getElementById(id);
 const elMenu=$('menu'), elPause=$('pause'), elOver=$('over'), elHud=$('hud'), elCross=$('cross');
 
@@ -12007,9 +12031,23 @@ canvas.addEventListener('mousedown', e=>{
     else if(e.button===2) startThink();
     return;
   }
-  if(e.button===0){ IN.fireHeld = true; IN.hold = 0; shoot(); }
+  /* WHAT THE LEFT BUTTON DOES DEPENDS ON WHAT IS IN YOUR HAND. With the gun
+     it shoots; with the torches it puts one down. The trigger charge is only
+     armed on the gun, so scrolling off it also cancels a long shot you were
+     holding - which is right: you cannot charge a weapon you have put away. */
+  if(e.button===0){
+    if(beltSel() === BELT_TORCH){ torchPlace(); return; }
+    IN.fireHeld = true; IN.hold = 0; shoot();
+  }
   else if(e.button===2) startThink();
 });
+/* THE BELT, ON THE WHEEL. Marcelo: "torches, selected by scrolling the mouse,
+   and left click places them." */
+canvas.addEventListener('wheel', e=>{
+  if(G.state!=='play') return;
+  e.preventDefault();
+  beltPick(beltSel() + (e.deltaY>0 ? 1 : -1));
+}, {passive:false});
 window.addEventListener('mouseup', e=>{
   if(e.button===0){ IN.fireHeld = false; IN.hold = 0; }   // let go and the charge is gone
   dragging=false;
@@ -12428,7 +12466,7 @@ function keyLook(dt){
 /* ==========================================================================
    14. LOOP
    ========================================================================== */
-/* MAP loop · 18 lines · surface: FOG, SUN, last, resize, viewM · uses: 16. TOUCH — the phone buil(1), 2. WEBGL — context and pro(1) · used by: THE DRAW: THE CUBE PASSES(2), THE DRAW: THE VIEW MODEL A(2), 14b. THE FRAME - the tick(2), WHAT LIGHTS THE CAVE(2) +27 */
+/* MAP loop · 18 lines · surface: FOG, SUN, last, resize, viewM · uses: 16. TOUCH — the phone buil(1), 2. WEBGL — context and pro(1) · used by: THE DRAW: THE VIEW MODEL A(2), 14b. THE FRAME - the tick(2), WHAT LIGHTS THE CAVE(2), MINESWEEPER / THREE PLANES(2) +29 */
 let W=1, H=1, DPR=1;
 function resize(){
   DPR = Math.min(window.devicePixelRatio||1, TOUCH ? 1.5 : 2);
@@ -12466,7 +12504,7 @@ let last=performance.now(), nextWhisper=25+Math.random()*30, tGlobal=0;
 
    Lights ADD where they overlap, so two flags light a corner better than one.
    ========================================================================== */
-/* MAP lights-cave · 290 lines · surface: FLY_R, LIGHT_FLY, LIT_FOG, LIT_GLYPH, LIT_LANTERN, LIT_LANTR, LIT_LANTR2, LIT_LANTT +14 · uses: 4b. ENEMY TYPES(2), 5. GAME STATE(2), 14. LOOP(2), 8. AUDIO — everything synt(1) +9 · used by: THE DRAW: THE CUBE PASSES(16), THE DRAW: THE BILLBOARD PA(6), 12. ACTIONS — shoot and fl(1), THE DRAW: FOG AND WATER(1) +6 */
+/* MAP lights-cave · 243 lines · surface: FLAG_IN, FLAG_OUT, FLY_LEVEL, FLY_R, FOE_IN, FOE_LEVEL, FOE_OUT, LIGHT_FLAG +19 · uses: 5. GAME STATE(2), 14. LOOP(2), 8. AUDIO — everything synt(1), 4b. ENEMY TYPES(1) +6 · used by: TORCHES(21), THE DRAW: THE CUBE PASSES(13), THE DRAW: THE BILLBOARD PA(4), 12. ACTIONS — shoot and fl(1) +5 */
 /* All three are tunable from the URL — ?dark=0.06&lantern=0.05&glyph=0.06 —
    because "way darker" is a look, and a look is found by turning a knob and
    looking, not by a round trip through a rebuild. */
@@ -12520,6 +12558,41 @@ function darkNow(){
   if (LIT_DARK_Q !== null) return LIT_DARK * LIGHT_X;
   const base = (!G.dungeon && G.diff === 0) ? DARK_LEARN : LIT_DARK;
   return (base + Math.min(LAMP_MAX, G.lamp||0)*LAMP_STEP) * LIGHT_X;
+}
+/* WHERE THE LIGHT COMES FROM, AND WHAT COLOUR IT IS. One owner, and it is the
+   sky's own clock.
+
+   Marcelo: "Make the sun the master source of light of this universe (player
+   still emits light)."
+
+   It was not. uC.sun was the constant SUN - a fixed direction, pointing up and
+   to the right, forever - while three hundred lines away the sky shader drew
+   the real sun rising, crossing and setting. So the world was lit from one
+   place and the sky said the light came from another, which is the same fault
+   the horizon had and is why a sunset looked painted on.
+
+   AT NIGHT THE MOON TAKES OVER, direction and colour both, because a key light
+   coming from a sun that is under your feet lights every face from below. The
+   brightness is darkNow()'s business and always was.
+
+   Underground there is no sky, so the old constant stands: a cave lit from an
+   imaginary sun is a lit room with rock textures in it. */
+function setSunLight(SKY){
+  if(!SKY){
+    gl.uniform3fv(uC.sun, SUN);
+    gl.uniform3f(uC.sunC, 1.25, 1.02, 0.72);
+    return;
+  }
+  const n = SKY.night;                          // 0 day, 1 night
+  gl.uniform3f(uC.sun, _sun[0]*(1-n) + _moon[0]*n,
+                       _sun[1]*(1-n) + _moon[1]*n,
+                       _sun[2]*(1-n) + _moon[2]*n);
+  /* scaled so a white noon sun reproduces the constant this replaces to three
+     decimal places - noon is unchanged, and every other hour is not */
+  const c = SKY.sunC, m = SKY.moonC;
+  gl.uniform3f(uC.sunC, (c[0]*(1-n) + m[0]*n)*1.25,
+                        (c[1]*(1-n) + m[1]*n)*1.05,
+                        (c[2]*(1-n) + m[2]*n)*0.82);
 }
 function giveLamp(where){
   G.lamp = (G.lamp||0) + 1;
@@ -12653,6 +12726,125 @@ function flyAt(f, out){
   out[2] = f.z + Math.cos(t*0.83)*BLOCK*f.rx;
 }
 
+/* ==========================================================================
+   TORCHES
+   --------------------------------------------------------------------------
+   Marcelo: "Add to inventory 'torches', selected by scrolling the mouse, and
+   left click places them. Torches are made of 2 beads of wood and have fire
+   above them, burning continuously. Torches have the same light radius of the
+   player."
+
+   A torch is not a model and it is not a particle. It is TWO BEADS OF WOOD in
+   the same grid everything else in this world lives in, with a bead of real
+   S_FIRE above them - the fire from the material table, with its own forty
+   ticks of life, its own flicker, its own smoke and its own opinion about
+   what it touches.
+
+   WHAT MAKES IT CONTINUOUS IS THAT THE TORCH PUTS THE FIRE BACK. That is what
+   fuel is. It costs one grid write when the flame has moved on, and it means
+   a torch is a fire like every other fire here rather than a lamp with a
+   picture of a flame painted on it.
+
+   Wood is K_STATIC, so it does not fall: a torch you set on a ledge is on that
+   ledge when you come back for it.
+   ========================================================================== */
+/* MAP torches · 213 lines · surface: BELT_GUN, TORCH, _fp, beltPick, beltSel, collectLights, flyB, lightAt +4 · uses: WHAT LIGHTS THE CAVE(21), WHAT IT DOES TO YOU(4), 9b. SAND — voxel/sand.js, (2), 12. ACTIONS — shoot and fl(1) +13 · used by: THE DRAW: THE CUBE PASSES(4), 14b. THE FRAME - the tick(4), 13. INTERFACE(3), THE DRAW: THE BILLBOARD PA(2) +4 */
+/* THE BELT. Three slots were already drawn under the crosshair with two of
+   them empty and a comment saying "there is going to be something to put in
+   them". This is the first of them.
+   G.belt is the slot in your hand. It stays a number rather than becoming an
+   object, because everything that asks is asking one question: which one. */
+const BELT_GUN = 0, BELT_TORCH = 1, BELT_N = 3;
+function beltSel(){ return G.belt|0; }
+function beltPick(i){
+  const n = ((i % BELT_N) + BELT_N) % BELT_N;         // the wheel wraps round
+  if(n === beltSel()) return;
+  G.belt = n;
+  IN.fireHeld = false; IN.hold = 0; P.longReady = false;
+  const slots = document.querySelectorAll('#belt .slot');
+  for(let k=0;k<slots.length;k++) slots[k].classList.toggle('held', k===n);
+  toast(n===BELT_GUN ? 'Shotgun' : n===BELT_TORCH ? 'Torches' : 'Empty', 900);
+}
+
+const TORCH     = [];              // {x,y,z} in bead cells, base bead
+const TORCH_MAX = 64;              // a light is not free, and neither is a fire
+const TORCH_REACH = 4.5;           // how far you can reach to place one, metres
+const TORCH_LIVE  = 40;            // and how near before its fire is simulated
+/* THE SAME LIGHT THE PLAYER CARRIES - his words - so these are the staff's own
+   two radii rather than two numbers that happen to look like them. Change the
+   lantern and the torches follow it. */
+const TORCH_LV = LIT_LANTERN;
+
+/* WHERE A TORCH WOULD GO if you clicked right now. Walk beads along the aim
+   and take the last empty one before something solid, which is how you get a
+   torch ON a wall rather than IN it. Returns null when the aim finds nothing
+   inside arm's reach, so a click at the sky costs a click and nothing else. */
+function torchSpot(){
+  const w = SAND; if(!w) return null;
+  const r = aimRay(), st = CELL_M*0.5;
+  let px=-1, py=-1, pz=-1;
+  for(let t=st; t<=TORCH_REACH; t+=st){
+    const x = Math.floor((r.ox + r.dx*t)/CELL_M);
+    const y = Math.floor((r.oy + r.dy*t)/CELL_M);
+    const z = Math.floor((r.oz + r.dz*t)/CELL_M);
+    if(!w.inBox(x,y,z)) return null;
+    if(x===px && y===py && z===pz) continue;
+    if(w.at(x,y,z) !== S_AIR)
+      return (px<0) ? null : {x:px, y:py, z:pz};     // the cell before it
+    px=x; py=y; pz=z;
+  }
+  return null;                                        // nothing within reach
+}
+
+/* PUT ONE THERE. Two beads of wood along his own up, and the fire is left to
+   torchTick, which is the thing that keeps putting it back. */
+function torchPlace(){
+  const w = SAND; if(!w) return false;
+  const s = torchSpot();
+  if(!s) return false;
+  const up = -sandDir();                              // one bead toward the sky
+  if(w.at(s.x, s.y+up, s.z) !== S_AIR) return false;  // no room to stand it up
+  if(TORCH.length >= TORCH_MAX) TORCH.shift();        // the oldest one goes out
+  w.put(s.x, s.y,      s.z, S_WOOD);
+  w.put(s.x, s.y+up,   s.z, S_WOOD);
+  TORCH.push({x:s.x, y:s.y, z:s.z});
+  try{ snd.clink(); }catch(e){}
+  return true;
+}
+
+/* AND IT BURNS. Once the flame above a torch has run out its forty ticks and
+   gone to smoke, put another one there. Its wood is checked too: a torch that
+   has been shot is a torch, and if both of its beads are gone it stops being
+   one and stops lighting anything. */
+function torchTick(){
+  const w = SAND; if(!w || !TORCH.length) return;
+  const up = -sandDir(), R2 = TORCH_LIVE*TORCH_LIVE;
+  for(let i=TORCH.length-1; i>=0; i--){
+    const T = TORCH[i];
+    const dx=(T.x+0.5)*CELL_M-P.x, dy=(T.y+0.5)*CELL_M-P.y, dz=(T.z+0.5)*CELL_M-P.z;
+    /* OUT OF RANGE, OUT OF THE SIMULATION - the same bargain the rest of the
+       world makes. A torch across the island is a light, not a live fire, and
+       nothing about it is worth a grid write until you walk back to it. */
+    if(dx*dx+dy*dy+dz*dz > R2) continue;
+    /* THE TABLE IS TRYING TO EAT THE TORCH, and it succeeds in three frames.
+       srx(S_FIRE, S_WOOD, S_FIRE, S_EMBER) turns wood beside a flame into
+       ember, and the ember burns out to nothing: measured, a torch placed and
+       looked at three frames later had AIR in all three of its cells.
+
+       So the two beads ARE the torch and it puts them back. That is what fuel
+       is. It is unconditional, and it has to be: "someone destroyed it" and
+       "it burnt down" leave exactly the same thing behind - air - so there is
+       no test that tells them apart, and a torch that guesses wrong either
+       cannot be destroyed or cannot stay alight. A torch that stays alight is
+       the one he asked for. Past TORCH_MAX the oldest stops being re-asserted
+       and burns down to nothing on its own, which is a torch going out. */
+    if(w.at(T.x, T.y,    T.z) !== S_WOOD) w.put(T.x, T.y,    T.z, S_WOOD);
+    if(w.at(T.x, T.y+up, T.z) !== S_WOOD) w.put(T.x, T.y+up, T.z, S_WOOD);
+    /* put() touches the cell itself, so the sim already knows */
+    if(w.at(T.x, T.y+up*2, T.z) === S_AIR) w.put(T.x, T.y+up*2, T.z, S_FIRE);
+  }
+}
+
 /* The nearest MAXL of them, packed for the shader. Everything else in the cave
    is simply out of range of the camera and costs nothing. */
 const _fp = [0,0,0];
@@ -12678,6 +12870,19 @@ function collectLights(cx, cy, cz){
     if(d < 26*BLOCK)
       cand.push({d, x:px, y:py, z:pz, out:9*BLOCK, in:3.2*BLOCK,
                  c:[1.00,0.82,0.48], k:1.0});
+  }
+  /* THE TORCHES HE PUT THERE, lighting the same distance he does. The flame
+     sits two beads up, so the light does too - a torch lights the room from
+     its fire and not from its handle. */
+  const torchOut = LIT_LANTR2*BLOCK, torchIn = LIT_LANTR*BLOCK, tUp = -sandDir();
+  for(const T of TORCH){
+    const px=(T.x+0.5)*CELL_M, py=(T.y+tUp*2+0.5)*CELL_M, pz=(T.z+0.5)*CELL_M;
+    const d = Math.hypot(px-cx, py-cy, pz-cz);
+    if(d > torchOut + 90) continue;
+    /* a fire is never quite still, and two torches should not blink together */
+    const fl = 0.86 + 0.14*Math.sin(tGlobal*7.3 + T.x*1.7 + T.z*2.9);
+    cand.push({d, x:px, y:py, z:pz, out:torchOut, in:torchIn,
+               c:[1.00,0.72,0.34], k:TORCH_LV*fl});
   }
   const flyOut = FLY_R*BLOCK;
   for(const f of flies){
@@ -13169,7 +13374,7 @@ function fzFrame(dt){
   /* AND THE SUN IN THE SKY IS THE SUN IN THE SHADER. Outside, the light on
      every surface comes from wherever the sun actually is, so the island's
      shading turns with the day rather than being lit from a fixed corner. */
-  if(SKY) gl.uniform3f(uC.sun, _sun[0], _sun[1], _sun[2]); else gl.uniform3fv(uC.sun, SUN);
+  setSunLight(SKY);
   gl.uniform3fv(uC.fog, FZ_BG);
   gl.uniform1f(uC.time, tGlobal);
   gl.uniform1f(uC.outline, 1.30);
@@ -13461,7 +13666,7 @@ function logDump(why){
    --------------------------------------------------------------------------
    Everything that happens to the world in one frame, before any of it is drawn.
    ========================================================================== */
-/* MAP frame-tick · 98 lines · surface: frame · uses: 13. INTERFACE(5), 13b. GAMEPAD — built again(3), 12. ACTIONS — shoot and fl(2), THE BLACK BOX(2) +18 · used by: 12. ACTIONS — shoot and fl(1), THE BLACK BOX(1), 15. BOOT(1), THE CAMERA - where the eye(1) +25 */
+/* MAP frame-tick · 104 lines · surface: frame · uses: 13. INTERFACE(5), TORCHES(4), 13b. GAMEPAD — built again(3), 12. ACTIONS — shoot and fl(2) +20 · used by: 12. ACTIONS — shoot and fl(1), THE BLACK BOX(1), 15. BOOT(1), THE CAMERA - where the eye(1) +25 */
 function frame(now){
   requestAnimationFrame(frame);
   let dt = Math.min(0.05, (now-last)/1000); last=now;
@@ -13475,7 +13680,7 @@ function frame(now){
   /* THE TRIGGER CHARGES WHILE IT IS HELD, and only where the long shot is
      allowed - so nothing accumulates in the dungeon and it cannot be carried
      out of one. */
-  if(IN.fireHeld && G.state==='play' && G.island && (G.weapon===undefined || G.weapon===0)){
+  if(IN.fireHeld && G.state==='play' && G.island && beltSel()===BELT_GUN){
     IN.hold += dt;
     if(IN.hold >= HOLD_LONG && !P.longReady){
       P.longReady = true;
@@ -13535,6 +13740,12 @@ function frame(now){
   G.shake = Math.max(0, G.shake - dt*0.55);
 
   sandStep(sim);
+  /* AND THE TORCHES GET THE LAST WORD, after the simulation and not before
+     it. Ordered the other way round they put their wood back and sandStep
+     ate it again inside the same frame, so every frame ended with a torch
+     made of air - which is exactly what the harness photographed: base,
+     head and flame all air, three frames after placing one. */
+  if(TORCH.length) torchTick();
   tickVials();
   // ------- particles -------
   for(let i=particles.length-1;i>=0;i--){
@@ -13724,12 +13935,12 @@ function frame(now){
    --------------------------------------------------------------------------
    World, sand, fireflies, enemies, the boss, chests and ghost blocks, in that order.
    ========================================================================== */
-/* MAP draw-cube-passes · 387 lines · surface: - · uses: WHAT LIGHTS THE CAVE(16), 9. DRAW BATCHES(7), 4b. ENEMY TYPES(4), CUBE GEOMETRY AND THE INST(3) +21 · used by: - */
+/* MAP draw-cube-passes · 387 lines · surface: - · uses: WHAT LIGHTS THE CAVE(13), 9. DRAW BATCHES(7), 4b. ENEMY TYPES(4), TORCHES(4) +22 · used by: - */
   gl.useProgram(pCube);
   gl.uniformMatrix4fv(uC.proj,false,projMain);
   gl.uniformMatrix4fv(uC.view,false,viewM);
   gl.uniform3f(uC.cam, camX,camY,camZ);
-  gl.uniform3fv(uC.sun, SUN);
+  setSunLight(SKY);
   gl.uniform3fv(uC.fog, FOGNOW);
   gl.uniform1f(uC.time, tGlobal);
   gl.uniform1f(uC.outline, 1.0);
@@ -14112,7 +14323,7 @@ function frame(now){
    --------------------------------------------------------------------------
    Glyphs, sprites and glows - everything that turns to face you.
    ========================================================================== */
-/* MAP draw-billboard-passes · 289 lines · surface: - · uses: 3. GLYPH ATLAS(6), WHAT LIGHTS THE CAVE(6), 9. DRAW BATCHES(5), 12c. DUNGEON MODE — the th(3) +13 · used by: - */
+/* MAP draw-billboard-passes · 289 lines · surface: - · uses: 3. GLYPH ATLAS(6), 9. DRAW BATCHES(5), WHAT LIGHTS THE CAVE(4), 12c. DUNGEON MODE — the th(3) +14 · used by: - */
   gl.useProgram(pBB);
   gl.uniformMatrix4fv(uB.proj,false,projMain);
   gl.uniformMatrix4fv(uB.view,false,viewM);
