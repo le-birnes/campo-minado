@@ -4361,7 +4361,20 @@ const SAND_DIV = 24;                       // beads per CELL edge (8 per LAT)
 const CELL_M   = BLOCK/SAND_DIV;           // 0.125 m — the bead, BLOCK/8
 /* A CHUNK IS STILL EXACTLY 2x2x2 BLOCKS, which is what the whole ladder hangs
    off, so it follows the divisor rather than being written down twice. */
-const SCS = SAND_DIV*2;                    // chunk edge, in cells
+/* A CHUNK IS TWO PAGES ON A SIDE, and it has to be said in PAGES.
+
+   This read SAND_DIV*2, and it was right when SAND_DIV meant "beads per
+   page". It stopped being right the moment the page became the LATTICE block
+   and SAND_DIV became beads per CELL: 24*2 is 48 cells, which is SIX pages a
+   side, not two - while ladChunkOf, ladBreak, ladWakeBlock, cbulk and the bead
+   draw all still divided by two.
+
+   So the draw pass walked 8 of every 216 pages in a chunk - the corners - and
+   the dirty flags landed on chunks that were not the ones that changed.
+   Measured: 8,909 loose beads on the ground beside the player, 1,200 chunks
+   flagged drawable, and NOT ONE of them within fifty metres of him. The beads
+   were real, in the grid, and nothing was looking at them. */
+const SCS = (SAND_DIV/LAT_DIV)*2;          // chunk edge in cells: two pages
 const SCSH = Math.round(Math.log2(SCS)), SCSM = SCS-1;
 const SCS3 = SCS*SCS*SCS;
 
@@ -7392,7 +7405,21 @@ function rebuildWorld(){
     }
     return false;
   };
-  // bedrock: a one-block shell around everything
+  /* THE BEDROCK SHELL - A ONE-BLOCK BOX AROUND THE ENTIRE WORLD, and it is
+     THE BOX. Not the ocean, not the island, not the sky: a literal cube of
+     bedrock drawn around everything, by name, in this loop.
+
+     Which is exactly right for a DUNGEON, because you are inside it and it is
+     the edge of the world making its promise: this does not open. And it is
+     exactly wrong for an OPEN WORLD, because you are outside it, looking at
+     the six faces of a box from the air. "The world should have 600 km radius,
+     that box needs to be GONE, it should not exist."
+
+     So it does not exist once the world opens. The floor is still there - it
+     is blocksBody that holds you up, not this - and what is past the array is
+     sea and sky, drawn by the shader, which is the whole point of a planet
+     with a radius. */
+  if(!G.island)
   for(let y=-1;y<=G.ny;y++) for(let z=-1;z<=G.nz;z++) for(let x=-1;x<=G.nx;x++){
     if(inside(x,y,z)) continue;
     if(!facesAir(x,y,z)) continue;

@@ -4361,7 +4361,20 @@ const SAND_DIV = 24;                       // beads per CELL edge (8 per LAT)
 const CELL_M   = BLOCK/SAND_DIV;           // 0.125 m — the bead, BLOCK/8
 /* A CHUNK IS STILL EXACTLY 2x2x2 BLOCKS, which is what the whole ladder hangs
    off, so it follows the divisor rather than being written down twice. */
-const SCS = SAND_DIV*2;                    // chunk edge, in cells
+/* A CHUNK IS TWO PAGES ON A SIDE, and it has to be said in PAGES.
+
+   This read SAND_DIV*2, and it was right when SAND_DIV meant "beads per
+   page". It stopped being right the moment the page became the LATTICE block
+   and SAND_DIV became beads per CELL: 24*2 is 48 cells, which is SIX pages a
+   side, not two - while ladChunkOf, ladBreak, ladWakeBlock, cbulk and the bead
+   draw all still divided by two.
+
+   So the draw pass walked 8 of every 216 pages in a chunk - the corners - and
+   the dirty flags landed on chunks that were not the ones that changed.
+   Measured: 8,909 loose beads on the ground beside the player, 1,200 chunks
+   flagged drawable, and NOT ONE of them within fifty metres of him. The beads
+   were real, in the grid, and nothing was looking at them. */
+const SCS = (SAND_DIV/LAT_DIV)*2;          // chunk edge in cells: two pages
 const SCSH = Math.round(Math.log2(SCS)), SCSM = SCS-1;
 const SCS3 = SCS*SCS*SCS;
 
