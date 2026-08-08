@@ -250,13 +250,33 @@ def render(lines, secs):
     return "\n".join(o)
 
 
+def zones(lines):
+    """Which language each line is in. index.html is one document with CSS and
+    JavaScript inside it, and `/* ... */` is a comment in both - but in raw
+    HTML it is TEXT, and would be printed on the page. Every banner happens to
+    live inside a <style> or a <script> today; this is what stops the day one
+    does not from putting slashes and stars on the title screen."""
+    out, z = [], "html"
+    for L in lines:
+        if "<style" in L:    z = "css"
+        if "<script" in L:   z = "js"
+        out.append(z)
+        if "</style>" in L or "</script>" in L: z = "html"
+    return out
+
+
 def maplines(lines, secs):
     """Put the links INSIDE the banners, where they are read. Owned by this
     script: the line is replaced wholesale every run, so it cannot drift."""
     by = {s.id: s for s in secs}
     out, ins = list(lines), 0
+    zone = zones(lines)
     for s in secs:
         if s.id == "document-head":
+            continue
+        if zone[s.a - 1] == "html":
+            print("  skipped %s: its banner is in raw HTML, where /* */ is not"
+                  " a comment" % s.id)
             continue
         txt = ("/* MAP %s · %d lines · surface: %s · uses: %s · used by: %s */"
                % (s.id, s.n, lst(s.surface, 8), links(s.uses, by, 4),
