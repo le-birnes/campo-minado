@@ -5253,10 +5253,66 @@ const PGO = PGP*PGS;               // 32 — added before the shift so it never 
 function pgOff(x,y,z){ return ((y&PGM)<<(PGSH*2)) | ((z&PGM)<<PGSH) | (x&PGM); }
 function pgOf(w,x,y,z){ return ((((y+PGO)>>PGSH)*w.BD + ((z+PGO)>>PGSH))*w.BW + ((x+PGO)>>PGSH)); }
 
+/* ==========================================================================
+   STREAMING: the array is a WINDOW, and what has not been asked about yet is
+   not stored at all
+   --------------------------------------------------------------------------
+   "I want the diggable patch to follow me, so if I manage to get there,
+   wherever that is, I'll be able to interact with it. ALL IS FUNCTION UNTIL I
+   GET NEAR, THEN THE FUNCTION BECOMES ARRAY."
+
+   That sentence is the design and this is it, in three parts:
+
+     PG_UNKNOWN  a block nobody has touched has no material at all - not air,
+                 not rock: UNKNOWN. The first read of it asks universeAt what
+                 should be there and writes down the answer. So the function
+                 becomes array exactly when he arrives and not one block sooner.
+     the ORIGIN  the page grid has one, in lattice blocks, and every address is
+                 relative to it. Moving it moves the window.
+     RECENTRE    when he leaves the middle, the window slides: pages that are
+                 still inside keep their contents and their address, pages that
+                 fell off the back are dropped, and the space they leave is
+                 UNKNOWN again - which costs nothing until he looks at it.
+
+   The cost of arriving somewhere new is therefore paid PER BLOCK HE TOUCHES,
+   not per block that exists, which is the same bargain the paged grid already
+   made one rung down. */
+const PG_UNKNOWN = 255;                    // no material is 255; the table has ~80
+
+/* WHAT SHOULD BE HERE, asked of the universe and then remembered. A block that
+   comes out all one thing stays one byte; one the surface passes through gets
+   a page and its 512 cells. */
+function pgResolve(w, b, bx,by,bz){
+  const S = PGS*CELL_M;
+  const x0 = bx*S, y0 = by*S, z0 = bz*S;
+  /* nine samples: the centre and the eight corners. A block is uniform when
+     they all agree, and underground or high in the air they always do - which
+     is most of a planet. */
+  const c = universeAt(x0+S*0.5, y0+S*0.5, z0+S*0.5);
+  let uniform = true;
+  for(let k=0;k<8 && uniform;k++){
+    if(universeAt(x0+(k&1?S:0), y0+(k&2?S:0), z0+(k&4?S:0)) !== c) uniform = false;
+  }
+  if(uniform){ w.pgu[b] = c; return c; }
+  const pg = new Uint8Array(PGB);
+  for(let ly=0;ly<PGS;ly++) for(let lz=0;lz<PGS;lz++) for(let lx=0;lx<PGS;lx++)
+    pg[(ly<<(PGSH*2))|(lz<<PGSH)|lx] =
+      universeAt(x0+(lx+0.5)*CELL_M, y0+(ly+0.5)*CELL_M, z0+(lz+0.5)*CELL_M);
+  w.pg[b] = pg; w.pgn++;
+  w.pgu[b] = S_AIR;                        // it has cells; pgu is not consulted
+  return pg[0];
+}
 function cGet(w,x,y,z){
   const b = (((y+PGO)>>PGSH)*w.BD + ((z+PGO)>>PGSH))*w.BW + ((x+PGO)>>PGSH);
   const p = w.pg[b];
-  return p === null ? w.pgu[b] : p[((y&PGM)<<(PGSH*2)) | ((z&PGM)<<PGSH) | (x&PGM)];
+  if(p !== null) return p[((y&PGM)<<(PGSH*2)) | ((z&PGM)<<PGSH) | (x&PGM)];
+  const u = w.pgu[b];
+  if(u !== PG_UNKNOWN) return u;
+  /* NOBODY HAS BEEN HERE BEFORE, so ask the universe - once. This is the line
+     where "all is function until I get near" actually happens. */
+  pgResolve(w, b, (x>>PGSH), (y>>PGSH), (z>>PGSH));
+  const p2 = w.pg[b];
+  return p2 === null ? w.pgu[b] : p2[((y&PGM)<<(PGSH*2)) | ((z&PGM)<<PGSH) | (x&PGM)];
 }
 /* Make the block real. Idempotent, because demotion and the first write into a
    uniform block can arrive in either order. */
@@ -5265,7 +5321,7 @@ function cFault(w,b){
   if(p !== null) return p;
   p = new Uint8Array(PGB);
   const u = w.pgu[b];
-  if(u) p.fill(u, 0, PGC);
+  if(u && u !== PG_UNKNOWN) p.fill(u, 0, PGC);
   w.pg[b] = p; w.pgn++;
   return p;
 }
@@ -5453,6 +5509,16 @@ class SandWorld {
       for(let o=0;o<PGC;o++) if(p[o]===mat) n++;
     }
     return n;
+  }
+  /* THE WHOLE WINDOW BECOMES FUNCTION AGAIN. Every page is dropped and every
+     block is marked UNKNOWN, so nothing is stored and the first read of any
+     cell asks universeAt what belongs there. This is the streaming state: the
+     world costs a byte a block until he touches it, and what he touches costs
+     a page. Re-centring is this, applied to the slice that fell off the back. */
+  streamAll(){
+    if(this.pgn) this.pg.fill(null);
+    this.pgu.fill(PG_UNKNOWN);
+    this.pgn = 0;
   }
   /* EVERY BLOCK IS ROCK AGAIN, and every page it had is gone. */
   clearAll(){

@@ -806,150 +806,161 @@ function gnow(){ return GRAV * (G.gravK === undefined ? 1 : G.gravK); }
    THE MOON MOVES, so its pull moves with it. It is already drawn as a record
    in the sky at a real angular size; giving it a position in metres is the
    same number said in a different unit. */
+/* ==========================================================================
+   THE UNIVERSE, AND IT IS ONE FUNCTION
+   --------------------------------------------------------------------------
+   Marcelo: "make sure there is only ONE FUNCTION to generate the whole
+   universe (world now is actually worldS) so we can use it as a platform to
+   build everything else."
+
+   So there is. universeAt(x,y,z) answers what is at any point in space, and
+   everything else in the game asks it: the block builder, the bead grid, the
+   collision, the shader, and whatever streams in when he walks somewhere new.
+   Nothing generates terrain anywhere else. That is the platform.
+
+   A UNIVERSE IS A LIST OF BODIES. Each body is a sphere with
+
+       a centre and a radius        where it is and how big
+       a surface gravity            what it does to you
+       a geoid roll                 its shape and its layers, rolled per run
+       a sea level, or none         the planet has one, the moon does not
+
+   and the material at a point is the FIRST body that claims it. Space is what
+   nothing claims. That is the whole model, and everything he has asked for is
+   a consequence of it rather than a feature bolted to it:
+
+     * the moon is solid, made of layers, and can be landed on and DUG
+     * gravity is the sum of the bodies, so there is a crossover between them
+     * a black hole later is one more row with a large g and no surface
+     * and a new world is a new row, not a new code path
+
+   THE PLANET CARRIES THE DONUT. Its geoid has an island at a feature point,
+   a ring of sea around it and mainland beyond - and the moon's geoid has none
+   of that, because a moon is plain. Same function, different roll. */
 const BODIES = [];
 function bodyPlanet(){ return BODIES[0]; }
-function worldBodies(){
-  const cx = (G.nx||1)*BLOCK*0.5, cz = (G.nz||1)*BLOCK*0.5;
-  BODIES.length = 0;
-  /* the planet: the island sits on its surface, so its centre is one radius
-     straight down from sea level */
-  BODIES.push({ n:'planet', x:cx, y:(G.seaY||0)*BLOCK + PLANET_R, z:cz,
-                R:PLANET_R, g:GRAV });
-  /* THE MOON. A quarter the radius, a sixth the gravity - the Moon's own
-     numbers - on a circular orbit at sixty planet-radii, which is where ours
-     is. Its position comes from the same clock the sky already turns it by, so
-     what you see and what pulls you are the same object. */
-  const gg = geoOf();
-  const MOON_R = PLANET_R*gg.moonR, MOON_G = GRAV*gg.moonG, MOON_D = PLANET_R*gg.moonD;
-  const th = (typeof tGlobal==='number' ? tGlobal : 0) / (SKY_LUN||600) * 6.28318;
-  BODIES.push({ n:'moon',
-                x: cx + Math.cos(th)*MOON_D,
-                y: (G.seaY||0)*BLOCK + PLANET_R - Math.sin(th)*MOON_D,
-                z: cz,
-                R:MOON_R, g:MOON_G });
-  return BODIES;
-}
-/* ==========================================================================
-   THE GEOID: what the planet is made of, everywhere, as a function
-   --------------------------------------------------------------------------
-   "The world is solid, composed of dirt and rock and lava in the centre,
-   pretty much like earth, so imagine a geoid in which a portion of it contains
-   a DONUT-SHAPED DEPRESSION filled with water, and the centre of the donut -
-   the donut hole - is the dungeon below the island."
 
-   So the planet is not an empty sphere with an island glued on. It is solid
-   all the way down, and the sea is a dent in it:
-
-       surface        the geoid: R + H(d), where d is the distance from the
-                      island along the ground
-       0 .. 40 m      DIRT
-       40 m .. 55%R   ROCK
-       inside 55%R    LAVA
-
-       H(d):  d < 90 m       THE ISLAND, the donut's hole, rising to +16 m,
-                             with the dungeon buried under it
-              90 .. 400 m    the beach, falling away
-              400 m .. 10 km THE DONUT: a depression 60 m deep, and everything
-                             in it below sea level is WATER
-              beyond 10 km   PLAIN DIRT at +8 m, out to the horizon
-
-   ALL OF IT IS A FUNCTION AND NONE OF IT IS STORED. That is the point, and it
-   is his: "all is function until I get near, then the function becomes array."
-   An array can then be filled from this anywhere, at any time, and it will
-   always agree with itself - which is the whole of "I can't build stuff on a
-   changing world". Same seed, same ground, for ever. */
-/* EVERY RUN IS A DIFFERENT PLANET. Marcelo: "same seed, same ground, for ever
-   -> that's not cool for now, since I can't save the game. I want randomness
-   each RUN, not a fixed game. You can make small variations on what you built -
-   shape and layers of materials building the bodies."
-
-   So the geoid's shape and its layers are ROLLED ONCE per world, off the run's
-   own seed, and then they are constant for that run. Both halves matter: it is
-   a different island every time you press start, and it is the SAME island for
-   as long as you are standing on it - which is what "I can't build stuff on a
-   changing world" needed. The determinism was never about the seed being
-   fixed; it was about the ground not moving while you are on it.
-
-   And when saving exists, the save is these fifteen numbers. */
-let GEO = null;
-function rollGeo(){
+/* ONE ROLL, one body's shape and crust. kind picks how eventful it is. */
+function rollGeoid(kind){
   const R = (a,b) => a + rnd()*(b-a);
-  /* THE ISLAND HAS TO FIT IN THE PATCH YOU CAN DIG. The array is 180 m across,
-     so it reaches 90 m from the middle - and the first roll made islands of
-     110 to 145 m, which meant the whole diggable world was island and there
-     was no shore anywhere in it: the sea count fell from 24,640 blocks to
-     1,223. The island is the donut's HOLE, and a hole you cannot see the edge
-     of is not a hole. So it is sized to leave beach and water inside the patch,
-     and the ten kilometres of ocean past it belong to the function. */
-  const island = R(26,52);
-  GEO = {
-    isleR : island,
-    isleH : R(9,27),                      // how far it stands out of the water
-    beachR: island + R(22,58),            // where the beach finishes falling
-    donutR: R(6500,14000),                // HIS TEN KILOMETRES, give or take
-    donutD: R(34,92),                     // how deep the sea gets
-    plainH: R(3,17),                      // and the mainland beyond it
-    coreF : R(0.44,0.66),                 // where the lava starts, as a fraction
-    /* THE LAYERS, from the surface down. A crust is not one thing: some worlds
-       have a deep soil, some are bare rock a metre down, some have a band of
-       sand or of rubble under the topsoil. Depths are metres of that material
-       before the next begins, and whatever is left over is rock down to the
-       core. */
-    layers: (() => {
-      const L = [{m:S_DIRT, d:R(8,55)}];
-      const roll = rnd();
-      if(roll < 0.34)      L.push({m:S_SAND,   d:R(4,26)});
-      else if(roll < 0.62) L.push({m:S_RUBBLE, d:R(6,34)});
-      else if(roll < 0.78) L.push({m:S_WETSND, d:R(5,20)});   // a clay band
-      if(rnd() < 0.30) L.push({m:S_SAND, d:R(3,14)});
-      return L;
-    })(),
-    /* and the moon is a body too, so it varies with the rest of them */
-    moonR : R(0.18,0.34), moonG: R(0.11,0.24), moonD: R(9,17)
+  const g = {
+    kind,
+    /* the crust, from the surface down, and whatever is left is rock to the
+       core. Some worlds have deep soil, some are bare rock a metre down, some
+       carry a band of sand or rubble or clay under the topsoil. */
+    layers: [],
+    coreF : R(0.42,0.68),
+    /* a feature: an island in a ring of sea, or nothing at all */
+    isle  : null
   };
-  BODIES.length = 0;                       // they are rebuilt from the new roll
-  return GEO;
+  if(kind === 'planet'){
+    g.layers.push({m:S_DIRT, d:R(8,55)});
+    const roll = rnd();
+    if(roll < 0.34)      g.layers.push({m:S_SAND,   d:R(4,26)});
+    else if(roll < 0.62) g.layers.push({m:S_RUBBLE, d:R(6,34)});
+    else if(roll < 0.78) g.layers.push({m:S_WETSND, d:R(5,20)});
+    if(rnd() < 0.30) g.layers.push({m:S_SAND, d:R(3,14)});
+    const island = R(26,52);
+    g.isle = { r: island, h: R(9,27), beach: island + R(22,58),
+               seaR: R(6500,14000), seaD: R(34,92), plain: R(3,17) };
+    g.sea = S_WATER;                      // it has an ocean
+  } else {                                 // a moon: dust over rock, no water
+    g.layers.push({m:S_SAND, d:R(2,14)});
+    if(rnd() < 0.5) g.layers.push({m:S_RUBBLE, d:R(3,18)});
+    g.sea = 0;
+  }
+  return g;
 }
-function geoOf(){ return GEO || rollGeo(); }
 
-/* HOW HIGH THE GROUND IS above sea level, d metres from the island along the
-   surface. The island is the donut's hole; the donut is the sea; past its rim
-   the mainland goes on to the horizon. */
-function geoH(d){
-  const g = geoOf();
-  if(d < g.isleR){                      // the island, domed
-    const t = d/g.isleR;
-    return g.isleH*(1 - t*t);
+/* HOW HIGH THE GROUND IS on a body, d metres from its feature along the
+   surface. A body with no feature is a sphere and this is zero. */
+function bodyH(b, d){
+  const g = b.geo, s = g && g.isle;
+  if(!s) return 0;
+  if(d < s.r){ const t = d/s.r; return s.h*(1 - t*t); }          // the island
+  if(d < s.beach){                                               // the beach
+    const t = (d-s.r)/(s.beach-s.r);
+    return s.h*(1-t)*(1-t) - s.seaD*t*t;
   }
-  if(d < g.beachR){                     // the beach, into the water
-    const t = (d-g.isleR)/(g.beachR-g.isleR);
-    return g.isleH*(1-t)*(1-t) - g.donutD*t*t;
+  if(d < s.seaR){                                                // the donut
+    const t = (d-s.beach)/(s.seaR-s.beach);
+    return -s.seaD + (s.seaD+s.plain)*t*t*t*t;
   }
-  if(d < g.donutR){                     // the donut floor, rising at its rim
-    const t = (d-g.beachR)/(g.donutR-g.beachR);
-    return -g.donutD + (g.donutD+g.plainH)*t*t*t*t;
-  }
-  return g.plainH;                      // and the mainland goes on
+  return s.plain;                                                // the mainland
 }
-/* WHAT IS AT A POINT, from nothing but where it is: air above the ground,
-   water in the dent, then this run's own crust, then rock, then the core. */
-function geoMat(x,y,z){
-  const b = bodyPlanet() || (worldBodies(), bodyPlanet());
+
+/* WHAT ONE BODY SAYS ABOUT A POINT, or null if the point is not its business. */
+function bodyMat(b, x,y,z){
   const dx=x-b.x, dy=y-b.y, dz=z-b.z;
   const r = Math.hypot(dx,dy,dz);
-  const cx=(G.nx||1)*BLOCK*0.5, cz=(G.nz||1)*BLOCK*0.5;
-  const d = Math.hypot(x-cx, z-cz);
-  const surf = b.R + geoH(d);           // the solid surface, as a radius
-  if(r > surf) return r > b.R ? S_AIR : S_WATER;
-  const g = geoOf();
+  if(r > b.R*1.02) return null;            // above its sea and its ground: space
+  /* distance from the body's feature, along its own surface */
+  const d = b.fx===undefined ? 0
+          : Math.hypot(x-b.fx, z-b.fz);
+  const surf = b.R + bodyH(b, d);
+  /* SEA LEVEL IS THE BODY'S RADIUS. Above the ground and BELOW that line you
+     are in its ocean; above the line you are in its air, which is nothing this
+     function owns. Without the second half, standing a hundred metres up the
+     island read as water - the ground was below you, so it called it sea. */
+  if(r > surf) return (b.geo.sea && r <= b.R) ? b.geo.sea : null;
   let dep = surf - r;
-  for(let i=0;i<g.layers.length;i++){
-    if(dep < g.layers[i].d) return g.layers[i].m;
-    dep -= g.layers[i].d;
+  const L = b.geo.layers;
+  for(let i=0;i<L.length;i++){
+    if(dep < L[i].d) return L[i].m;
+    dep -= L[i].d;
   }
-  if(r > b.R*g.coreF) return S_ROCK;
-  return S_LAVA;
+  return r > b.R*b.geo.coreF ? S_ROCK : S_LAVA;
 }
+
+/* THE ONE FUNCTION. What is at this point, anywhere in the universe. */
+function universeAt(x,y,z){
+  if(!BODIES.length) worldBodies();
+  for(let i=0;i<BODIES.length;i++){
+    const m = bodyMat(BODIES[i], x,y,z);
+    if(m !== null) return m;
+  }
+  return S_AIR;                            // space
+}
+
+/* AND THE BODIES THEMSELVES, rolled once per run. The planet's island sits
+   under the middle of the diggable patch, because that is where the dungeon
+   is; the moon has no feature and needs no anchor. */
+function worldBodies(){
+  const cx = (G.nx||1)*BLOCK*0.5, cz = (G.nz||1)*BLOCK*0.5;
+  const sy = (G.seaY||0)*BLOCK;
+  BODIES.length = 0;
+  BODIES.push({ n:'planet', x:cx, y:sy + PLANET_R, z:cz, R:PLANET_R, g:GRAV,
+                fx:cx, fz:cz, geo: GEO_ROLL.planet || (GEO_ROLL.planet = rollGeoid('planet')) });
+  /* THE MOON MOVES, so its pull moves with it, and it is turned by the same
+     clock the sky already turns it by - what you SEE and what pulls you are
+     one object. */
+  const mg = GEO_ROLL.moon || (GEO_ROLL.moon = rollGeoid('moon'));
+  const th = (typeof tGlobal==='number' ? tGlobal : 0) / (SKY_LUN||600) * 6.28318;
+  BODIES.push({ n:'moon',
+                x: cx + Math.cos(th)*PLANET_R*GEO_ROLL.moonD,
+                y: sy + PLANET_R - Math.sin(th)*PLANET_R*GEO_ROLL.moonD,
+                z: cz,
+                R: PLANET_R*GEO_ROLL.moonR, g: GRAV*GEO_ROLL.moonG, geo: mg });
+  return BODIES;
+}
+/* one roll per run, held here so worldBodies can be called every frame as the
+   moon moves without the universe changing shape underneath it */
+const GEO_ROLL = { planet:null, moon:null, moonR:0.27, moonG:0.17, moonD:12 };
+function rollGeo(){
+  GEO_ROLL.planet = rollGeoid('planet');
+  GEO_ROLL.moon   = rollGeoid('moon');
+  GEO_ROLL.moonR  = 0.18 + rnd()*0.16;
+  GEO_ROLL.moonG  = 0.11 + rnd()*0.13;
+  GEO_ROLL.moonD  = 9 + rnd()*8;
+  BODIES.length = 0;
+  return GEO_ROLL;
+}
+function geoOf(){ return GEO_ROLL.planet || (rollGeo(), GEO_ROLL.planet); }
+/* the two names the rest of the file already calls, now thin views of the one
+   function: the planet's height, and the material anywhere */
+function geoH(d){ if(!BODIES.length) worldBodies(); return bodyH(bodyPlanet(), d); }
+function geoMat(x,y,z){ return universeAt(x,y,z); }
+
 const _GV = [0,0,0];
 function planetCY(){ return (G.seaY||0)*BLOCK + PLANET_R; }
 function gravAt(x,y,z){
@@ -1686,6 +1697,17 @@ uniform float uNight;                 // 0 day, 1 night - how many stars
    sits at sqrt(2*R*h) - 2.8 km from an eye 2 m up, 78 km from five hundred -
    and it curves, and as you climb it closes into a disc and then a ball. */
 uniform float uR;                     // planet radius, metres
+/* THE HORIZON IS THE PLANET, NOT A PICTURE OF ONE.
+   uPC is the planet's centre and uFeat the island's, both RELATIVE TO THE EYE,
+   and uIsleA/uIsleB are this run's own island: its radius, its height, where
+   the beach finishes, how far the sea reaches, how deep it is, and how high
+   the mainland stands beyond it. The same six numbers the ground is built
+   from. So what he sees at the horizon is the terrain, marched - the donut of
+   sea, its far rim, and the mainland rising past it - rather than a coloured
+   line at eye level pretending to be a world. */
+uniform vec3  uPC, uFeat;
+uniform vec4  uIsleA;                 // r, h, beach, seaR
+uniform vec2  uIsleB;                 // seaD, plain
 uniform float uH;                     // how far the eye is above sea level
 uniform float uPhase;                 // cos of the sun-moon angle: the moon's phase
 out vec4 frag;
@@ -1697,6 +1719,14 @@ float h31(vec3 p){
   return fract(p.x*p.y*p.z*(p.x+p.y+p.z));
 }
 
+/* the same curve as bodyH(), in the shader, because there is only one shape */
+float isleH(float d){
+  float r=uIsleA.x, h=uIsleA.y, be=uIsleA.z, sR=uIsleA.w, sD=uIsleB.x, pl=uIsleB.y;
+  if(d < r){ float t=d/r; return h*(1.0-t*t); }
+  if(d < be){ float t=(d-r)/max(be-r,1.0); return h*(1.0-t)*(1.0-t) - sD*t*t; }
+  if(d < sR){ float t=(d-be)/max(sR-be,1.0); float t4=t*t*t*t; return -sD + (sD+pl)*t4; }
+  return pl;
+}
 void main(){
   vec3 dir = normalize(uFwd + uRight*(vNDC.x*uTan.x) + uUpv*(vNDC.y*uTan.y));
   float h = dot(dir, uWorldUp);                    // +1 straight up, -1 straight down
@@ -1717,11 +1747,36 @@ void main(){
   float seaT = -1.0;
   if(dq > 0.0){ float t = bq - sqrt(dq); if(t > 0.0) seaT = t; }
   if(seaT > 0.0){
-    /* AND IT FADES INTO ITS OWN HORIZON: fifteen kilometres of air turns any
-       sea the colour of the sky, which is why a far coast is a smudge. So the
-       far edge needs no line drawn on it. */
-    vec3 water = mix(uSea, uSea*0.35, clamp(-h*2.2, 0.0, 1.0));
-    col = mix(water, uHoriz, clamp(1.0 - exp(-seaT/15000.0), 0.0, 1.0));
+    /* MARCH THE GROUND. The sphere hit is only the FAR BOUND - the sea's own
+       level - and the land can stand above it or fall below it, so the ray is
+       walked and the first step that goes under the surface is the ground.
+       Geometric steps: detail past a few hundred metres is under a pixel, and
+       the horizon is 2.8 km from an eye two metres up. */
+    float landT = -1.0, lh = 0.0;
+    float t = 2.0, prev = 0.0;
+    for(int i=0;i<96;i++){
+      if(t >= seaT) break;
+      vec3 q = dir*t;                                   // relative to the eye
+      vec3 rel = q - uPC;                               // relative to the centre
+      vec3 fr  = q - uFeat;
+      float dd = length(fr - uWorldUp*dot(fr, uWorldUp));   // along the surface
+      float hh = isleH(dd);
+      if(length(rel) < uR + hh){ landT = mix(prev, t, 0.5); lh = hh; break; }
+      prev = t;
+      t += max(2.0, t*0.09);
+    }
+    if(landT > 0.0){
+      /* SAND AT THE WATERLINE, DIRT ABOVE IT, and the whole thing goes to the
+         horizon's colour with distance, because that is what air does. */
+      vec3 sand = vec3(0.62,0.54,0.38), soil = vec3(0.34,0.30,0.20);
+      vec3 land = mix(sand, soil, clamp(lh/22.0, 0.0, 1.0));
+      col = mix(land, uHoriz, clamp(1.0 - exp(-landT/9000.0), 0.0, 1.0));
+    } else {
+      /* AND IT FADES INTO ITS OWN HORIZON: fifteen kilometres of air turns any
+         sea the colour of the sky, which is why a far coast is a smudge. */
+      vec3 water = mix(uSea, uSea*0.35, clamp(-h*2.2, 0.0, 1.0));
+      col = mix(water, uHoriz, clamp(1.0 - exp(-seaT/15000.0), 0.0, 1.0));
+    }
   } else if(h <= 0.0){
     col = mix(uHoriz, uZenith*0.30, clamp(uH/60000.0, 0.0, 1.0));
   }
@@ -1783,7 +1838,9 @@ const uS = {
   sea:gl.getUniformLocation(pSky,'uSea'), sunCol:gl.getUniformLocation(pSky,'uSunCol'),
   moonCol:gl.getUniformLocation(pSky,'uMoonCol'),
   night:gl.getUniformLocation(pSky,'uNight'), phase:gl.getUniformLocation(pSky,'uPhase'),
-  R:gl.getUniformLocation(pSky,'uR'), H:gl.getUniformLocation(pSky,'uH')
+  R:gl.getUniformLocation(pSky,'uR'), H:gl.getUniformLocation(pSky,'uH'),
+  PC:gl.getUniformLocation(pSky,'uPC'), FEAT:gl.getUniformLocation(pSky,'uFeat'),
+  ISA:gl.getUniformLocation(pSky,'uIsleA'), ISB:gl.getUniformLocation(pSky,'uIsleB')
 };
 const skyVAO = gl.createVertexArray();
 
@@ -5196,10 +5253,66 @@ const PGO = PGP*PGS;               // 32 — added before the shift so it never 
 function pgOff(x,y,z){ return ((y&PGM)<<(PGSH*2)) | ((z&PGM)<<PGSH) | (x&PGM); }
 function pgOf(w,x,y,z){ return ((((y+PGO)>>PGSH)*w.BD + ((z+PGO)>>PGSH))*w.BW + ((x+PGO)>>PGSH)); }
 
+/* ==========================================================================
+   STREAMING: the array is a WINDOW, and what has not been asked about yet is
+   not stored at all
+   --------------------------------------------------------------------------
+   "I want the diggable patch to follow me, so if I manage to get there,
+   wherever that is, I'll be able to interact with it. ALL IS FUNCTION UNTIL I
+   GET NEAR, THEN THE FUNCTION BECOMES ARRAY."
+
+   That sentence is the design and this is it, in three parts:
+
+     PG_UNKNOWN  a block nobody has touched has no material at all - not air,
+                 not rock: UNKNOWN. The first read of it asks universeAt what
+                 should be there and writes down the answer. So the function
+                 becomes array exactly when he arrives and not one block sooner.
+     the ORIGIN  the page grid has one, in lattice blocks, and every address is
+                 relative to it. Moving it moves the window.
+     RECENTRE    when he leaves the middle, the window slides: pages that are
+                 still inside keep their contents and their address, pages that
+                 fell off the back are dropped, and the space they leave is
+                 UNKNOWN again - which costs nothing until he looks at it.
+
+   The cost of arriving somewhere new is therefore paid PER BLOCK HE TOUCHES,
+   not per block that exists, which is the same bargain the paged grid already
+   made one rung down. */
+const PG_UNKNOWN = 255;                    // no material is 255; the table has ~80
+
+/* WHAT SHOULD BE HERE, asked of the universe and then remembered. A block that
+   comes out all one thing stays one byte; one the surface passes through gets
+   a page and its 512 cells. */
+function pgResolve(w, b, bx,by,bz){
+  const S = PGS*CELL_M;
+  const x0 = bx*S, y0 = by*S, z0 = bz*S;
+  /* nine samples: the centre and the eight corners. A block is uniform when
+     they all agree, and underground or high in the air they always do - which
+     is most of a planet. */
+  const c = universeAt(x0+S*0.5, y0+S*0.5, z0+S*0.5);
+  let uniform = true;
+  for(let k=0;k<8 && uniform;k++){
+    if(universeAt(x0+(k&1?S:0), y0+(k&2?S:0), z0+(k&4?S:0)) !== c) uniform = false;
+  }
+  if(uniform){ w.pgu[b] = c; return c; }
+  const pg = new Uint8Array(PGB);
+  for(let ly=0;ly<PGS;ly++) for(let lz=0;lz<PGS;lz++) for(let lx=0;lx<PGS;lx++)
+    pg[(ly<<(PGSH*2))|(lz<<PGSH)|lx] =
+      universeAt(x0+(lx+0.5)*CELL_M, y0+(ly+0.5)*CELL_M, z0+(lz+0.5)*CELL_M);
+  w.pg[b] = pg; w.pgn++;
+  w.pgu[b] = S_AIR;                        // it has cells; pgu is not consulted
+  return pg[0];
+}
 function cGet(w,x,y,z){
   const b = (((y+PGO)>>PGSH)*w.BD + ((z+PGO)>>PGSH))*w.BW + ((x+PGO)>>PGSH);
   const p = w.pg[b];
-  return p === null ? w.pgu[b] : p[((y&PGM)<<(PGSH*2)) | ((z&PGM)<<PGSH) | (x&PGM)];
+  if(p !== null) return p[((y&PGM)<<(PGSH*2)) | ((z&PGM)<<PGSH) | (x&PGM)];
+  const u = w.pgu[b];
+  if(u !== PG_UNKNOWN) return u;
+  /* NOBODY HAS BEEN HERE BEFORE, so ask the universe - once. This is the line
+     where "all is function until I get near" actually happens. */
+  pgResolve(w, b, (x>>PGSH), (y>>PGSH), (z>>PGSH));
+  const p2 = w.pg[b];
+  return p2 === null ? w.pgu[b] : p2[((y&PGM)<<(PGSH*2)) | ((z&PGM)<<PGSH) | (x&PGM)];
 }
 /* Make the block real. Idempotent, because demotion and the first write into a
    uniform block can arrive in either order. */
@@ -5208,7 +5321,7 @@ function cFault(w,b){
   if(p !== null) return p;
   p = new Uint8Array(PGB);
   const u = w.pgu[b];
-  if(u) p.fill(u, 0, PGC);
+  if(u && u !== PG_UNKNOWN) p.fill(u, 0, PGC);
   w.pg[b] = p; w.pgn++;
   return p;
 }
@@ -5396,6 +5509,16 @@ class SandWorld {
       for(let o=0;o<PGC;o++) if(p[o]===mat) n++;
     }
     return n;
+  }
+  /* THE WHOLE WINDOW BECOMES FUNCTION AGAIN. Every page is dropped and every
+     block is marked UNKNOWN, so nothing is stored and the first read of any
+     cell asks universeAt what belongs there. This is the streaming state: the
+     world costs a byte a block until he touches it, and what he touches costs
+     a page. Re-centring is this, applied to the slice that fell off the back. */
+  streamAll(){
+    if(this.pgn) this.pg.fill(null);
+    this.pgu.fill(PG_UNKNOWN);
+    this.pgn = 0;
   }
   /* EVERY BLOCK IS ROCK AGAIN, and every page it had is gone. */
   clearAll(){
@@ -13144,6 +13267,21 @@ function frame(now){
     /* HIS NUMBER, six hundred kilometres. Height above sea level is measured
        through gravity's sign, because down is +Y once the boss is dead. */
     gl.uniform1f(uS.R, PLANET_R);
+    /* THE SAME SIX NUMBERS THE GROUND IS BUILT FROM, handed to the shader so
+       the horizon and the ground he is standing on are one shape. Positions go
+       across RELATIVE TO THE EYE, because 600 km in a float32 has metres of
+       slop in it and the difference is what he is looking at. */
+    {
+      const pb = (typeof bodyPlanet==='function' && bodyPlanet()) || null;
+      const gi = (typeof geoOf==='function' && geoOf() && geoOf().isle) || null;
+      const ey = eyeY();
+      if(pb && gi){
+        gl.uniform3f(uS.PC,   pb.x-P.x, pb.y-ey, pb.z-P.z);
+        gl.uniform3f(uS.FEAT, pb.fx-P.x, (pb.y-pb.R)-ey, pb.fz-P.z);
+        gl.uniform4f(uS.ISA, gi.r, gi.h, gi.beach, gi.seaR);
+        gl.uniform2f(uS.ISB, gi.seaD, gi.plain);
+      }
+    }
     gl.uniform1f(uS.H, Math.max(0.5, (G.seaY*BLOCK - eyeY()) * -gsign()));
     gl.uniform3fv(uS.sunDir, _sun);
     gl.uniform3fv(uS.moonDir, _moon);
