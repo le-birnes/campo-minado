@@ -716,7 +716,7 @@ body.world .stat.foe-only{ display:flex !important; }
 /* ==========================================================================
    0. WORLD CONSTANTS — real proportions
    ========================================================================== */
-/* MAP world-constants-real · 75 lines · surface: ALT_SHOW, BLOCK, EYE, GRAV, P_H, P_R, eyeOff, eyeY +1 · uses: 5. GAME STATE(1), THE LAYOUT - clusters, wei(1), 14. LOOP(1), THE UNIVERSE, AND IT IS ON(1) · used by: THE MINE INSIDE THE BLOCK(6), AND YOU CAN SEE THE RUNGS(4), 11. PHYSICS AND COLLISION(4), THE DRAW: THE SKY(3) +38 */
+/* MAP world-constants-real · 80 lines · surface: ALT_SHOW, BLOCK, EYE, GRAV, P_H, P_R, SUB_MAX, eyeOff +2 · uses: 14b. THE FRAME - the tick(1), 5. GAME STATE(1), THE LAYOUT - clusters, wei(1), 14. LOOP(1) +1 · used by: THE MINE INSIDE THE BLOCK(6), 11. PHYSICS AND COLLISION(5), AND YOU CAN SEE THE RUNGS(4), THE DRAW: THE SKY(3) +38 */
 const P_H     = 2.0;    // altura do personagem
 /* One face is 1.4 of you, not 2. At 4 m a cube read as architecture rather than
    as a block: standing in a one-cell corridor you could not see over anything,
@@ -778,6 +778,11 @@ function eyeY(){ return P.y + eyeOff(); }
    walking about on an island and the answer is always "about four metres",
    which is a readout that only teaches you to stop looking at it. */
 const ALT_SHOW = 500;
+/* HOW MANY SUBSTEPS ONE FRAME OF MOVEMENT IS ALLOWED. 96 of them at 40 cm
+   is 38 m in a frame, which is 2,300 m/s - past that a step is longer than
+   a block and a thin wall can be missed. It is the ceiling on the WORK,
+   which is the thing that has to be finite; the speed does not. */
+const SUB_MAX = 96;
 const GRAV    = 20.0;   // m/s^2 (heavy, so jumps do not float)
 /* GRAVITY IS NO LONGER A CONSTANT, it is a constant times something you can
    change. Not yet a vector — down is still -Y everywhere — but the MAGNITUDE
@@ -873,7 +878,7 @@ function gnow(){ return GRAV * (G.gravK === undefined ? 1 : G.gravK); }
    THE PLANET CARRIES THE DONUT. Its geoid has an island at a feature point,
    a ring of sea around it and mainland beyond - and the moon's geoid has none
    of that, because a moon is plain. Same function, different roll. */
-/* MAP universe-function · 201 lines · surface: BODIES, bodyH, bodyPlanet, geoH, geoMat, geoOf, gravAt, gsign +2 · uses: WHAT IT DOES TO YOU(8), 0. WORLD CONSTANTS — real (3), THE SKY, THE SUN, THE MOON(2), 14b. THE FRAME - the tick(1) +5 · used by: THE DRAW: THE SKY(3), THE REVEAL - what you were(3), 11. PHYSICS AND COLLISION(2), THE SKY, THE SUN, THE MOON(2) +14 */
+/* MAP universe-function · 201 lines · surface: BODIES, bodyH, bodyPlanet, geoH, geoMat, geoOf, gravAt, gsign +2 · uses: WHAT IT DOES TO YOU(8), 0. WORLD CONSTANTS — real (3), THE SKY, THE SUN, THE MOON(2), 14b. THE FRAME - the tick(1) +5 · used by: THE DRAW: THE SKY(3), THE REVEAL - what you were(3), AND YOU CAN SEE THE RUNGS(2), 11. PHYSICS AND COLLISION(2) +15 */
 const BODIES = [];
 function bodyPlanet(){ return BODIES[0]; }
 
@@ -2645,7 +2650,7 @@ const EBODY = ETYPES.map(bodyOf);
 /* ==========================================================================
    5. GAME STATE
    ========================================================================== */
-/* MAP game-state · 148 lines · surface: CELL_S, CLEAR_M, SPREAD, blocksBody, densExp, idx, inside, isSolidCell +1 · uses: WHICH WAY UP THE PLAYER IS(2), 14b. THE FRAME - the tick(1), 10. STAFF(1), 0. WORLD CONSTANTS — real (1) · used by: THE LAYOUT - clusters, wei(5), THE SAND STEP, AND DRAWING(4), 12. ACTIONS — shoot and fl(3), genWorld - THE ONE ENTRY P(3) +40 */
+/* MAP game-state · 161 lines · surface: CELL_S, CLEAR_M, SPREAD, blocksBody, densExp, idx, inside, isSolidCell +1 · uses: WHICH WAY UP THE PLAYER IS(2), WHAT IT DOES TO YOU(1), 14b. THE FRAME - the tick(1), 9b. SAND — voxel/sand.js, (1) +3 · used by: THE LAYOUT - clusters, wei(5), THE SAND STEP, AND DRAWING(4), 12. ACTIONS — shoot and fl(3), genWorld - THE ONE ENTRY P(3) +41 */
 const G = {
   state:'menu',          // menu | play | pause | over
   diff:0,
@@ -2743,7 +2748,20 @@ function blocksBody(x,y,z){
      solid, because a floor is not a wall. */
   if(!inside(x,y,z)){
     if(!G.island) return true;                 // sealed in, or playing the board
-    return y >= G.ny;                          // open sky and open sea; the seabed holds
+    /* AND PAST THE ARRAY THE PLANET IS STILL THERE. This used to answer
+       `y >= G.ny` - open sky above the stored patch and a floor only where the
+       seabed would be - which meant the built scenery was the only thing on the
+       world. Marcelo: "reaching the border of it makes me fall into a
+       'nothingness' from where I can enter or leave the water, the planet is
+       not being generated."
+       It IS generated, and always was: universeAt() is the one function that
+       says what is at any point in the universe, and "is there ground here" is
+       that question. The sky shader has been drawing this same terrain out to
+       the horizon the whole time from the same six numbers - so what you could
+       see and what you could stand on finally agree. */
+    const m = universeAt((x+0.5)*BLOCK, (y+0.5)*BLOCK, (z+0.5)*BLOCK);
+    const k = SMAT[m] && SMAT[m].k;
+    return m !== S_AIR && k !== K_LIQUID && k !== K_GAS;   // you swim in the rest
   }
   const st = G.st[idx(x,y,z)];
   if(st === AIR) return false;
@@ -4915,7 +4933,7 @@ const hellB   = makeCubeBatch(6000);
        Without it piles come out flatter along the diagonals, which is the same
        artefact as before wearing a different hat.
    ========================================================================== */
-/* MAP sand-voxel-sand · 158 lines · surface: AIR_MAX, CELL_M, FX_DUR, FX_NAME, HP_START, K_STATIC, LAT_DIV, LAT_M +16 · uses: THE PROMOTION LADDER - bea(3), 12. ACTIONS — shoot and fl(1), THE GAME SIDE: where the g(1), 11. PHYSICS AND COLLISION(1) +2 · used by: WHAT IT DOES TO YOU(15), AND YOU CAN SEE THE RUNGS(10), ONE CELL, ONE STEP - the f(7), THE PROMOTION LADDER - bea(7) +18 */
+/* MAP sand-voxel-sand · 158 lines · surface: AIR_MAX, CELL_M, FX_DUR, FX_NAME, HP_START, K_STATIC, LAT_DIV, LAT_M +16 · uses: THE PROMOTION LADDER - bea(3), 12. ACTIONS — shoot and fl(1), THE GAME SIDE: where the g(1), 11. PHYSICS AND COLLISION(1) +2 · used by: WHAT IT DOES TO YOU(15), AND YOU CAN SEE THE RUNGS(10), ONE CELL, ONE STEP - the f(7), THE PROMOTION LADDER - bea(7) +19 */
 /* THE THREE SCALES, and each number now answers only its own question.
 
      CELL  = BLOCK   4.5 m   the minesweeper unit: a mine, a safe block, a
@@ -5074,7 +5092,7 @@ const SM_MASS  = new Float32Array(256);   // kg of one bead, from density
    water in never. The status is one id, because a material in Noita does one
    thing to you - it is the combination of materials that gets complicated, and
    that complication belongs in the reaction table rather than here. */
-/* MAP does · 147 lines · surface: EVAP_BASE, EVAP_EVERY, HUMID, HUMID_DECAY, HUMID_PER, SM_BURN, SM_DMG, SM_DOUSE +24 · uses: 9b. SAND — voxel/sand.js, (15), INTEGRITY, AND MOMENTUM AS(2), 1. MATH(1) · used by: NOITA'S TABLE(25), ONE CELL, ONE STEP - the f(8), THE GAME SIDE: where the g(8), THE UNIVERSE, AND IT IS ON(8) +14 */
+/* MAP does · 147 lines · surface: EVAP_BASE, EVAP_EVERY, HUMID, HUMID_DECAY, HUMID_PER, SM_BURN, SM_DMG, SM_DOUSE +24 · uses: 9b. SAND — voxel/sand.js, (15), INTEGRITY, AND MOMENTUM AS(2), 1. MATH(1) · used by: NOITA'S TABLE(25), ONE CELL, ONE STEP - the f(8), THE GAME SIDE: where the g(8), THE UNIVERSE, AND IT IS ON(8) +15 */
 const SM_DMG  = new Float32Array(256);  // HP a second while you are in it
 const SM_FX   = new Uint8Array(256);    // the status it gives you
 const SM_BURN = new Uint8Array(256);    // does fire take it
@@ -5659,7 +5677,7 @@ function cBlockBulk(w, bx,by,bz){
    --------------------------------------------------------------------------
    The object every bead lives in: pages, chunks, wake bits, and the stats the log reads.
    ========================================================================== */
-/* MAP sandworld-grid-itself · 173 lines · surface: SandWorld · uses: THE PAGED CELL STORE — why(4), 9b. SAND — voxel/sand.js, (4), STREAMING: the array is a (4), WHAT IT DOES TO YOU(3) +4 · used by: THE BLOCK BECOMES BEADS - (1), THE PROMOTION LADDER - bea(1) */
+/* MAP sandworld-grid-itself · 175 lines · surface: SandWorld · uses: THE PAGED CELL STORE — why(4), 9b. SAND — voxel/sand.js, (4), STREAMING: the array is a (4), 12. ACTIONS — shoot and fl(1) +5 · used by: THE BLOCK BECOMES BEADS - (1), THE PROMOTION LADDER - bea(1) */
 class SandWorld {
   constructor(W,H,D){
     this.W=W; this.H=H; this.D=D;
@@ -5717,9 +5735,11 @@ class SandWorld {
      so the sealed dungeon is unchanged. */
   at(x,y,z){
     if(this.inBox(x,y,z)) return cGet(this,x,y,z);
-    if(G.island && y < G.ny*SAND_DIV){
-      return y >= G.seaY*SAND_DIV ? S_SALT : S_AIR;
-    }
+    /* THE SAME ANSWER blocksBody GIVES, from the same function. It used to say
+       "brine below the waterline, air above it", which is a picture of an ocean
+       rather than a world, and it disagreed with what was drawn at the horizon.
+       One owner: universeAt(). */
+    if(G.island) return universeAt((x+0.5)*CELL_M, (y+0.5)*CELL_M, (z+0.5)*CELL_M);
     return S_ROCK;
   }
   /* the raw write, without waking anything: for builders and harnesses */
@@ -6404,7 +6424,7 @@ const SAND_DRAW_R = BLOCK*11;              // chunks past this are not drawn
    Loose material - a heap of sand, a spill - keeps the full bead radius,
    because it has no rung above bead to go to. Only what has been PROMOTED
    changes size, which means the size you see is the rung it is on. */
-/* MAP can-see-rungs · 232 lines · surface: LAD_MASS_R, SAND_BEAD_R, SAND_CHUNKS, SAND_DRAW_MAX, SAND_HZ, V_MAX, V_UNIT, sandAcc +5 · uses: 9b. SAND — voxel/sand.js, (10), WHAT IT DOES TO YOU(6), 0. WORLD CONSTANTS — real (4), ONE CELL, ONE STEP - the f(1) +13 · used by: THE SAND STEP, AND DRAWING(7), THE PROMOTION LADDER - bea(4), ONE CELL, ONE STEP - the f(2), 11. PHYSICS AND COLLISION(2) +6 */
+/* MAP can-see-rungs · 237 lines · surface: LAD_MASS_R, SAND_BEAD_R, SAND_CHUNKS, SAND_DRAW_MAX, SAND_HZ, V_MAX, V_UNIT, sandAcc +5 · uses: 9b. SAND — voxel/sand.js, (10), WHAT IT DOES TO YOU(6), 0. WORLD CONSTANTS — real (4), THE UNIVERSE, AND IT IS ON(2) +13 · used by: THE SAND STEP, AND DRAWING(7), THE PROMOTION LADDER - bea(4), ONE CELL, ONE STEP - the f(2), 11. PHYSICS AND COLLISION(2) +6 */
 const SAND_BEAD_R = 10.0;             // promoted material past this is a cube
 const LAD_MASS_R  = 42.0;              // and past this the whole body is one box
 const SAND_DRAW_MAX = 22000;               // instances the sand layer may spend
@@ -6469,8 +6489,13 @@ function sandLoad(dt){
     let n=0, hit=0, dens=0, stick=0, dmg=0, fx=0;
     for(let y=y0;y<=y1;y++) for(let z=z0;z<=z1;z++) for(let x=x0;x<=x1;x++){
       n++;
-      if(!w.inBox(x,y,z)) continue;
-      const m=cGet(w,x,y,z);
+      /* w.at(), NOT cGet() AND A SKIP. Outside the stored array this walk used
+         to count nothing, so a man standing in forty metres of ocean two
+         hundred metres past the edge was bone dry: no buoyancy, no drowning,
+         no swimming. at() asks universeAt() out there, which is the same
+         function the collision and the horizon now ask, so being wet and being
+         held up finally come from one place. */
+      const m=w.at(x,y,z);
       if(m===S_AIR || m===S_ROCK || SM_K[m]===K_STATIC) continue;
       hit++; dens += SM_D[m]; stick += SM_STICK[m];
       /* WHAT IT DOES TO YOU, read out of the same walk that already knows what
@@ -8355,7 +8380,7 @@ function buildViewModel(t, speed, aspect){
 /* ==========================================================================
    11. PHYSICS AND COLLISION
    ========================================================================== */
-/* MAP physics-collision · 168 lines · surface: physics · uses: 0. WORLD CONSTANTS — real (4), WHICH WAY UP THE PLAYER IS(3), AND YOU CAN SEE THE RUNGS(2), THE LONG SHOT(2) +8 · used by: THE DRAW: THE CUBE PASSES(1), THE ENDING — the boss blow(1), 14b. THE FRAME - the tick(1), GRIT - a bead in flight, a(1) +9 */
+/* MAP physics-collision · 169 lines · surface: physics · uses: 0. WORLD CONSTANTS — real (5), WHICH WAY UP THE PLAYER IS(3), AND YOU CAN SEE THE RUNGS(2), THE LONG SHOT(2) +9 · used by: THE DRAW: THE CUBE PASSES(1), THE ENDING — the boss blow(1), 14b. THE FRAME - the tick(1), GRIT - a bead in flight, a(1) +9 */
 function collideAxis(axis, delta){
   if(delta===0) return false;
   if(axis===0) P.x+=delta; else if(axis===1) P.y+=delta; else P.z+=delta;
@@ -8483,17 +8508,18 @@ function physics(dt){
     /* dry: the planet alone, on all three axes */
     P.vx += GV[0]*dt; P.vy += GV[1]*dt; P.vz += GV[2]*dt;
   }
-  /* THE SPEED CEILING IS A TUNNELLING GUARD, NOT A SPEED LIMIT, and at sixty
-     it would have eaten the long shot whole - a thousand metres a second
-     clamped to sixty is a jump. The substep count below is what actually stops
-     anything passing through a wall, and it scales with the speed, so the
-     ceiling only has to be high enough that the arithmetic stays sane. */
-  if(P.vy < -1400) P.vy = -1400;
-  if(P.vy >  1400) P.vy =  1400;
-
-  // substeps so we cannot tunnel through a block
+  /* NO SPEED LIMIT. Marcelo: "remove max speed."
+     There was a ceiling of 1400 m/s on the vertical, and before that sixty, and
+     it was always the wrong thing to bound. What has to stay finite is the
+     WORK, not the speed: the substeps below are what stop you passing through a
+     wall, and one per 40 cm means a man doing ten kilometres a second asks for
+     four thousand of them and the frame stops.
+     So the COUNT is capped instead. Below about two kilometres a second nothing
+     changes and you cannot tunnel; above it a step is longer than a block and
+     you can pass through a thin one - and at those speeds you are in space,
+     where there is nothing thin to pass through. */
   const dist = Math.hypot(P.vx+P.kx, P.vy, P.vz+P.kz)*dt;
-  const steps = Math.max(1, Math.ceil(dist/0.4));
+  const steps = Math.min(SUB_MAX, Math.max(1, Math.ceil(dist/0.4)));
   const sdt = dt/steps;
   let grounded=false;
   for(let s=0;s<steps;s++){
@@ -13666,7 +13692,7 @@ function logDump(why){
    --------------------------------------------------------------------------
    Everything that happens to the world in one frame, before any of it is drawn.
    ========================================================================== */
-/* MAP frame-tick · 104 lines · surface: frame · uses: 13. INTERFACE(5), TORCHES(4), 13b. GAMEPAD — built again(3), 12. ACTIONS — shoot and fl(2) +20 · used by: 12. ACTIONS — shoot and fl(1), THE BLACK BOX(1), 15. BOOT(1), THE CAMERA - where the eye(1) +25 */
+/* MAP frame-tick · 104 lines · surface: frame · uses: 13. INTERFACE(5), TORCHES(4), 13b. GAMEPAD — built again(3), 12. ACTIONS — shoot and fl(2) +20 · used by: 12. ACTIONS — shoot and fl(1), THE BLACK BOX(1), 15. BOOT(1), THE CAMERA - where the eye(1) +27 */
 function frame(now){
   requestAnimationFrame(frame);
   let dt = Math.min(0.05, (now-last)/1000); last=now;
