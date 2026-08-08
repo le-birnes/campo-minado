@@ -38,9 +38,9 @@ setTimeout(()=>{ try{
            (h>=0?'+':'') + h.toFixed(1) + ' m, ' +
            (h < 0 ? 'UNDER WATER' : 'dry') + ', made of ' + nm(m));
   }
-  const gg = geoOf();
-  R.push('  so: island to ' + gg.isleR.toFixed(0) + ' m, beach to ' + gg.beachR.toFixed(0) +
-         ', a donut of sea ' + gg.donutD.toFixed(0) + ' m deep out to ' + (gg.donutR/1000).toFixed(1) +
+  const gg = geoOf().isle;
+  R.push('  so: island to ' + gg.r.toFixed(0) + ' m, beach to ' + gg.beach.toFixed(0) +
+         ', a donut of sea ' + gg.seaD.toFixed(0) + ' m deep out to ' + (gg.seaR/1000).toFixed(1) +
          ' km, then plain dirt for ever ' +
          (geoH(0)>0 && geoH(5000)<0 && geoH(40000)>0
           ? 'ok, THE DONUT IS THERE' : 'FAULT: that is not a donut'));
@@ -50,8 +50,8 @@ setTimeout(()=>{ try{
     const m = geoMat(cx, b.y - (b.R + geoH(0) - dep), cz);
     R.push('  ' + String(dep).padStart(7) + ' m down: ' + nm(m));
   }
-  R.push('  crust: ' + gg.layers.map(l=>SMAT[l.m].n+' '+l.d.toFixed(0)+'m').join(' > ') +
-         ' > rock to ' + (gg.coreF*100).toFixed(0) + '% of the radius, then lava ' +
+  R.push('  crust: ' + geoOf().layers.map(l=>SMAT[l.m].n+' '+l.d.toFixed(0)+'m').join(' > ') +
+         ' > rock to ' + (geoOf().coreF*100).toFixed(0) + '% of the radius, then lava ' +
          (geoMat(cx,b.y-b.R*0.3,cz)===S_LAVA ? 'ok, THERE IS A CORE' : 'FAULT'));
 
   R.push('AND ABOVE: ' + [1, 100, 5000].map(h =>
@@ -81,14 +81,14 @@ setTimeout(()=>{ try{
   for(const sd of [1,2,3,4,5]){
     seed = sd; genWorld(0); worldBodies();
     const g = geoOf();
-    const key = [g.isleR|0, g.donutR|0, g.donutD|0, g.layers.length].join('/');
+    const key = [g.isle.r|0, g.isle.seaR|0, g.isle.seaD|0, g.layers.length].join('/');
     seen.add(key);
-    R.push('  seed ' + sd + ': island r=' + g.isleR.toFixed(0) + ' m h=' + g.isleH.toFixed(0) +
-           ', sea out to ' + (g.donutR/1000).toFixed(1) + ' km, ' + g.donutD.toFixed(0) +
-           ' m deep, mainland +' + g.plainH.toFixed(0) +
+    R.push('  seed ' + sd + ': island r=' + g.isle.r.toFixed(0) + ' m h=' + g.isle.h.toFixed(0) +
+           ', sea out to ' + (g.isle.seaR/1000).toFixed(1) + ' km, ' + g.isle.seaD.toFixed(0) +
+           ' m deep, mainland +' + g.isle.plain.toFixed(0) +
            ', core at ' + (g.coreF*100).toFixed(0) + '%' +
            ' | crust: ' + g.layers.map(l=>(SMAT[l.m].n)+' '+l.d.toFixed(0)+'m').join(' > ') + ' > rock > lava' +
-           ' | moon r=' + (g.moonR*100).toFixed(0) + '% at ' + g.moonD.toFixed(0) + 'R');
+           ' | moon r=' + (GEO_ROLL.moonR*100).toFixed(0) + '% at ' + GEO_ROLL.moonD.toFixed(0) + 'R');
   }
   R.push('  ' + seen.size + ' of 5 are different ' +
          (seen.size === 5 ? 'ok, EVERY RUN IS ITS OWN PLANET' : 'FAULT: they repeat'));
@@ -100,6 +100,29 @@ setTimeout(()=>{ try{
          (geoH(500)===h1 && geoMat(1000,1000,1000)===m1
           ? 'is unchanged ok, THE GROUND HOLDS STILL WHILE HE IS ON IT'
           : 'MOVED - FAULT'));
+
+  /* ---- AND IT IS ONE FUNCTION FOR EVERY BODY --------------------------- */
+  seed = 7; genWorld(0); worldBodies();
+  const pl = BODIES[0], mo = BODIES[1];
+  R.push('ONE FUNCTION, TWO WORLDS:');
+  for(const bb of BODIES){
+    const rows = [];
+    for(const dep of [-100, 1, 20, 200, 100000]){
+      const rr = bb.R + bodyH(bb,0) - dep;
+      rows.push((dep<0?('+'+(-dep)+' up'):(dep+' down')) + ' ' +
+                nm(universeAt(bb.x, bb.y - rr, bb.z)));
+    }
+    R.push('  ' + bb.n.padEnd(7) + 'R=' + (bb.R/1000).toFixed(0) + ' km, g=' + bb.g.toFixed(1) +
+           ', crust ' + bb.geo.layers.map(l=>SMAT[l.m].n).join('>') +
+           ' | ' + rows.join(', '));
+  }
+  R.push('  the moon is solid and made of layers ' +
+         (universeAt(mo.x, mo.y-mo.R+5, mo.z)!==S_AIR &&
+          universeAt(mo.x, mo.y-mo.R-50, mo.z)===S_AIR
+          ? 'ok, YOU COULD LAND ON IT AND DIG IT' : 'FAULT'));
+  R.push('  and between them is space: ' +
+         nm(universeAt(pl.x, pl.y - pl.R*3, pl.z)) + ' ' +
+         (universeAt(pl.x, pl.y-pl.R*3, pl.z)===S_AIR ? 'ok' : 'FAULT'));
   R.push(window.__err.length ? ('FAULT '+window.__err.join(' | ')) : 'no errors');
   document.body.dataset.r=R.join(' ~ ');
 }catch(err){ document.body.dataset.r='THREW: '+err.message; }}, 300);
