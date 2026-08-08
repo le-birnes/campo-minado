@@ -1756,8 +1756,17 @@ uniform vec2  uIsleB;                 // seaD, plain
 uniform float uPhase;                 // cos of the sun-moon angle: the moon's phase
 out vec4 frag;
 
-const float ATM    = 70000.0;         // where the air runs out
-const float HSC    =  7000.0;         // and how fast it thins on the way up
+/* HOW HIGH THE AIR GOES, and it is his specification exactly:
+   "Atmosphere should be at around 10km high ... 100km should be the actual
+   limit between 'in the planet' and 'in space'. 3/4 of the 'air' is below
+   10km, and the other 1/4 is spread in the next 90km."
+   Both numbers are one number, because the air is exponential: the fraction
+   below 10 km is 1 - exp(-10000/HSC), and three quarters of it means
+   HSC = 10000/ln(4) = 7213 m. Nothing is tuned to taste here; the scale
+   height IS the three-quarters rule, and 100 km is where what is left has
+   fallen to one part in a million and space begins. */
+const float ATM    = 100000.0;        // the Karman line: above this, space
+const float HSC    =   7213.0;        // three quarters of the air below 10 km
 const float OD_F   =  2400.0;         // how much air makes a full sky
 const float OD_H   = 55000.0;         // and how much makes it horizon-coloured
 const float BETA_S = 1.05e-4;         // what the air does to what is behind it
