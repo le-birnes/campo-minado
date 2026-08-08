@@ -1697,6 +1697,17 @@ uniform float uNight;                 // 0 day, 1 night - how many stars
    sits at sqrt(2*R*h) - 2.8 km from an eye 2 m up, 78 km from five hundred -
    and it curves, and as you climb it closes into a disc and then a ball. */
 uniform float uR;                     // planet radius, metres
+/* THE HORIZON IS THE PLANET, NOT A PICTURE OF ONE.
+   uPC is the planet's centre and uFeat the island's, both RELATIVE TO THE EYE,
+   and uIsleA/uIsleB are this run's own island: its radius, its height, where
+   the beach finishes, how far the sea reaches, how deep it is, and how high
+   the mainland stands beyond it. The same six numbers the ground is built
+   from. So what he sees at the horizon is the terrain, marched - the donut of
+   sea, its far rim, and the mainland rising past it - rather than a coloured
+   line at eye level pretending to be a world. */
+uniform vec3  uPC, uFeat;
+uniform vec4  uIsleA;                 // r, h, beach, seaR
+uniform vec2  uIsleB;                 // seaD, plain
 uniform float uH;                     // how far the eye is above sea level
 uniform float uPhase;                 // cos of the sun-moon angle: the moon's phase
 out vec4 frag;
@@ -1708,6 +1719,14 @@ float h31(vec3 p){
   return fract(p.x*p.y*p.z*(p.x+p.y+p.z));
 }
 
+/* the same curve as bodyH(), in the shader, because there is only one shape */
+float isleH(float d){
+  float r=uIsleA.x, h=uIsleA.y, be=uIsleA.z, sR=uIsleA.w, sD=uIsleB.x, pl=uIsleB.y;
+  if(d < r){ float t=d/r; return h*(1.0-t*t); }
+  if(d < be){ float t=(d-r)/max(be-r,1.0); return h*(1.0-t)*(1.0-t) - sD*t*t; }
+  if(d < sR){ float t=(d-be)/max(sR-be,1.0); float t4=t*t*t*t; return -sD + (sD+pl)*t4; }
+  return pl;
+}
 void main(){
   vec3 dir = normalize(uFwd + uRight*(vNDC.x*uTan.x) + uUpv*(vNDC.y*uTan.y));
   float h = dot(dir, uWorldUp);                    // +1 straight up, -1 straight down
@@ -1728,11 +1747,36 @@ void main(){
   float seaT = -1.0;
   if(dq > 0.0){ float t = bq - sqrt(dq); if(t > 0.0) seaT = t; }
   if(seaT > 0.0){
-    /* AND IT FADES INTO ITS OWN HORIZON: fifteen kilometres of air turns any
-       sea the colour of the sky, which is why a far coast is a smudge. So the
-       far edge needs no line drawn on it. */
-    vec3 water = mix(uSea, uSea*0.35, clamp(-h*2.2, 0.0, 1.0));
-    col = mix(water, uHoriz, clamp(1.0 - exp(-seaT/15000.0), 0.0, 1.0));
+    /* MARCH THE GROUND. The sphere hit is only the FAR BOUND - the sea's own
+       level - and the land can stand above it or fall below it, so the ray is
+       walked and the first step that goes under the surface is the ground.
+       Geometric steps: detail past a few hundred metres is under a pixel, and
+       the horizon is 2.8 km from an eye two metres up. */
+    float landT = -1.0, lh = 0.0;
+    float t = 2.0, prev = 0.0;
+    for(int i=0;i<96;i++){
+      if(t >= seaT) break;
+      vec3 q = dir*t;                                   // relative to the eye
+      vec3 rel = q - uPC;                               // relative to the centre
+      vec3 fr  = q - uFeat;
+      float dd = length(fr - uWorldUp*dot(fr, uWorldUp));   // along the surface
+      float hh = isleH(dd);
+      if(length(rel) < uR + hh){ landT = mix(prev, t, 0.5); lh = hh; break; }
+      prev = t;
+      t += max(2.0, t*0.09);
+    }
+    if(landT > 0.0){
+      /* SAND AT THE WATERLINE, DIRT ABOVE IT, and the whole thing goes to the
+         horizon's colour with distance, because that is what air does. */
+      vec3 sand = vec3(0.62,0.54,0.38), soil = vec3(0.34,0.30,0.20);
+      vec3 land = mix(sand, soil, clamp(lh/22.0, 0.0, 1.0));
+      col = mix(land, uHoriz, clamp(1.0 - exp(-landT/9000.0), 0.0, 1.0));
+    } else {
+      /* AND IT FADES INTO ITS OWN HORIZON: fifteen kilometres of air turns any
+         sea the colour of the sky, which is why a far coast is a smudge. */
+      vec3 water = mix(uSea, uSea*0.35, clamp(-h*2.2, 0.0, 1.0));
+      col = mix(water, uHoriz, clamp(1.0 - exp(-seaT/15000.0), 0.0, 1.0));
+    }
   } else if(h <= 0.0){
     col = mix(uHoriz, uZenith*0.30, clamp(uH/60000.0, 0.0, 1.0));
   }
@@ -1794,7 +1838,9 @@ const uS = {
   sea:gl.getUniformLocation(pSky,'uSea'), sunCol:gl.getUniformLocation(pSky,'uSunCol'),
   moonCol:gl.getUniformLocation(pSky,'uMoonCol'),
   night:gl.getUniformLocation(pSky,'uNight'), phase:gl.getUniformLocation(pSky,'uPhase'),
-  R:gl.getUniformLocation(pSky,'uR'), H:gl.getUniformLocation(pSky,'uH')
+  R:gl.getUniformLocation(pSky,'uR'), H:gl.getUniformLocation(pSky,'uH'),
+  PC:gl.getUniformLocation(pSky,'uPC'), FEAT:gl.getUniformLocation(pSky,'uFeat'),
+  ISA:gl.getUniformLocation(pSky,'uIsleA'), ISB:gl.getUniformLocation(pSky,'uIsleB')
 };
 const skyVAO = gl.createVertexArray();
 
@@ -13155,6 +13201,21 @@ function frame(now){
     /* HIS NUMBER, six hundred kilometres. Height above sea level is measured
        through gravity's sign, because down is +Y once the boss is dead. */
     gl.uniform1f(uS.R, PLANET_R);
+    /* THE SAME SIX NUMBERS THE GROUND IS BUILT FROM, handed to the shader so
+       the horizon and the ground he is standing on are one shape. Positions go
+       across RELATIVE TO THE EYE, because 600 km in a float32 has metres of
+       slop in it and the difference is what he is looking at. */
+    {
+      const pb = (typeof bodyPlanet==='function' && bodyPlanet()) || null;
+      const gi = (typeof geoOf==='function' && geoOf() && geoOf().isle) || null;
+      const ey = eyeY();
+      if(pb && gi){
+        gl.uniform3f(uS.PC,   pb.x-P.x, pb.y-ey, pb.z-P.z);
+        gl.uniform3f(uS.FEAT, pb.fx-P.x, (pb.y-pb.R)-ey, pb.fz-P.z);
+        gl.uniform4f(uS.ISA, gi.r, gi.h, gi.beach, gi.seaR);
+        gl.uniform2f(uS.ISB, gi.seaD, gi.plain);
+      }
+    }
     gl.uniform1f(uS.H, Math.max(0.5, (G.seaY*BLOCK - eyeY()) * -gsign()));
     gl.uniform3fv(uS.sunDir, _sun);
     gl.uniform3fv(uS.moonDir, _moon);

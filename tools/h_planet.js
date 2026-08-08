@@ -10,9 +10,10 @@ window.addEventListener('error',e=>window.__err.push('ERR '+e.message));
 setTimeout(()=>{ try{
   G.muted=true; try{ snd.setMute(true); }catch(e){}
   const R=[];
-  R.push('sky program links: ' + (pSky ? 'yes' : 'NO') +
-         ' | uR ' + (uS.R ? 'bound' : 'NOT BOUND') +
-         ' | uH ' + (uS.H ? 'bound' : 'NOT BOUND'));
+  R.push('sky links: ' + (pSky?'yes':'NO') + ' | bound: ' +
+    ['R','H','PC','FEAT','ISA','ISB'].map(k=>k+'='+(uS[k]?'y':'N')).join(' ') +
+    '  (a uniform reads N when the shader failed to compile, or when the'
+    + ' compiler dropped it because nothing used it)');
   R.push('planet radius ' + (PLANET_R/1000) + ' km');
   /* the horizon distance is sqrt(2*R*h), and it is the number that says
      whether climbing means anything */
