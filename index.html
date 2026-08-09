@@ -1395,7 +1395,7 @@ const wrange = (lo,hi) => lo + ((wrnd()*(hi-lo+1))|0);
 /* ==========================================================================
    2. WEBGL — context and programs
    ========================================================================== */
-/* MAP webgl-context-programs · 320 lines · surface: canvas, pBB, pCube, prog · uses: 12. ACTIONS — shoot and fl(1), 9. DRAW BATCHES(1), 12c. DUNGEON MODE — the th(1), 14b. THE FRAME - the tick(1) +4 · used by: THE SKY, THE SUN, THE MOON(3), THE CREATURE FORGE(1), THE DRAW: THE BILLBOARD PA(1), THE DRAW: THE CUBE PASSES(1) +13 */
+/* MAP webgl-context-programs · 331 lines · surface: canvas, pBB, pCube, prog · uses: 12. ACTIONS — shoot and fl(1), 9. DRAW BATCHES(1), 12c. DUNGEON MODE — the th(1), 14b. THE FRAME - the tick(1) +4 · used by: THE SKY, THE SUN, THE MOON(3), THE CREATURE FORGE(1), THE DRAW: THE BILLBOARD PA(1), THE DRAW: THE CUBE PASSES(1) +13 */
 const canvas = document.getElementById('gl');
 const gl = canvas.getContext('webgl2', {antialias:true, alpha:false, powerPreference:'high-performance'});
 if(!gl){ document.getElementById('nogl').style.display='grid'; return; }
@@ -1449,6 +1449,7 @@ in vec3 vN, vW, vC, vHi;
 in vec2 vUV;
 in float vSeed, vEmis, vMark, vEcho, vHover;
 uniform vec3 uCam, uSun, uFog;
+uniform vec2 uFogK;      // how thick the air is: scale, then power
 uniform vec3 uSunC;      // the colour of the key light, which is the sun's
 uniform float uTime, uOutline, uAlpha, uWallGrey, uEdgeSolid;
 /* THE LIGHTS IN THE ROOM.
@@ -1627,7 +1628,17 @@ void main(){
   lit = mix(lit, lit*0.34, eg*0.62);
   lit += vHi * eg * halo * (0.55 + 0.45*ep) * 0.95;
 
-  float f = 1.0 - exp(-pow(d*0.0135, 2.0));
+  /* THE AIR IS THE AIR, and there is only one lot of it. This was
+     exp(-pow(d*0.0135, 2.0)) - a CAVE fog, squared, 63% gone at 74 m and
+     saturated by 150. Underground that is right; outdoors it meant every
+     surface past a hundred and fifty metres was one flat wash of uFog, so the
+     866 m of planet drawn past the array was invisible and the join between
+     the blocks and the sky shader's terrain was a colour step you could stand
+     on. He photographed it twice.
+     uFogK carries the scale and the power now, so the cave keeps its fog and
+     the open world gets the same curve the sky shader uses for the same
+     distance - because it is the same air. */
+  float f = 1.0 - exp(-pow(d*uFogK.x, uFogK.y));
   /* The husk a hatched mine leaves behind: the face fades out but the frame of
      the block stays solid, so the space it occupied is still legible. The edge
      term is 0 on the outline and 1 on the face, exactly the mask needed.
@@ -2071,7 +2082,7 @@ function skyStart(){ SKY_T0 = tGlobal; }
 const uC = {
   proj:gl.getUniformLocation(pCube,'uProj'), view:gl.getUniformLocation(pCube,'uView'),
   cam:gl.getUniformLocation(pCube,'uCam'),   sun:gl.getUniformLocation(pCube,'uSun'),
-  fog:gl.getUniformLocation(pCube,'uFog'),   time:gl.getUniformLocation(pCube,'uTime'),
+  fog:gl.getUniformLocation(pCube,'uFog'),   fogK:gl.getUniformLocation(pCube,'uFogK'),   time:gl.getUniformLocation(pCube,'uTime'),
   sunC:gl.getUniformLocation(pCube,'uSunC'),
   hover:gl.getUniformLocation(pCube,'uHover'), outline:gl.getUniformLocation(pCube,'uOutline'),
   alpha:gl.getUniformLocation(pCube,'uAlpha'),
@@ -7921,7 +7932,7 @@ function gritStep(dt){
    --------------------------------------------------------------------------
    One pass of the simulation per frame, and the instance buffer that shows the result.
    ========================================================================== */
-/* MAP sand-step-drawing · 420 lines · surface: WD_MAX, rebuildWorld, sandDraw, sandStep · uses: AND YOU CAN SEE THE RUNGS(7), 4. CAVE MATERIALS(7), 9b. SAND — voxel/sand.js, (7), THE GAME SIDE: where the g(5) +20 · used by: THE CAMERA - where the eye(1), AND YOU CAN SEE THE RUNGS(1), THE DRAW: THE CUBE PASSES(1), 14b. THE FRAME - the tick(1) */
+/* MAP sand-step-drawing · 427 lines · surface: WD_MAX, rebuildWorld, sandDraw, sandStep · uses: AND YOU CAN SEE THE RUNGS(7), 4. CAVE MATERIALS(7), 9b. SAND — voxel/sand.js, (7), THE GAME SIDE: where the g(5) +20 · used by: THE CAMERA - where the eye(1), AND YOU CAN SEE THE RUNGS(1), THE DRAW: THE CUBE PASSES(1), 14b. THE FRAME - the tick(1) */
 function sandStep(dt){
   if(!SAND) return;
   gritStep(dt);
@@ -8312,8 +8323,15 @@ function rebuildWorld(){
           if(Math.abs(dx) < prev && Math.abs(dz) < prev) continue;
           /* snapped to the step, or the whole ring shimmers as he walks */
           const bx = Math.floor((pbx+dx)/step)*step, bz = Math.floor((pbz+dz)/step)*step;
-          if(bx+step > -1 && bx <= G.nx && bz+step > -1 && bz <= G.nz) continue;
           const wx = (bx + step*0.5)*BLOCK, wz = (bz + step*0.5)*BLOCK;
+          /* SKIPPED BY ITS CENTRE, NOT BY ITS EDGE. Testing whether any part of
+             the cell touched the array threw away every coarse cell that
+             merely overlapped it - a ring up to 36 m wide with nothing drawn in
+             it at all, which is the black trench in his photograph: water you
+             could swim in, with no blocks and no beads. Overlapping the array
+             by half a cell costs nothing, because both are the same surface at
+             the same height. A gap costs a hole in the world. */
+          if(wx > -BLOCK && wx < G.nx*BLOCK && wz > -BLOCK && wz < G.nz*BLOCK) continue;
           const h = bodyH(pb, Math.hypot(wx-pb.fx, wz-pb.fz));
           const s = ((bx*73856093 ^ bz*83492791)>>>0 % 1000)/1000;
           /* HALF OF ITS OWN SIZE, not half a block: an outer cube is 36 m on a
@@ -12637,7 +12655,7 @@ let last=performance.now(), nextWhisper=25+Math.random()*30, tGlobal=0;
 
    Lights ADD where they overlap, so two flags light a corner better than one.
    ========================================================================== */
-/* MAP lights-cave · 243 lines · surface: FLAG_IN, FLAG_OUT, FLY_LEVEL, FLY_R, FOE_IN, FOE_LEVEL, FOE_OUT, LIGHT_FLAG +19 · uses: 5. GAME STATE(2), 14. LOOP(2), 8. AUDIO — everything synt(1), 4b. ENEMY TYPES(1) +6 · used by: TORCHES(21), THE DRAW: THE CUBE PASSES(13), THE DRAW: THE BILLBOARD PA(4), 12. ACTIONS — shoot and fl(1) +5 */
+/* MAP lights-cave · 252 lines · surface: FLAG_IN, FLAG_OUT, FLY_LEVEL, FLY_R, FOE_IN, FOE_LEVEL, FOE_OUT, LIGHT_FLAG +20 · uses: 5. GAME STATE(2), 14. LOOP(2), 8. AUDIO — everything synt(1), 4b. ENEMY TYPES(1) +6 · used by: TORCHES(21), THE DRAW: THE CUBE PASSES(14), THE DRAW: THE BILLBOARD PA(4), DRAWING IT(2) +6 */
 /* All three are tunable from the URL — ?dark=0.06&lantern=0.05&glyph=0.06 —
    because "way darker" is a look, and a look is found by turning a knob and
    looking, not by a round trip through a rebuild. */
@@ -12710,6 +12728,15 @@ function darkNow(){
 
    Underground there is no sky, so the old constant stands: a cave lit from an
    imaginary sun is a lit room with rock textures in it. */
+/* HOW THICK THE AIR IS, for the cube shader. The sky shader's own veil is
+   1 - exp(-od/2400) over the same distance, so outdoors this IS that curve
+   and the two meet without a step. Underground it stays the cave's fog:
+   squared and gone by a hundred and fifty metres, which is what makes a
+   corridor a corridor. */
+function setFog(){
+  if(G.island) gl.uniform2f(uC.fogK, 1/2400, 1.0);
+  else         gl.uniform2f(uC.fogK, 0.0135, 2.0);
+}
 function setSunLight(SKY){
   if(!SKY){
     gl.uniform3fv(uC.sun, SUN);
@@ -13420,7 +13447,7 @@ function fzAxis(a){ FZ.axis = a; FZ.slice = Math.min(FZ.slice, fzSliceMax()); fz
    painting into a solid and cannot see the tip of the pencil. Orbit past the
    plane and the hidden half swaps sides on its own.
    ========================================================================== */
-/* MAP drawing · 112 lines · surface: fzFrame · uses: THE FORGE ITSELF(6), THE CREATURE FORGE(3), CUBE GEOMETRY AND THE INST(2), 1. MATH(2) +8 · used by: 14b. THE FRAME - the tick(1) */
+/* MAP drawing · 113 lines · surface: fzFrame · uses: THE FORGE ITSELF(6), THE CREATURE FORGE(3), CUBE GEOMETRY AND THE INST(2), WHAT LIGHTS THE CAVE(2) +8 · used by: 14b. THE FRAME - the tick(1) */
 function fzBuild(){
   const d = fzB.data; let n = 0;
   const pal = hellPalette(FZ.col);
@@ -13509,6 +13536,7 @@ function fzFrame(dt){
      shading turns with the day rather than being lit from a fixed corner. */
   setSunLight(SKY);
   gl.uniform3fv(uC.fog, FZ_BG);
+  setFog();
   gl.uniform1f(uC.time, tGlobal);
   gl.uniform1f(uC.outline, 1.30);
   gl.uniform1f(uC.alpha, 1.0);
@@ -14075,13 +14103,14 @@ function frame(now){
    --------------------------------------------------------------------------
    World, sand, fireflies, enemies, the boss, chests and ghost blocks, in that order.
    ========================================================================== */
-/* MAP draw-cube-passes · 387 lines · surface: - · uses: WHAT LIGHTS THE CAVE(13), 9. DRAW BATCHES(7), 4b. ENEMY TYPES(4), TORCHES(4) +22 · used by: - */
+/* MAP draw-cube-passes · 388 lines · surface: - · uses: WHAT LIGHTS THE CAVE(14), 9. DRAW BATCHES(7), 4b. ENEMY TYPES(4), TORCHES(4) +22 · used by: - */
   gl.useProgram(pCube);
   gl.uniformMatrix4fv(uC.proj,false,projMain);
   gl.uniformMatrix4fv(uC.view,false,viewM);
   gl.uniform3f(uC.cam, camX,camY,camZ);
   setSunLight(SKY);
   gl.uniform3fv(uC.fog, FOGNOW);
+  setFog();
   gl.uniform1f(uC.time, tGlobal);
   gl.uniform1f(uC.outline, 1.0);
   gl.uniform1f(uC.alpha, 1.0);
@@ -14753,7 +14782,7 @@ function frame(now){
    --------------------------------------------------------------------------
    The staff in the corner, drawn last and with its own projection.
    ========================================================================== */
-/* MAP draw-view-model · 28 lines · surface: - · uses: 14. LOOP(2), 12. ACTIONS — shoot and fl(1), CUBE GEOMETRY AND THE INST(1), 9. DRAW BATCHES(1) +4 · used by: - */
+/* MAP draw-view-model · 29 lines · surface: - · uses: 14. LOOP(2), 12. ACTIONS — shoot and fl(1), CUBE GEOMETRY AND THE INST(1), 9. DRAW BATCHES(1) +5 · used by: - */
   if(G.state==='play' || G.state==='pause'){
     gl.clear(gl.DEPTH_BUFFER_BIT);
     gl.useProgram(pCube);
@@ -14763,6 +14792,7 @@ function frame(now){
     gl.uniform3f(uC.hover, 1e9,1e9,1e9);
     gl.uniform1f(uC.outline, 0.55);
     gl.uniform3fv(uC.fog, FOG);
+    setFog();
     /* The thing in your hands is held at arm's length in its own little space,
        not standing in the cave, so the cave's lamps have no business reaching
        it — and at a metre away a flag would blow it out completely. */

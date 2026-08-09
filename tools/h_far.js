@@ -25,8 +25,11 @@ setTimeout(()=>{ try{
   const R=[];
   G.mode=MODE_WORLD; seed=5; genWorld(0); G.state='play'; G.noWin=true;
   const sy = G.seaY*BLOCK, gs = gsign();
-  const inArray = (x,z) => x > -BLOCK && x < (G.nx+1)*BLOCK &&
-                           z > -BLOCK && z < (G.nz+1)*BLOCK;
+  /* THE SAME LINE THE GAME SKIPS ON, or this counts the cubes that close the
+     join as if they were array cubes and then reports the join as a hole -
+     which it did, five metres of it, all of it in the filter. */
+  const inArray = (x,z) => x > -BLOCK && x < G.nx*BLOCK &&
+                           z > -BLOCK && z < G.nz*BLOCK;
 
   /* every cube in the batch, as {x,y,z,s} - the instance matrix is column
      major and composeAA puts the translation in 12..14 and the scale on the
@@ -116,7 +119,32 @@ setTimeout(()=>{ try{
             : 'FAULT: ' + wrong + ' wrong'));
   }
 
-  /* ---- 5. AND IT FITS ------------------------------------------------- */
+  /* ---- 5. NO GAP AT THE JOIN -------------------------------------------
+     He photographed a black trench between the stored patch and the drawn
+     planet: water he could swim in with nothing drawn in it. Walk a line out
+     across the boundary and check that every metre of it has SOMETHING - a
+     stored block or a far cube - covering it. */
+  {
+    P.x = (G.nx*0.5)*BLOCK; P.z = (G.nz*0.5)*BLOCK;
+    G.dirty = true; rebuildWorld();
+    const far = faCubes().filter(c=>!inArray(c.x,c.z));
+    const holes=[], zz = (G.nz*0.5)*BLOCK;
+    for(let x = (G.nx-2)*BLOCK; x < (G.nx+50)*BLOCK; x += 1.0){
+      if(x < G.nx*BLOCK) continue;                    // still inside the array
+      let covered = false;
+      for(const c of far){
+        if(Math.abs(c.x-x) <= c.s*0.5 && Math.abs(c.z-zz) <= c.s*0.5){ covered=true; break; }
+      }
+      if(!covered) holes.push(x.toFixed(0));
+    }
+    R.push('WALKING OUT ACROSS THE JOIN, metre by metre: ' + holes.length +
+           ' metres with nothing drawn over them' +
+           (holes.length ? ' (at x ' + holes.slice(0,6).join(',') + ')' : '') + ' ' +
+           (holes.length === 0 ? 'ok, NO TRENCH - the two meet with no gap'
+                               : 'FAULT: a hole ' + holes.length + ' m wide'));
+  }
+
+  /* ---- 6. AND IT FITS ------------------------------------------------- */
   R.push('THE BUDGET: ' + worldB.count + ' of ' + worldB.max + ' instances (' +
          (100*worldB.count/worldB.max).toFixed(0) + '%) ' +
          (worldB.count < worldB.max*0.9 ? 'ok, room to spare'
