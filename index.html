@@ -2661,7 +2661,7 @@ const EBODY = ETYPES.map(bodyOf);
 /* ==========================================================================
    5. GAME STATE
    ========================================================================== */
-/* MAP game-state · 161 lines · surface: CELL_S, CLEAR_M, SPREAD, blocksBody, densExp, idx, inside, isSolidCell +1 · uses: WHICH WAY UP THE PLAYER IS(2), WHAT IT DOES TO YOU(1), 14b. THE FRAME - the tick(1), 9b. SAND — voxel/sand.js, (1) +3 · used by: THE LAYOUT - clusters, wei(5), THE SAND STEP, AND DRAWING(4), 12. ACTIONS — shoot and fl(3), genWorld - THE ONE ENTRY P(3) +41 */
+/* MAP game-state · 161 lines · surface: CELL_S, CLEAR_M, SPREAD, blocksBody, densExp, idx, inside, isSolidCell +1 · uses: WHICH WAY UP THE PLAYER IS(2), WHAT IT DOES TO YOU(1), 14b. THE FRAME - the tick(1), 9b. SAND — voxel/sand.js, (1) +3 · used by: THE LAYOUT - clusters, wei(5), THE SAND STEP, AND DRAWING(4), 12. ACTIONS — shoot and fl(3), genWorld - THE ONE ENTRY P(3) +42 */
 const G = {
   state:'menu',          // menu | play | pause | over
   diff:0,
@@ -4158,7 +4158,7 @@ const snd = (function(){
    --------------------------------------------------------------------------
    Marcelo's own recordings, base64 at the foot of the file, decoded once on the first gesture.
    ========================================================================== */
-/* MAP real-shells-decoding · 208 lines · surface: - · uses: 14. LOOP(1), 2. WEBGL — context and pro(1) · used by: - */
+/* MAP real-shells-decoding · 245 lines · surface: - · uses: 5. GAME STATE(1), 14. LOOP(1), 2. WEBGL — context and pro(1) · used by: - */
   function bankLoad(){
     if(bankState !== 'cold') return;
     const B = window.SND_B64;
@@ -4361,13 +4361,50 @@ const snd = (function(){
   let mBus=null, mTimer=0, mStep=0, mNext=0, mTheme=null, mVol=0.16, mMuted=false;
   const SECTION_BARS = 32;
   let mVar=0, mSection=-1;
+  /* ======================================================================
+     RUBATO
+     ======================================================================
+     Swing moves the notes inside the beat. This moves the BEAT. A band does
+     not hold 120 for a minute: it leans forward when the music climbs and
+     sits back at the end of the sentence, and a clock that never does either
+     is the last thing in here that still sounds like a machine.
+
+     Three things breathe, each on its own length, and they add:
+       the phrase   four bars, one pass of the harmony. It pushes through the
+                    middle and eases into its last bar, so the cadence lands.
+       the section  thirty-two bars, the long sentence. It starts held back,
+                    climbs to its top seven-eighths of the way through, and
+                    spends the last phrase letting go into the turn.
+       the hands    a small wander from bar to bar that belongs to nobody.
+
+     How FAR it may move is the adrenaline of the phrase: how high the section
+     has climbed, times how busy the kick is. Two percent when it is calm,
+     five at the top of a dense section, and never past five. Every term is
+     continuous across the bar line, the phrase and the section turn, so the
+     tempo bends and never steps. */
+  const RUB_BASE = 0.02, RUB_PEAK = 0.05, RUB_TOP = 0.875;
+  const rubWander = b => { const x=Math.sin(b*12.9898)*43758.5453; return (x-Math.floor(x))*2-1; };
+  function rubato(T, V, barNo, s){
+    const pos = (barNo%SECTION_BARS) + s/16, u = pos/SECTION_BARS;
+    const long = u<RUB_TOP ? -Math.cos(Math.PI*u/RUB_TOP)
+                           :  Math.cos(Math.PI*(u-RUB_TOP)/(1-RUB_TOP));
+    /* Skewed late: the top of the push is past the middle of the phrase. */
+    const arc = -Math.cos(2*Math.PI*Math.pow((pos%4)/4, 1.3));
+    const w0 = rubWander(barNo), wander = w0 + (rubWander(barNo+1)-w0)*(s/16);
+    let hits=0; for(let i=0;i<16;i++) hits+=V.kick[i];
+    const dens = T.hell ? 1 : Math.min(1, hits/11);
+    const adrenaline = (long+1)/2 * (0.35+0.65*dens);
+    const depth = RUB_BASE + (RUB_PEAK-RUB_BASE)*adrenaline;
+    const m = 1 + depth*(0.55*arc + 0.35*long + 0.10*wander);
+    return Math.max(1-RUB_PEAK, Math.min(1+RUB_PEAK, m));
+  }
 
 /* ==========================================================================
    THE MUSIC
    --------------------------------------------------------------------------
    Two guitars, a snare, and a clock.
    ========================================================================== */
-/* MAP music · 439 lines · surface: - · uses: 12. ACTIONS — shoot and fl(1), 5. GAME STATE(1), THE LAST FLAG(1), 14. LOOP(1) +3 · used by: - */
+/* MAP music · 445 lines · surface: - · uses: 12. ACTIONS — shoot and fl(1), 5. GAME STATE(1), THE LAST FLAG(1), 14. LOOP(1) +3 · used by: - */
   function mEnsure(){
     if(!ensure()) return false;
     if(!mBus){ mBus = ac.createGain(); mBus.gain.value = mMuted?0:mVol; mBus.connect(ac.destination); }
@@ -4432,7 +4469,7 @@ const snd = (function(){
   }
   function mTick(){
     if(!mTheme || !mBus) return;
-    const T=mTheme, spb=60/T.bpm, sixteenth=spb/4;
+    const T=mTheme;
     while(mNext < ac.currentTime + 0.20){
       const t=mNext, s=mStep%16, barNo=(mStep/16)|0, bar=barNo%4;
       /* Every 32 bars, move to one of the other three sections. Never the one
@@ -4445,6 +4482,8 @@ const snd = (function(){
              : (mVar + 1 + ((Math.random()*(T.vars.length-1))|0)) % T.vars.length;
       }
       const V=T.vars[mVar];
+      /* The tempo of THIS sixteenth. Everything below is timed against it. */
+      const spb=60/(T.bpm*rubato(T, V, barNo, s)), sixteenth=spb/4;
       const chord = T.root*SEMI(V.prog[bar]);
       /* Rotated by different amounts so they do not all turn over together. */
       const BL = V.bass  || BASSLINES[(mVar + mSection)     % BASSLINES.length];
@@ -4516,6 +4555,10 @@ const snd = (function(){
     musicVol(v){ mVol=v; if(mBus) mBus.gain.value = mMuted?0:v; },
     musicMute(m){ mMuted=m; if(mBus) mBus.gain.value = m?0:mVol; },
     musicIsMuted(){ return mMuted; },
+    /* The tempo multiplier at one sixteenth, so the curve can be counted. */
+    rubato(themeIdx, varIdx, barNo, s){
+      const T=THEMES[themeIdx]; return rubato(T, T.vars[varIdx], barNo, s); },
+    themeBpm(themeIdx){ return THEMES[themeIdx] ? THEMES[themeIdx].bpm : 0; },
     /* A shotgun is not a drum, and the old one was a drum: a swept noise burst
        over a sine thump, both starting on the same sample and both gone in a
        fifth of a second. That is a kick with hiss on it, which is exactly what
