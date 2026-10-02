@@ -4158,7 +4158,7 @@ const snd = (function(){
    --------------------------------------------------------------------------
    Marcelo's own recordings, base64 at the foot of the file, decoded once on the first gesture.
    ========================================================================== */
-/* MAP real-shells-decoding · 245 lines · surface: - · uses: 5. GAME STATE(1), 14. LOOP(1), 2. WEBGL — context and pro(1) · used by: - */
+/* MAP real-shells-decoding · 287 lines · surface: - · uses: 5. GAME STATE(1), 14. LOOP(1), 2. WEBGL — context and pro(1) · used by: - */
   function bankLoad(){
     if(bankState !== 'cold') return;
     const B = window.SND_B64;
@@ -4173,9 +4173,34 @@ const snd = (function(){
          the promise one and this is the code path that decides whether the
          game has a gun sound at all. */
       ac.decodeAudioData(u.buffer,
-        b => { BANK[k] = b;  if(!--left) bankState = 'done'; },
+        b => { ONSET.set(b, onsetOf(b)); BANK[k] = b;  if(!--left) bankState = 'done'; },
         _ => { bankBad++;    if(!--left) bankState = 'done'; });
     }
+  }
+
+  /* WHERE THE SOUND STARTS, which is not where the file starts.
+     Marcelo: "the shotgun sound is with delay - after I click it takes some
+     ms to start."
+
+     Measured, rendered offline, trigger to first noise: 13 to 22 ms. Six of
+     it was the run-up the bake left in on purpose, the rest is what Opus
+     puts in front of a stream and what a take does before it gets going.
+     So find the first sample within 20 dB of the peak, step back half a
+     millisecond, and start playback THERE. Found once, at decode. */
+  const ONSET = new Map();         // AudioBuffer -> seconds to skip
+  function onsetOf(b){
+    let pk = 0, first = b.length;
+    for(let c=0;c<b.numberOfChannels;c++){
+      const d = b.getChannelData(c);
+      for(let i=0;i<d.length;i++){ const a = d[i]<0 ? -d[i] : d[i]; if(a>pk) pk = a; }
+    }
+    const th = pk*0.1;
+    for(let c=0;c<b.numberOfChannels;c++){
+      const d = b.getChannelData(c);
+      for(let i=0;i<first;i++) if(d[i]>=th || d[i]<=-th){ first = i; break; }
+    }
+    if(first >= b.length) return 0;
+    return Math.max(0, first/b.sampleRate - 0.0005);
   }
 
   /* One shell out of whatever has finished decoding, never the same one
@@ -4201,19 +4226,36 @@ const snd = (function(){
      catches pile-ups and is transparent below its threshold, which one shot
      never reaches.
 
+     It used to be a DynamicsCompressor, and a compressor LOOKS AHEAD: six
+     milliseconds of delay on every sound that went through it, the gun
+     included, to catch a pile-up that almost never happens. A curve has no
+     memory and so no delay. Straight line to -1 dBFS, a soft knee above it,
+     and it tops out at full scale. Halved going in and doubled coming out
+     so the curve has room for four shells at once.
+
      Keyed on the context because API.render swaps in an offline one, and
      connecting a node built on the live context to that is an error rather
      than a wrong number — the kind of bug that only shows up in the test
      rig and looks like the test rig is broken. */
-  let sfxFor = null, sfxBus = null;
+  let sfxFor = null, sfxBus = null, limC = null;
+  function limCurve(){
+    if(limC) return limC;
+    const n = 8193, T = 0.891, K = 1-T; limC = new Float32Array(n);
+    for(let i=0;i<n;i++){
+      const x = ((i/(n-1))*2-1)*2, a = Math.abs(x);     // the curve spans +-2
+      const y = a<=T ? a : T + K*Math.tanh((a-T)/K);
+      limC[i] = (x<0 ? -y : y)*0.5;
+    }
+    return limC;
+  }
   function sfx(){
     if(sfxFor === ac) return sfxBus;
     sfxFor = ac;
     sfxBus = ac.createGain(); sfxBus.gain.value = 1.0;
-    const lim = ac.createDynamicsCompressor();
-    lim.threshold.value = -1; lim.knee.value = 0; lim.ratio.value = 20;
-    lim.attack.value = 0.003; lim.release.value = 0.25;
-    sfxBus.connect(lim); lim.connect(master);
+    const pre = ac.createGain(); pre.gain.value = 0.5;
+    const lim = ac.createWaveShaper(); lim.curve = limCurve();
+    const post = ac.createGain(); post.gain.value = 2.0;
+    sfxBus.connect(pre); pre.connect(lim); lim.connect(post); post.connect(master);
     return sfxBus;
   }
   function voice(buf, gain, at, rate){
@@ -4221,7 +4263,7 @@ const snd = (function(){
     const s = ac.createBufferSource(); s.buffer = buf;
     if(rate) s.playbackRate.value = rate;
     s.connect(g); g.connect(sfx());
-    s.start(at);
+    s.start(at, ONSET.get(buf) || 0);
     return {s, g};
   }
   /* Never stop() a source outright. Cutting a waveform mid-cycle is a
