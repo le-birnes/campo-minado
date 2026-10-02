@@ -9,7 +9,7 @@
    MINESWEEPER / THREE PLANES
    Palette: sand, ochre, ember, gold, arcane violet, soot
    ============================================================ */
-/* MAP minesweeper-three-planes · 316 lines · surface: - · uses: 13. INTERFACE(2), 14. LOOP(2), 12. ACTIONS — shoot and fl(1), 14b. THE FRAME - the tick(1) +3 · used by: - */
+/* MAP minesweeper-three-planes · 318 lines · surface: - · uses: 13. INTERFACE(2), 14. LOOP(2), 12. ACTIONS — shoot and fl(1), 14b. THE FRAME - the tick(1) +3 · used by: - */
 :root{
   --sand:#d9a44c;
   --sand-hi:#f0c883;
@@ -193,6 +193,8 @@ canvas#gl{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:
         background:radial-gradient(120% 120% at 50% 45%, rgba(0,128,128,.80), rgba(0,46,46,.95));
         backdrop-filter:blur(2px);pointer-events:auto;}
 .screen.on{display:grid;}
+#buildTag{position:absolute;right:8px;bottom:6px;font:11px/1 monospace;
+          color:rgba(255,255,255,.55);pointer-events:none;user-select:none;}
 
 /* every screen is a window: raised frame, navy title bar, gray client area */
 .panel{width:min(680px,92vw);max-height:88vh;overflow:auto;padding:3px;
@@ -328,7 +330,7 @@ kbd{font-family:var(--mono);font-size:.92em;background:var(--w95);color:#000;
    the screen and moving is a thumbstick on the left — the two things a pair of
    thumbs can do at once without getting in each other's way.
    ========================================================================== */
-/* MAP touch-controls · 390 lines · surface: - · uses: 13. INTERFACE(2), 16. TOUCH — the phone buil(2), 12. ACTIONS — shoot and fl(1), 12c. DUNGEON MODE — the th(1) +4 · used by: - */
+/* MAP touch-controls · 392 lines · surface: - · uses: 13. INTERFACE(2), 16. TOUCH — the phone buil(2), 12. ACTIONS — shoot and fl(1), 12c. DUNGEON MODE — the th(1) +4 · used by: - */
 #touch{position:absolute;inset:0;z-index:7;display:none;touch-action:none;}
 body.touch #touch{display:block;}
 body.touch #needlock{display:none !important;}
@@ -445,6 +447,8 @@ body.touch.portrait #rotate{display:grid;}
 
   <!-- ========== MENU ========== -->
   <div class="screen on" id="menu">
+    <!-- Which version is this. Written by tools/stamp.py, never by hand. -->
+    <div id="buildTag">dev</div>
     <div class="panel">
       <div class="titlebar"><span>Minesweeper — Three Planes</span>
         <span class="btns"><i>_</i><i>□</i><i>×</i></span></div>
